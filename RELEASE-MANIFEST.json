@@ -1,0 +1,65 @@
+{
+  "files": [
+    {
+      "bytes": 42,
+      "path": ".gitignore",
+      "sha256": "48959b88edd74ee1136127969f2d2d6df25387b8b743e73b056f9c64036c9fa8"
+    },
+    {
+      "bytes": 3602,
+      "path": "ACTIVATE.md",
+      "sha256": "56e576c13508c1c52cccc042cc8bcef93f7dc02260c327f37bdb039ec85f717f"
+    },
+    {
+      "bytes": 11938,
+      "path": "PROTOCOL.md",
+      "sha256": "709af4b00ffcabeeca1b175d7d7d6db5103df829dabba1e529eef26dce23a000"
+    },
+    {
+      "bytes": 8367,
+      "path": "README.md",
+      "sha256": "cbc4ed9564a4117687856977399828d348f15adab8cd284363bfe9c4d27ee8f7"
+    },
+    {
+      "bytes": 4406,
+      "path": "SECURITY.md",
+      "sha256": "4ac88ade9c202045800addb314acd33150baf5e8bf34b222dd863596fabe6c7d"
+    },
+    {
+      "bytes": 41252,
+      "path": "ai_comm.py",
+      "sha256": "ec0c4b453f186acfcfc084fa58d0b1327a0621034d5eefa82a555f66a2dc3194"
+    },
+    {
+      "bytes": 2411,
+      "path": "docs/EXPERIMENT.md",
+      "sha256": "949e60f217e0742f08f0a48b156a0990d6b1c4438022f89ed3dd22a8c1d25d0b"
+    },
+    {
+      "bytes": 317,
+      "path": "examples/ask.json",
+      "sha256": "5c4c7e06350e0dddb10fb624e3a6d1cfa95b53bed182973858461cf2fb7392e2"
+    },
+    {
+      "bytes": 17552,
+      "path": "tests/test_protocol.py",
+      "sha256": "239c4b5b7734af4bf250237dffe43296d598f264e5c49be8d07c85d46671b8ef"
+    }
+  ],
+  "format": "ai-comm-review-manifest/1",
+  "limits": [
+    "Same-OS-user trust; no cryptographic author authentication",
+    "No model wake-up or remote transport",
+    "64 MiB committed snapshot bound",
+    "Claim shorthand rejected; byte experiment is not a token-cost guarantee"
+  ],
+  "protocol_sha256": "709af4b00ffcabeeca1b175d7d7d6db5103df829dabba1e529eef26dce23a000",
+  "validation": {
+    "command": "python3 -m unittest discover -s tests -v",
+    "git": "git version 2.43.0",
+    "python": "3.12.3",
+    "result": "PASS",
+    "scope": "local POSIX filesystem; synthetic fixtures; includes killed-writer and concurrency tests",
+    "tests": 20
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "act": "ASK",
+  "to": ["reviewer"],
+  "topic": "design-review",
+  "summary": "Review the retry behavior and identify any missing failure case.",
+  "questions": [
+    {
+      "op": "open",
+      "id": "retry-review",
+      "text": "Does retrying an interrupted send preserve a single durable message?"
+    }
+  ]
+}
