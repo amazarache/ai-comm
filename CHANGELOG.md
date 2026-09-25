@@ -1,5 +1,16 @@
 # Changes
 
+## 0.1.3
+
+- Document per-project package pins and channels, participant roles and reviewer
+  setup, same-account trust limits, package upgrades and copy-paste activation
+  prompts for both the initiator and peer.
+- Compatibility: package `0.1.0`–`0.1.3` uses protocol `2.0` (`709af4b0…`) and
+  opens only channels whose stored digest matches its bundled `PROTOCOL.md`.
+- Package and protocol versions are separate; a breaking contract, storage or
+  CLI change bumps package MAJOR. The full mapping is in the README compatibility
+  table. `PROTOCOL.md` remains byte-identical, so existing v2.0 channels work.
+
 ## 0.1.2
 
 - Fix an intermittent notification-arrival test failure. The test now uses a

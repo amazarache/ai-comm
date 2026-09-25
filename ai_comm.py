@@ -19,7 +19,7 @@ import time
 import unicodedata
 from datetime import datetime, timezone
 
-VERSION = "0.1.2"
+VERSION = "0.1.3"
 ACTS = {"PING", "ACK", "PONG", "ASK", "FACT", "CORRECT", "PROPOSE",
         "REVIEW", "ACCEPT", "REJECT", "DECIDE"}
 CONFIDENCE = {"verified", "likely", "unverified"}

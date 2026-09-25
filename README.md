@@ -14,6 +14,10 @@ model service.
 
 Point the session at a pinned revision of this repository and [ACTIVATE.md](ACTIVATE.md):
 
+Before joining, settle the checkout, channel, roles, reviewers and upgrade plan in
+the [setup decisions](ACTIVATE.md#setup-decisions). It includes prompts for the
+initiator and peer.
+
 > Activate ai-comm from this repository at revision `<commit>`. Read ACTIVATE.md.
 > Use channel `<absolute local path>`, handle `<my handle>`, platform `<platform>`,
 > session reference `<non-secret conversation ID>`, peers `<handles>`,
@@ -167,6 +171,16 @@ receipt cursor. Existing version-1 logs remain in their original repository;
 link them in the project's activation note rather than rewriting history.
 Takeovers require a session reference never previously used for that handle;
 changing the platform label alone cannot reactivate an old reference.
+
+### Release compatibility
+
+| Package releases | Protocol contract | Channels they can open |
+|---|---|---|
+| `0.1.0`–`0.1.3` | `2.0` (`709af4b0…`) | Channels whose stored protocol digest matches the full bundled protocol digest. |
+
+Package and protocol versions are separate. A breaking protocol, stored-record
+or CLI change bumps the package MAJOR; compatible additions bump MINOR; docs and
+fixes bump PATCH. Every release should update this table and its changelog entry.
 
 Channel compatibility is pinned to the exact PROTOCOL.md digest, including its
 wording. Keep using the accepted package revision for an existing channel. A
