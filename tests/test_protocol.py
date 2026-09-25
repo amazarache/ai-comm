@@ -12,6 +12,8 @@ import tempfile
 import threading
 import unittest
 from unittest import mock
+import hashlib
+import ast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import ai_comm as ac
@@ -55,6 +57,188 @@ class ProtocolTests(unittest.TestCase):
         with self.assertRaises(ac.ProtocolError):
             self.channel.send("alpha", "alpha-session", "retry", dict(draft, summary="Changed"))
         self.assertEqual(1, len(self.channel.snapshot().messages))
+
+    def test_send_dry_run_has_no_durable_side_effects_and_does_not_reserve_key(self):
+        before = self.channel.snapshot().head
+        receipt = self.channel.runtime / "beta.json"
+        self.assertFalse(receipt.exists())
+        dry = self.channel.send("alpha", "alpha-session", "dry-ping",
+                                self.draft("PING"), dry_run=True)
+        self.assertTrue(dry["dry_run"])
+        self.assertFalse(dry["published"])
+        self.assertTrue(dry["message"]["provisional"])
+        self.assertEqual(1, dry["message"]["seq"])
+        self.assertRegex(dry["message"]["nonce"], r"^[0-9a-f]{32}$")
+        self.assertEqual(before, self.channel.snapshot().head)
+        self.assertEqual([], self.channel.snapshot().messages)
+        self.assertFalse(receipt.exists())
+        real = self.channel.send("alpha", "alpha-session", "dry-ping",
+                                 self.draft("PING"))
+        self.assertFalse(real["duplicate"])
+        self.assertEqual(1, real["message"]["seq"])
+        self.assertNotEqual(dry["message"]["nonce"], real["message"]["nonce"])
+
+    def test_dry_run_validates_and_returns_structured_safe_errors(self):
+        bad = self.draft("ASK", confidence="secret-payload")
+        with self.assertRaises(ac.ProtocolError) as caught:
+            self.channel.send("alpha", "alpha-session", "dry-bad", bad, dry_run=True)
+        details = caught.exception.details
+        self.assertEqual("confidence_not_allowed", details["code"])
+        self.assertEqual("confidence", details["field"])
+        self.assertEqual("ASK", details["got"])
+        self.assertNotIn("secret-payload", json.dumps(details))
+        self.assertEqual([], self.channel.snapshot().messages)
+
+    def test_unregistered_recipients_report_only_a_count(self):
+        draft = self.draft("ASK", to=["ghost-one", "ghost-two"])
+        with self.assertRaises(ac.ProtocolError) as caught:
+            self.channel.send("alpha", "alpha-session", "unregistered", draft, dry_run=True)
+        self.assertEqual("unregistered_recipients", caught.exception.details["code"])
+        self.assertEqual(2, caught.exception.details["got"])
+        self.assertNotIn("ghost-one", json.dumps(caught.exception.details))
+        self.assertNotIn("ghost-two", json.dumps(caught.exception.details))
+        result = self.cli("send", "--as", "alpha", "--session", "alpha-session",
+                          "--key", "cli-dry-run", "--draft", "-", "--dry-run",
+                          data=ac.canonical(self.draft("PING")))
+        self.assertEqual(0, result.returncode, result.stderr)
+        response = json.loads(result.stdout)
+        self.assertTrue(response["dry_run"])
+        self.assertFalse(response["published"])
+        self.assertTrue(response["message"]["provisional"])
+        self.assertEqual([], self.channel.snapshot().messages)
+
+    def test_all_literal_require_rules_have_structured_codes_fields_and_hints(self):
+        tree = ast.parse(SCRIPT.read_text(encoding="utf-8"))
+        rules = {node.args[1].value for node in ast.walk(tree)
+                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                 and node.func.id == "require" and len(node.args) > 1
+                 and isinstance(node.args[1], ast.Constant)
+                 and isinstance(node.args[1].value, str)}
+        self.assertGreater(len(rules), 60)
+        for rule in rules:
+            with self.subTest(rule=rule), self.assertRaises(ac.ProtocolError) as caught:
+                ac.require(False, rule)
+            details = caught.exception.details
+            self.assertRegex(details["code"], r"^[a-z][a-z0-9_]{0,63}$")
+            self.assertRegex(details["field"], r"^[a-z_]{1,32}$")
+            self.assertTrue(details["hint"])
+            self.assertNotIn("secret-payload", json.dumps(details))
+        unsafe = ac.ProtocolError("safe rejection", field="secret-payload",
+                                  got="secret-payload", allowed=["secret-payload"])
+        self.assertEqual("input", unsafe.details["field"])
+        self.assertNotIn("got", unsafe.details)
+        self.assertNotIn("allowed", unsafe.details)
+        self.assertNotIn("secret-payload", json.dumps(unsafe.details))
+
+    def test_body_warning_counts_unicode_codepoints_and_is_actionable(self):
+        result = self.channel.send("alpha", "alpha-session", "long-body",
+                                   self.draft(body="😀" * 2001))
+        self.assertIn("body is 2001 characters", result["warnings"][0])
+        self.assertIn("Unicode code points", result["warnings"][0])
+        self.assertIn("artifact --file PATH", result["warnings"][0])
+
+    def test_release_range_and_fixed_in_boundaries(self):
+        parsed, upper, inclusive = ac.parse_affects(">=1.0.0,<1.2.0")
+        self.assertEqual((1, 2, 0), upper)
+        self.assertFalse(inclusive)
+        self.assertTrue(ac.range_matches(parsed, (1, 1, 9)))
+        self.assertFalse(ac.range_matches(parsed, (1, 2, 0)))
+        base = {"kind": "ai-comm-release", "package_version": "1.2.0",
+                "commit": "a" * 40, "tag": "v1.2.0", "manifest_sha256": "b" * 64,
+                "protocol_sha256": "c" * 64, "advisory": "required", "reason": "Data loss risk.",
+                "affects": ">=1.0.0,<1.2.0", "fixed_in": "1.2.0"}
+        ac.validate_release_record(base)
+        with self.assertRaises(ac.ProtocolError):
+            ac.validate_release_record(dict(base, fixed_in="0.9.0"))
+        with self.assertRaises(ac.ProtocolError):
+            ac.validate_release_record(dict(base, affects=">=1.0.0", fixed_in="2.0.0"))
+        with self.assertRaises(ac.ProtocolError):
+            ac.parse_affects(">=01.0.0")
+
+    def test_upgrade_record_is_strict_and_surfaces_advisory_in_state_and_inbox(self):
+        package = SCRIPT.parent
+        record = {"kind": "ai-comm-release", "package_version": ac.VERSION,
+                  "commit": "a" * 40, "tag": "v" + ac.VERSION,
+                  "manifest_sha256": ac.sha((package / "RELEASE-MANIFEST.json").read_bytes()),
+                  "protocol_sha256": ac.sha((package / "PROTOCOL.md").read_bytes()),
+                  "advisory": "required", "reason": "A protocol safety defect affects this range.",
+                  "affects": ">=0.1.0,<0.3.0", "fixed_in": "0.3.0"}
+        digest = self.channel.put_artifact("alpha", "alpha-session", ac.canonical(record))["artifact"]
+        summary = f"Release v{ac.VERSION} at {record['commit']}; required advisory."
+        self.channel.send("alpha", "alpha-session", "upgrade-notice",
+                          self.draft("FACT", topic="upgrade", artifact=digest,
+                                     summary=summary))
+        notice = self.channel.snapshot().state()["release_notices"][0]
+        self.assertEqual("same", notice["status"])
+        self.assertEqual("required", notice["advisory"])
+        self.assertTrue(notice["advisory_applies"])
+        inbox = self.channel.inbox("beta", "beta-session")
+        self.assertEqual("required", inbox["messages"][0]["release_status"]["advisory"])
+
+    def test_offline_release_status_checks_local_index_and_annotated_tag(self):
+        repo = self.root / "release-repo"
+        repo.mkdir()
+
+        def git(*args):
+            env = os.environ.copy()
+            env.update(GIT_CONFIG_NOSYSTEM="1", GIT_AUTHOR_NAME="test", GIT_AUTHOR_EMAIL="test@example.invalid",
+                       GIT_COMMITTER_NAME="test", GIT_COMMITTER_EMAIL="test@example.invalid")
+            return subprocess.run(["git", "-C", str(repo), *args], check=True,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, timeout=30).stdout
+
+        subprocess.run(["git", "init", "--initial-branch=main", str(repo)], check=True,
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+        manifest = b'{"release":"fixture"}\n'
+        protocol = b"fixture protocol\n"
+        (repo / "ai_comm.py").write_text('VERSION = "1.0.0"\n', encoding="utf-8")
+        (repo / "RELEASE-MANIFEST.json").write_bytes(manifest)
+        (repo / "PROTOCOL.md").write_bytes(protocol)
+        git("add", "ai_comm.py", "RELEASE-MANIFEST.json", "PROTOCOL.md")
+        git("commit", "-m", "release fixture")
+        commit = git("rev-parse", "HEAD").decode().strip()
+        manifest_digest = hashlib.sha256(manifest).hexdigest()
+        protocol_digest = hashlib.sha256(protocol).hexdigest()
+        git("tag", "-a", "v1.0.0", "-m", "Release 1.0.0 manifest " + manifest_digest)
+        (repo / "RELEASES.json").write_bytes(ac.canonical({"format": "ai-comm-releases/1", "releases": [{
+            "package_version": "1.0.0", "commit": commit, "tag": "v1.0.0",
+            "manifest_sha256": manifest_digest, "protocol_sha256": protocol_digest,
+            "summary": "Initial release", "advisory": "required", "reason": "Protocol safety defect.",
+            "affects": ">=1.0.0,<1.2.0", "fixed_in": "1.2.0"}]}))
+        git("switch", "--orphan", "release-index")
+        for name in ("ai_comm.py", "RELEASE-MANIFEST.json", "PROTOCOL.md"):
+            (repo / name).unlink(missing_ok=True)
+        git("add", "RELEASES.json")
+        git("commit", "-m", "release index")
+        git("update-ref", "refs/remotes/origin/release-index", "HEAD")
+        self.assertEqual("RELEASES.json", git("ls-tree", "--name-only", "HEAD").decode().strip())
+        git("switch", "main")
+        result = ac.release_status(repo)
+        self.assertEqual("ok", result["status"])
+        self.assertEqual("1.0.0", result["pinned_version"])
+        self.assertEqual("1.0.0", result["latest_version"])
+        self.assertEqual("not verified (no attestation)", result["authenticity"])
+        self.assertEqual("required", result["active_advisories"][0]["advisory"])
+        self.assertEqual("1.2.0", result["active_advisories"][0]["fixed_in"])
+
+        wrong = {"format": "ai-comm-releases/1", "releases": [{
+            "package_version": "1.0.0", "commit": "0" * 40, "tag": "v1.0.0",
+            "manifest_sha256": manifest_digest, "protocol_sha256": protocol_digest,
+            "summary": "Initial release", "advisory": "required", "reason": "Protocol safety defect.",
+            "affects": ">=1.0.0,<1.2.0", "fixed_in": "1.2.0"}]}
+        git("switch", "release-index")
+        (repo / "RELEASES.json").write_bytes(ac.canonical(wrong))
+        git("add", "RELEASES.json")
+        git("commit", "-m", "inconsistent index")
+        git("update-ref", "refs/remotes/origin/release-index", "HEAD")
+        git("switch", "main")
+        result = ac.release_status(repo)
+        self.assertEqual("index_inconsistent", result["status"])
+        self.assertEqual([], result["advice"])
+
+        git("update-ref", "-d", "refs/remotes/origin/release-index")
+        result = ac.release_status(repo)
+        self.assertEqual("index_missing", result["status"])
+        self.assertEqual([], result["advice"])
 
     def test_concurrent_send_and_same_key_retry(self):
         def launch(index):
@@ -101,8 +285,11 @@ class ProtocolTests(unittest.TestCase):
     def test_ack_requires_scanning_and_no_topic_skip(self):
         self.send(key="first", topic="first")
         self.send(key="other", topic="other")
-        with self.assertRaises(ac.ProtocolError):
+        with self.assertRaises(ac.ProtocolError) as caught:
             self.channel.ack("beta", "beta-session", 1)
+        self.assertEqual("ack_out_of_range", caught.exception.details["code"])
+        self.assertEqual(0, caught.exception.details["read_through"])
+        self.assertEqual(0, caught.exception.details["scanned_through"])
         page = self.channel.inbox("beta", "beta-session", 1)
         self.assertEqual(1, page["through"])
         with self.assertRaises(ac.ProtocolError):
@@ -485,6 +672,10 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(2, result.returncode)
         self.assertNotIn(b"secret-value", result.stderr)
         self.assertNotIn(b"Traceback", result.stderr)
+        error = json.loads(result.stderr)
+        self.assertTrue(error["code"])
+        self.assertTrue(error["field"])
+        self.assertTrue(error["hint"])
         self.assertEqual([], self.channel.snapshot().messages)
 
 

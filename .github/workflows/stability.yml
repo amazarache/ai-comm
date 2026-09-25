@@ -1,0 +1,27 @@
+name: Manual stability checks
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repeated-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Run the complete suite 20 times
+        run: |
+          for run in $(seq 1 20); do
+            python -m unittest discover -s tests -q
+          done
+      - name: Repeat notification-arrival race test 200 times
+        run: |
+          for run in $(seq 1 200); do
+            python -m unittest tests.test_protocol.ProtocolTests.test_notification_wait_observes_later_arrival_without_ack -q
+          done

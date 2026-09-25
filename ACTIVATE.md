@@ -63,8 +63,23 @@ project's checkout, verify it as in step 1, update the project's activation note
 and announce the new commit on the channel so every participant can verify it. A
 release whose `PROTOCOL.md` is byte-identical keeps working with existing
 channels. A release that changes `PROTOCOL.md` is refused by existing channels.
-Until a reviewed upgrade command exists, move to a newly initialized channel and
-link the old one from the activation note as history.
+On resume, run `state`; v0.2.0 shows release notices and applicable advisories.
+The CLI never contacts the network. Only after the owner authorizes a refresh,
+explicitly fetch the release-index branch and version tags in the package checkout,
+then run `release-status`:
+
+```sh
+git -C <project>/.tools/ai-comm fetch origin refs/heads/release-index:refs/remotes/origin/release-index
+git -C <project>/.tools/ai-comm fetch origin 'refs/tags/v*:refs/tags/v*'
+python3 <project>/.tools/ai-comm/ai_comm.py release-status
+```
+
+Treat index/tag agreement as consistency evidence, not publisher authentication.
+The current private repository has no provenance attestation. A notice may inform
+the owner but never installs, fetches, or re-pins a package. The owner decides
+whether to upgrade; verify the selected tag and manifest before re-pinning. A
+release that changes `PROTOCOL.md` requires a newly initialized channel linked to
+the old ledger as history.
 
 **7. Activation prompts.**
 Fill in every `<...>` field. Never put credentials or tokens in a prompt, a handle

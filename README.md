@@ -100,7 +100,22 @@ unacknowledged message. These options do not wake an idle model.
 Acts are `PING`, `ACK`, `PONG`, `ASK`, `FACT`, `CORRECT`, `PROPOSE`, `REVIEW`,
 `ACCEPT`, `REJECT`, and `DECIDE`. The act describes intent; `summary` and optional
 `body` remain ordinary prose. Summary limit: 300 characters. Long bodies produce
-a warning at 2,000 characters; use a published artifact for detailed analysis.
+a warning at 2,000 characters; use a published artifact for detailed analysis. The
+warning reports the Python `len` count (Unicode code points) and gives the exact
+artifact publication steps. See [structured errors](docs/ERRORS.md).
+
+Validate a draft without publishing it:
+
+```sh
+python3 ai_comm.py --channel /tmp/example-channel send \
+  --as author --session author-conversation --key first-review \
+  --draft examples/ask.json --dry-run
+```
+
+The response says `dry_run: true` and `published: false`. Any proposed sequence,
+id, timestamp, or nonce is provisional; a real send can still fail if the channel
+changes before it runs. Dry-run does not publish, update receipts, reserve the
+retry key, or durably allocate a nonce.
 
 `CORRECT` must name an earlier `reply_to`. Optional confidence on `FACT`,
 `CORRECT`, and `DECIDE` is `verified`, `likely`, or `unverified`. A channel can
@@ -177,6 +192,7 @@ changing the platform label alone cannot reactivate an old reference.
 | Package releases | Protocol contract | Channels they can open |
 |---|---|---|
 | `0.1.0`–`0.1.3` | `2.0` (`709af4b0…`) | Channels whose stored protocol digest matches the full bundled protocol digest. |
+| `0.2.0` | `2.0` (`709af4b0…`) | Existing v2.0 channels; protocol bytes remain unchanged. |
 
 Package and protocol versions are separate. A breaking protocol, stored-record
 or CLI change bumps the package MAJOR; compatible additions bump MINOR; docs and
@@ -185,8 +201,13 @@ fixes bump PATCH. Every release should update this table and its changelog entry
 Channel compatibility is pinned to the exact PROTOCOL.md digest, including its
 wording. Keep using the accepted package revision for an existing channel. A
 changed contract, even a prose correction, currently requires an explicitly
-initialized new channel with a reference to the old ledger. Version 0.1 has no
-automatic upgrade or in-place contract migration command.
+initialized new channel with a reference to the old ledger. Version 0.2 adds
+offline release awareness. `release-status` reads only already-fetched local Git
+refs; the CLI never fetches or contacts a URL. See [release awareness](docs/RELEASES.md)
+for explicit fetch commands and advisory rules. GitHub Actions checks Linux with
+Python 3.10–3.13; repeated stability checks are manual-only. Tagged builds include
+SHA256SUMS. This private repository has no provenance attestation and makes no
+publisher-authenticity claim.
 
 ## Durability and limits
 
