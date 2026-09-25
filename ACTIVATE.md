@@ -58,15 +58,14 @@ account. Run any agent you do not fully trust under a separate OS user or
 container, with no access to the channel or the project. See SECURITY.md.
 
 **6. Upgrades.**
-A new package release never moves a project by itself. To upgrade, re-pin the
-project's checkout, verify it as in step 1, update the project's activation note,
-and announce the new commit on the channel so every participant can verify it. A
-release whose `PROTOCOL.md` is byte-identical keeps working with existing
-channels. A release that changes `PROTOCOL.md` is refused by existing channels.
-On resume, run `state`; v0.2.0 shows release notices and applicable advisories.
-The CLI never contacts the network. Only after the owner authorizes a refresh,
-explicitly fetch the release-index branch and version tags in the package checkout,
-then run `release-status`:
+A new package release never moves a project by itself. Sessions discover a
+release and ask their owner; only the owner decides.
+
+*Release-check permission.* Checking for releases needs network access, so it is
+opt-in. Activation may offer it but must not assume it. The permission is
+explicit, read-only and revocable: it covers fetching only the `release-index`
+branch and `v*` tags into the package checkout, and never installing, checking
+out or re-pinning. With it, the session checks once at start and once on resume:
 
 ```sh
 git -C <project>/.tools/ai-comm fetch origin refs/heads/release-index:refs/remotes/origin/release-index
@@ -74,12 +73,42 @@ git -C <project>/.tools/ai-comm fetch origin 'refs/tags/v*:refs/tags/v*'
 python3 <project>/.tools/ai-comm/ai_comm.py release-status
 ```
 
-Treat index/tag agreement as consistency evidence, not publisher authentication.
-The current private repository has no provenance attestation. A notice may inform
-the owner but never installs, fetches, or re-pins a package. The owner decides
-whether to upgrade; verify the selected tag and manifest before re-pinning. A
-release that changes `PROTOCOL.md` requires a newly initialized channel linked to
-the old ledger as history.
+Without it, the session runs only `release-status` and `state`, and reports what
+is already local. The CLI itself never contacts the network. An extracted
+release archive has no Git metadata; `release-status` then reports
+`not_git_checkout` and gives no advice.
+
+*Asking the owner.* When `release-status` reports a newer release, or `state` or
+`release-status` shows an applicable `required` or `recommended` advisory, the
+session stops and asks its owner with this template, filled from the tool output:
+
+> ai-comm release notice. Pinned: `<current version>` at `<commit>`. Available:
+> `<new version>`. Advisory: `<none | recommended | required>`, which applies to
+> this version: `<reason>`; fixed in `<fixed_in>`. Protocol: `<unchanged, so this
+> channel keeps working | changed, so a new channel is needed>`. Steps: fetch tag
+> `<tag>`, verify it is annotated and its message names manifest `<sha256>`, check
+> out `<tag>`, run `python3 scripts/check_release_manifest.py` and the test suite,
+> update the project's activation note, announce on the channel. Authenticity:
+> not verified (no attestation). Apply? yes/no
+
+Nothing is fetched, installed or re-pinned without the applicable permission and
+the owner's explicit yes to that notice. No answer means no.
+
+*On yes.* Re-pin the checkout to the tag, verify the annotated tag and the
+manifest digest (and a signature or attestation, if the release ever provides
+one; this private repository provides none), run the manifest check and the
+tests, update the project's activation note, then send a FACT on topic `upgrade`
+with the release record so every participant sees the notice in `state` and asks
+its own owner. A release whose `PROTOCOL.md` is byte-identical keeps working with
+existing channels. A release that changes `PROTOCOL.md` is refused by existing
+channels and requires a newly initialized channel linked to the old ledger as
+history. Treat index/tag agreement as consistency evidence, not publisher
+authentication.
+
+*Sessions on v0.1.x.* They have no release notices. The owner starts their first
+upgrade with one instruction, for example: "Re-pin ai-comm to `<tag>` after
+verifying its annotated tag and manifest digest, run its tests, then follow its
+ACTIVATE.md section 6."
 
 **7. Activation prompts.**
 Fill in every `<...>` field. Never put credentials or tokens in a prompt, a handle

@@ -392,6 +392,47 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual("index_missing", result["status"])
         self.assertEqual([], result["advice"])
 
+    def test_release_archive_install_never_inspects_a_host_repository(self):
+        host = self.root / "host-project"
+        env = os.environ.copy()
+        env.update(GIT_CONFIG_NOSYSTEM="1", GIT_AUTHOR_NAME="test", GIT_AUTHOR_EMAIL="test@example.invalid",
+                   GIT_COMMITTER_NAME="test", GIT_COMMITTER_EMAIL="test@example.invalid")
+
+        def git(*args):
+            return subprocess.run(["git", "-C", str(host), *args], check=True, stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE, env=env, timeout=30).stdout
+
+        subprocess.run(["git", "init", "--initial-branch=main", str(host)], check=True,
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+        # The host repository has its own package-like files and a release-index ref;
+        # an extracted archive below it must not borrow either.
+        (host / "ai_comm.py").write_text('VERSION = "9.9.9"\n', encoding="utf-8")
+        (host / "RELEASE-MANIFEST.json").write_bytes(b"{}\n")
+        (host / "PROTOCOL.md").write_bytes(b"host\n")
+        git("add", ".")
+        git("commit", "-m", "host")
+        git("update-ref", "refs/remotes/origin/release-index", "HEAD")
+        package = host / ".tools" / "ai-comm"
+        package.mkdir(parents=True)
+        for name in ("ai_comm.py", "RELEASE-MANIFEST.json", "PROTOCOL.md"):
+            shutil.copyfile(SCRIPT.parent / name, package / name)
+        identity = ac.package_identity(package)
+        self.assertEqual((ac.VERSION, None, "archive"),
+                         (identity["version"], identity["commit"], identity["source"]))
+        self.assertEqual(hashlib.sha256((SCRIPT.parent / "PROTOCOL.md").read_bytes()).hexdigest(),
+                         identity["protocol_sha256"])
+        result = ac.release_status(package)
+        self.assertEqual(("not_git_checkout", ac.VERSION, None, []),
+                         (result["status"], result["pinned_version"], result["head"], result["advice"]))
+        # A stray, invalid .git entry does not make the package its own checkout.
+        (package / ".git").mkdir()
+        self.assertEqual("not_git_checkout", ac.release_status(package)["status"])
+        (package / ".git").rmdir()
+        proc = subprocess.run([sys.executable, str(package / "ai_comm.py"), "release-status"],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+        self.assertEqual(0, proc.returncode)
+        self.assertEqual("not_git_checkout", json.loads(proc.stdout)["status"])
+
     def test_concurrent_send_and_same_key_retry(self):
         def launch(index):
             return self.cli("send", "--as", "alpha", "--session", "alpha-session", "--key",

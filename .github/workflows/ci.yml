@@ -36,3 +36,25 @@ jobs:
       - name: Check patch whitespace
         if: github.event_name == 'pull_request'
         run: git diff --check "origin/${{ github.base_ref }}...HEAD"
+
+  archive:
+    name: Release archive install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - name: Extract the source archive the release publishes
+        run: |
+          pkg="$RUNNER_TEMP/archive-install"
+          mkdir "$pkg"
+          git archive --format=tar HEAD | tar -x -C "$pkg"
+          test ! -e "$pkg/.git"
+      - name: Verify manifest and run tests without Git metadata
+        working-directory: ${{ runner.temp }}/archive-install
+        run: |
+          python scripts/check_release_manifest.py
+          python -m unittest discover -s tests -v
+          python ai_comm.py release-status > status.json
+          python -c "import json,sys; s=json.load(open('status.json')); sys.exit(s['status'] != 'not_git_checkout')"

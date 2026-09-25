@@ -210,6 +210,10 @@ include a source archive and SHA256SUMS, with notes from the matching changelog
 section. This private repository has no provenance attestation and makes no
 publisher-authenticity claim. Release checks read committed HEAD; partial clones
 on older Git versions receive no advice rather than causing a lazy network fetch.
+An extracted source archive runs and passes its tests without Git metadata;
+`release-status` then reports `not_git_checkout`. Sessions discover releases only
+with the owner's opt-in fetch permission and ask the owner before any upgrade
+([ACTIVATE.md](ACTIVATE.md) section 6).
 
 ## Durability and limits
 

@@ -447,8 +447,26 @@ def validate_index_entry(entry):
     return entry
 
 
+def package_is_checkout(repo):
+    # Only the package's own checkout counts; never let Git search parent directories.
+    if not (repo / ".git").exists():
+        return False
+    top = work_git(repo, "rev-parse", "--show-toplevel", ok=(0, 128)).decode().strip()
+    return bool(top) and Path(top).resolve() == repo
+
+
 def package_identity(directory=None):
     repo = Path(directory or Path(__file__).resolve().parent).resolve()
+    if not package_is_checkout(repo):
+        # Extracted release archive: identify the installed files; there is no commit.
+        version_src = (repo / "ai_comm.py").read_text(encoding="utf-8")
+        match = re.search(r'^VERSION = "([0-9]+\.[0-9]+\.[0-9]+)"$', version_src, re.MULTILINE)
+        require(match is not None, "package version missing", code="package_version_missing",
+                field="channel", hint="Use a package with a valid VERSION constant.")
+        semver(match.group(1), "package_version")
+        return {"version": match.group(1), "commit": None, "source": "archive",
+                "manifest_sha256": sha((repo / "RELEASE-MANIFEST.json").read_bytes()),
+                "protocol_sha256": sha((repo / "PROTOCOL.md").read_bytes())}
     version_src = work_git(repo, "show", "HEAD:ai_comm.py").decode("utf-8")
     match = re.search(r'^VERSION = "([0-9]+\.[0-9]+\.[0-9]+)"$', version_src, re.MULTILINE)
     require(match is not None, "package version missing from HEAD", code="package_version_missing",
@@ -458,7 +476,7 @@ def package_identity(directory=None):
     manifest = work_git(repo, "show", "HEAD:RELEASE-MANIFEST.json")
     protocol = work_git(repo, "show", "HEAD:PROTOCOL.md")
     head = work_git(repo, "rev-parse", "HEAD").decode().strip()
-    return {"version": version, "commit": head, "manifest_sha256": sha(manifest),
+    return {"version": version, "commit": head, "source": "git", "manifest_sha256": sha(manifest),
             "protocol_sha256": sha(protocol)}
 
 
@@ -479,6 +497,14 @@ def release_status(directory=None):
 
 
 def _release_status(repo):
+    if not package_is_checkout(repo):
+        identity = package_identity(repo)
+        return {"status": "not_git_checkout", "pinned_version": identity["version"],
+                "head": None, "advice": [],
+                "message": "package is not a Git checkout (for example an extracted release "
+                           "archive); release status needs a Git checkout of a tagged release; "
+                           "no advice given",
+                "authenticity": "not verified (no attestation)"}
     partial = work_git(repo, "config", "--get", "extensions.partialClone", ok=(0, 1)).strip()
     if partial:
         version_output = subprocess.run(["git", "--version"], stdout=subprocess.PIPE,

@@ -15,6 +15,13 @@
   ranges, reused dry-run keys, and malformed question/advisory inputs.
 - Normalize error fields to draft keys or documented CLI arguments; carry
   validator-specific detail separately in the optional `subfield`.
+- Support release-archive installs: package identity and the manifest check
+  inspect only the package's own Git checkout and never a parent repository;
+  an archive install reports `release-status` as `not_git_checkout`. CI runs
+  the suite from an extracted `git archive`.
+- Document owner-consent upgrades: opt-in, read-only, revocable release-check
+  permission; a fixed notice asking the owner before any upgrade; and a
+  one-line bootstrap for sessions on v0.1.x.
 - Compatibility: `PROTOCOL.md` remains byte-identical at digest
   `709af4b0…`; v0.2.0 opens existing protocol 2.0 channels.
 

@@ -60,21 +60,30 @@ def main():
             return fail("invalid file digest")
         if hashlib.sha256(content).hexdigest() != entry["sha256"]:
             return fail("file digest mismatch")
-    try:
-        tracked = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-z"], check=True,
-                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30).stdout
-        tracked_paths = {name.decode("utf-8") for name in tracked.split(b"\0") if name}
-    except (OSError, UnicodeError, subprocess.SubprocessError):
-        return fail("cannot inspect tracked package paths")
-    if tracked_paths - {"RELEASE-MANIFEST.json"} != seen:
-        return fail("manifest paths do not match the complete tracked package file set")
+    # Only the package's own checkout is inspected; an extracted archive has no Git metadata,
+    # and Git must not search a parent repository in its place.
+    checkout = False
+    if (ROOT / ".git").exists():
+        top = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--show-toplevel"],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30).stdout
+        checkout = bool(top.strip()) and Path(top.decode().strip()).resolve() == ROOT.resolve()
+    if checkout:
+        try:
+            tracked = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-z"], check=True,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30).stdout
+            tracked_paths = {name.decode("utf-8") for name in tracked.split(b"\0") if name}
+        except (OSError, UnicodeError, subprocess.SubprocessError):
+            return fail("cannot inspect tracked package paths")
+        if tracked_paths - {"RELEASE-MANIFEST.json"} != seen:
+            return fail("manifest paths do not match the complete tracked package file set")
     protocol_digest = manifest.get("protocol_sha256")
     if not isinstance(protocol_digest, str) or not HEX.fullmatch(protocol_digest):
         return fail("invalid protocol digest")
     protocol = (ROOT / "PROTOCOL.md").read_bytes()
     if hashlib.sha256(protocol).hexdigest() != protocol_digest:
         return fail("protocol digest mismatch")
-    print(f"manifest ok: {len(seen)} files; protocol {protocol_digest}")
+    scope = "" if checkout else " (no Git checkout: tracked-file set not checked)"
+    print(f"manifest ok: {len(seen)} files; protocol {protocol_digest}{scope}")
     return 0
 
 

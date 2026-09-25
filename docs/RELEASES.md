@@ -15,6 +15,11 @@ python3 .tools/ai-comm/ai_comm.py release-status
 produces no advice. Every index entry must agree with its annotated tag's target,
 manifest digest in the tag message, manifest file, and `PROTOCOL.md` at that tag.
 Checks use committed HEAD, so working-tree edits do not affect package identity.
+Only the package directory's own checkout is inspected: Git is never allowed to
+search parent directories. An extracted release archive has no Git metadata, so
+`release-status` reports `not_git_checkout` with no advice, and `state` identifies
+the package from its installed `ai_comm.py`, `RELEASE-MANIFEST.json` and
+`PROTOCOL.md`. Verify an archive against the release's SHA256SUMS instead.
 Git 2.44 and newer disables lazy fetching during these reads; on older Git
 versions partial clones receive no release advice rather than triggering a
 network fetch. This is consistency evidence, not publisher authentication. The private repository has
@@ -44,11 +49,16 @@ neutral as version signals, while any matching advisory remains visible. Newer
 optional notices cannot hide an applicable required advisory. A notice never
 installs, fetches, or re-pins a package.
 
+Fetching the index is opt-in: the owner grants an explicit, read-only, revocable
+permission limited to the `release-index` branch and `v*` tags. A session asks
+its owner before any upgrade, using the notice template in ACTIVATE.md section 6.
+
 ## Automation
 
 `ci.yml` runs on main, candidate branches, and pull requests against Linux and
 Python 3.10–3.13. It validates the release manifest and protocol digest, runs the
-test suite, and scans tracked source files for credential patterns, private
+test suite, runs the suite again from an extracted `git archive` with no Git
+metadata, and scans tracked source files for credential patterns, private
 network addresses, and home paths. CI provides evidence only; it does not ACCEPT
 or DECIDE a release. `stability.yml` is manual-only and runs 20 full-suite
 repetitions plus 200 focused race-test runs. `release.yml` checks pushed tags,
