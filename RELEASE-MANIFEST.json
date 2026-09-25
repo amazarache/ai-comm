@@ -11,9 +11,9 @@
       "sha256": "484a82cad7675b4a5e5049b6051d00cb72d444b067dfef61432f6c1843904887"
     },
     {
-      "bytes": 1057,
+      "bytes": 1491,
       "path": "CHANGELOG.md",
-      "sha256": "d5b21a672fe116ac36fb190c205bc911d9bba8637a69bffedebd37c3789524b3"
+      "sha256": "c2b87783e7d52cce78033d44ca1e5a910e69fb984d6b165ccec10bf3d9179874"
     },
     {
       "bytes": 11938,
@@ -33,7 +33,7 @@
     {
       "bytes": 42931,
       "path": "ai_comm.py",
-      "sha256": "eb3404f924abdcf163801c3407ae18bed485345a31e5c1ab0af4d54904774b79"
+      "sha256": "e0288289787846a5f29e6ee4de1cc29d367f6cc29a19c02999e9970186981d2c"
     },
     {
       "bytes": 2411,
@@ -56,9 +56,9 @@
       "sha256": "eb983ed2c861f6e2f437c3f090af443c97873311c4eb5db6b9962d90f9019b01"
     },
     {
-      "bytes": 26520,
+      "bytes": 27344,
       "path": "tests/test_protocol.py",
-      "sha256": "02ec6d130cf62452c9ee0d056de58f510f5a6c88166bc239149002cf31a1a89a"
+      "sha256": "5faa8d6a96f7e320f5e34967a5dfab4b79549b41a363c76b2cee5757d035bfec"
     }
   ],
   "format": "ai-comm-review-manifest/1",
@@ -73,8 +73,13 @@
     "command": "python3 -m unittest discover -s tests -v",
     "git": "git version 2.43.0",
     "python": "3.12.3",
+    "repeated_runs": {
+      "full_suite": 20,
+      "notification_arrival_test": 200,
+      "result": "PASS"
+    },
     "result": "PASS",
-    "scope": "local POSIX filesystem; synthetic fixtures; killed-writer/concurrency tests; notification receipt isolation; full Unicode code-point equivalence in both multiline modes",
+    "scope": "local POSIX filesystem; synthetic fixtures; full Unicode equivalence; Event-coordinated notification arrival; old test fails and fixed test passes under forced subprocess exit timing",
     "tests": 27
   }
 }
