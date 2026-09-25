@@ -13,6 +13,8 @@
 - Make release checks total and offline-safe, preserve applicable notices within
   bounded state output, document every stable error code, and validate equality
   ranges, reused dry-run keys, and malformed question/advisory inputs.
+- Normalize error fields to draft keys or documented CLI arguments; carry
+  validator-specific detail separately in the optional `subfield`.
 - Compatibility: `PROTOCOL.md` remains byte-identical at digest
   `709af4b0…`; v0.2.0 opens existing protocol 2.0 channels.
 

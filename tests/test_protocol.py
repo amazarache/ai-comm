@@ -153,6 +153,34 @@ class ProtocolTests(unittest.TestCase):
         documented = set(re.findall(r"^\| `([a-z][a-z0-9_]+)` \|", docs, re.MULTILINE))
         self.assertEqual(ac.ERROR_CODES, documented)
 
+    def test_error_fields_use_draft_keys_or_documented_cli_arguments(self):
+        tree = ast.parse(SCRIPT.read_text(encoding="utf-8"))
+        raw_fields = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                raw_fields.update(keyword.value.value for keyword in node.keywords
+                                  if keyword.arg == "field" and isinstance(keyword.value, ast.Constant)
+                                  and isinstance(keyword.value.value, str))
+        raw_fields.update({"recipient", "handle", "source_id", "source_kind", "source_detail",
+                           "source_reference", "question", "question_id", "artifact_digest",
+                           "reply_target", "reason", "advisory", "fixed_in", "package_version",
+                           "manifest_sha256", "protocol_sha256", "generation", "session_reference",
+                           "sequence", "receipt_sequence", "retry_key", "message_id"})
+        for raw in raw_fields:
+            field = ac.ProtocolError("test", field=raw).details["field"]
+            self.assertIn(field, ac.PUBLIC_ERROR_FIELDS, raw)
+        source_error = ac.ProtocolError("bad source", field="source_detail").details
+        self.assertEqual("sources", source_error["field"])
+        self.assertEqual("detail", source_error["subfield"])
+        recipient_error = ac.ProtocolError("bad recipient", field="recipient").details
+        self.assertEqual("to", recipient_error["field"])
+        self.assertEqual("recipient", recipient_error["subfield"])
+        docs = (SCRIPT.parent / "docs" / "ERRORS.md").read_text(encoding="utf-8")
+        match = re.search(r"^CLI argument error fields: (.+)$", docs, re.MULTILINE)
+        self.assertIsNotNone(match)
+        documented = set(re.findall(r"`([a-z_]+)`", match.group(1)))
+        self.assertEqual(ac.CLI_ERROR_FIELDS, documented)
+
     def test_release_metadata_failures_cannot_break_channel_commands(self):
         with mock.patch.object(ac, "release_status", side_effect=TypeError("malformed advisory")):
             state = self.channel.snapshot()
@@ -211,10 +239,13 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr.decode())
 
     def test_text_control_errors_report_their_actual_field(self):
-        for field in ("summary", "body", "reason"):
+        expected_fields = {"summary": "summary", "body": "body", "reason": "artifact"}
+        for field, expected in expected_fields.items():
             with self.subTest(field=field), self.assertRaises(ac.ProtocolError) as caught:
                 ac.text_field("bad\u202evalue", field, 100, True)
-            self.assertEqual(field, caught.exception.details["field"])
+            self.assertEqual(expected, caught.exception.details["field"])
+            if field == "reason":
+                self.assertEqual("reason", caught.exception.details["subfield"])
 
     def test_question_open_shape_error_is_distinct_from_reused_id(self):
         malformed = self.draft(questions=[{"op": "open", "id": "new-q", "text": "Question?", "extra": 1}])

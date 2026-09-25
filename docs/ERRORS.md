@@ -18,6 +18,13 @@ never echoed. Every error includes a next-step hint. An error does not claim
 success; if a caller loses the result around publication, inspect the channel and
 retry with the same key so a committed message is returned idempotently.
 
+An error's `field` is a public draft key or a documented CLI argument. When a
+more precise internal field is useful, `subfield` identifies it without
+expanding the top-level field namespace. For example, a malformed source detail
+uses `field: "sources"` and `subfield: "detail"`.
+
+CLI argument error fields: `actor`, `ack`, `after`, `channel`, `draft`, `dry_run`, `file`, `id`, `input`, `key`, `kind`, `limit`, `new_since`, `offset`, `out`, `platform`, `require_confidence`, `require_sources`, `reviewers`, `session`, `since`, `takeover`, `task`, `through`, `timeout`.
+
 Complete code catalog:
 
 | Code | Meaning |

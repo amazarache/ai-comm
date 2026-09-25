@@ -26,9 +26,9 @@
       "sha256": "51dbe3ecc5a1cf5d0a7fcda09406192c8e882e044858e8dee3fc83602695cd48"
     },
     {
-      "bytes": 3097,
+      "bytes": 3238,
       "path": "CHANGELOG.md",
-      "sha256": "977d932ef8b74e10d43be0ce292f4b4a96f82693332b03897bd5b24dbf376326"
+      "sha256": "d56c2ee56d0432764e692bebaf781f87140b6adbd0adaa1d1925c6e1ef310bd8"
     },
     {
       "bytes": 11938,
@@ -46,14 +46,14 @@
       "sha256": "5a1248fed37f6af2f9aae29291c74b0fcae3e6758a35a45441554d16253dde07"
     },
     {
-      "bytes": 88277,
+      "bytes": 90541,
       "path": "ai_comm.py",
-      "sha256": "54086c021e7e234b98461b8bc046da9fc36a826d10e5b11f61e500462fb93ec5"
+      "sha256": "58ea1be779e053adc18cf036d8088be7960b33fa8916ee8ea76850ef9dd4d3b3"
     },
     {
-      "bytes": 15563,
+      "bytes": 16133,
       "path": "docs/ERRORS.md",
-      "sha256": "da7744ceee59c791f88a6561692f5c991dc69e701d81903b2ea89075ad87bd39"
+      "sha256": "deca5d7f036a23f006c88bc1a48fa77467fd321ae5281dd231fe21d88b950856"
     },
     {
       "bytes": 2411,
@@ -101,9 +101,9 @@
       "sha256": "622fe13b1e67b6715b40cbcb3b4861c53da2e6b6f99e7fb5d886a363af44f2af"
     },
     {
-      "bytes": 46262,
+      "bytes": 48360,
       "path": "tests/test_protocol.py",
-      "sha256": "414e2e04a11e049d519c52b0091638fd0304283e889faf01a31b54735177fc56"
+      "sha256": "f2cfe95b1e71b0267f31abd8903f053f186e34e9dee3ef9aa7d02b7f82589c47"
     }
   ],
   "format": "ai-comm-review-manifest/1",
@@ -117,18 +117,19 @@
   ],
   "protocol_sha256": "709af4b00ffcabeeca1b175d7d7d6db5103df829dabba1e529eef26dce23a000",
   "validation": {
-    "candidate_note": "Revised candidate addresses all peer review findings; 44-test suite passed locally; 20 full and 200 focused stability repetitions recorded; exact-commit GitHub CI and peer rerun pending.",
-    "command": "python3 -m unittest discover -s tests -v",
+    "candidate_note": "Final field-normalization follow-up: 45-test suite passes locally. The 20 full + 200 focused stability repetitions passed on parent 8b26064; exact-commit CI and adversarial rerun for this follow-up are pending.",
+    "command": "python3 -m unittest discover -s tests -q",
     "git": "git version 2.43.0",
     "protocol_sha256": "709af4b00ffcabeeca1b175d7d7d6db5103df829dabba1e529eef26dce23a000",
     "python": "3.12.3",
     "repeated_runs": {
       "full_suite": 20,
       "notification_arrival_test": 200,
-      "result": "PASS"
+      "result": "PASS",
+      "tested_commit": "8b26064a106bff4ee5071ac6a0660ba49b322fa4"
     },
     "result": "PASS",
     "scope": "POSIX local fixtures; real Git channel transactions; structured errors, dry-run side effects, strict release ranges, annotated-tag/index consistency, and existing protocol regressions",
-    "tests": 44
+    "tests": 45
   }
 }

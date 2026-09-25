@@ -26,6 +26,32 @@ CONFIDENCE = {"verified", "likely", "unverified"}
 CONF_ACTS = {"FACT", "CORRECT", "DECIDE"}
 DRAFT_KEYS = {"act", "to", "topic", "summary", "body", "reply_to", "refs",
               "sources", "questions", "artifact", "confidence"}
+CLI_ERROR_FIELDS = {"actor", "ack", "after", "channel", "draft", "dry_run", "file",
+                    "id", "input", "key", "kind", "limit", "new_since", "offset", "out",
+                    "platform", "require_confidence", "require_sources", "reviewers",
+                    "session", "since", "takeover", "task", "through", "timeout"}
+PUBLIC_ERROR_FIELDS = DRAFT_KEYS | CLI_ERROR_FIELDS
+INTERNAL_FIELD_MAP = {
+    "recipient": ("to", "recipient"), "handle": ("actor", None),
+    "sender": ("actor", None), "reply_target": ("reply_to", "target"),
+    "control_nonce": ("reply_to", "nonce"), "artifact_digest": ("artifact", "digest"),
+    "draft_digest": ("draft", "digest"), "source_id": ("sources", "id"),
+    "source_kind": ("sources", "kind"), "source_detail": ("sources", "detail"),
+    "source_reference": ("sources", "ref"), "question": ("questions", "text"),
+    "question_id": ("questions", "id"), "reason": ("artifact", "reason"),
+    "advisory": ("artifact", "advisory"), "affects": ("artifact", "affects"),
+    "fixed_in": ("artifact", "fixed_in"), "package_version": ("artifact", "package_version"),
+    "commit": ("artifact", "commit"), "tag": ("artifact", "tag"),
+    "manifest_sha256": ("artifact", "manifest_sha256"),
+    "protocol_sha256": ("artifact", "protocol_sha256"),
+    "protocol_digest": ("channel", "protocol_sha256"), "index": ("input", "index"),
+    "generation": ("session", "generation"), "non_secret_session_reference": ("session", "reference"),
+    "session_reference": ("session", "reference"), "platform": ("platform", None),
+    "reviewer": ("reviewers", "reviewer"), "message_id": ("id", None),
+    "sequence": ("input", "sequence"), "notification_sequence": ("new_since", None),
+    "receipt_sequence": ("through", None), "receipt_field": ("ack", "receipt"),
+    "retry_key": ("key", None), "stored_artifact": ("artifact", None),
+}
 META_KEYS = {"v", "id", "seq", "ts", "from", "session", "generation", "key",
              "draft_sha256", "nonce", "echo"}
 HANDLE = re.compile(r"[a-z][a-z0-9-]{0,31}\Z")
@@ -52,12 +78,21 @@ class ProtocolError(Exception):
     def __init__(self, message, *, code=None, field=None, allowed=None, got=None, hint=None, details=None):
         super().__init__(message)
         self.message = message
-        safe_field = field if isinstance(field, str) and re.fullmatch(r"[a-z_]{1,32}", field) else "input"
+        raw_field = field if isinstance(field, str) and re.fullmatch(r"[a-z_]{1,48}", field) else "input"
+        mapped = INTERNAL_FIELD_MAP.get(raw_field)
+        if mapped:
+            safe_field, subfield = mapped
+        elif raw_field in PUBLIC_ERROR_FIELDS:
+            safe_field, subfield = raw_field, None
+        else:
+            safe_field, subfield = "input", raw_field
         safe_code = code or "operation_failed"
         if not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", safe_code):
             safe_code = "operation_failed"
         self.details = {"error": message, "code": safe_code, "field": safe_field,
                         "hint": hint or f"Review the {safe_field} value and retry after correcting it."}
+        if subfield and re.fullmatch(r"[a-z_]{1,48}", subfield):
+            self.details["subfield"] = subfield
         safe_values = ACTS | CONFIDENCE | RELEASE_ADVISORIES
         if isinstance(allowed, (list, tuple)) and all(isinstance(v, str) and v in safe_values for v in allowed):
             self.details["allowed"] = list(allowed)
