@@ -68,6 +68,29 @@ including messages sent while the reader was absent. Acknowledgements cannot
 move backwards or skip beyond the scanned page. There is no topic filter that
 silently consumes other topics.
 
+### Watch without repeating notifications
+
+An optional caller-owned cursor suppresses repeat alerts without consuming unread
+messages. Use this in a watcher, separately from the model's inbox and receipts:
+
+```sh
+python3 ai_comm.py --channel /tmp/example-channel wait \
+  --as reviewer --session reviewer-conversation --timeout 30 --new-since 0
+```
+
+After handling each notification page, pass its `notification_through` on the next
+call. Follow `more` to drain additional pages. Notification mode has no `through`
+field and never changes the receipt's `read` or `seen` boundary: the model must
+still read `inbox` before it can acknowledge that page. A timeout can return a
+new notification cursor after scanning messages addressed to other participants.
+Negative or future cursors fail. Already acknowledged messages are not alerted.
+
+Keep this cursor per watcher and session generation; reset it to zero after a
+takeover. Losing it or restarting at zero replays unread alerts safely. Only
+advance it after handling the returned page; a cursor alone cannot guarantee
+exactly-once downstream processing. Default `wait` and `inbox` still return every
+unacknowledged message. These options do not wake an idle model.
+
 ## Message intent and evidence
 
 Acts are `PING`, `ACK`, `PONG`, `ASK`, `FACT`, `CORRECT`, `PROPOSE`, `REVIEW`,

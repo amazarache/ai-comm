@@ -109,6 +109,83 @@ class ProtocolTests(unittest.TestCase):
         self.channel.ack("beta", "beta-session", 1)
         self.assertEqual("other", self.channel.inbox("beta", "beta-session")["messages"][0]["topic"])
 
+    def test_notification_cursor_suppresses_alerts_without_consuming_inbox(self):
+        self.send()
+        args = ("wait", "--as", "beta", "--session", "beta-session", "--timeout", "0")
+        first = self.cli(*args, "--new-since", "0")
+        self.assertEqual(0, first.returncode, first.stderr)
+        page = json.loads(first.stdout)
+        self.assertEqual([1], [m["seq"] for m in page["messages"]])
+        self.assertEqual(1, page["notification_through"])
+        self.assertNotIn("through", page)
+        self.assertEqual("notifications", page["mode"])
+        self.assertFalse((self.channel.runtime / "beta.json").exists())
+        with self.assertRaises(ac.ProtocolError):
+            self.channel.ack("beta", "beta-session", 1)
+        duplicate = self.cli(*args, "--new-since", "1")
+        self.assertEqual(0, duplicate.returncode, duplicate.stderr)
+        self.assertTrue(json.loads(duplicate.stdout)["timed_out"])
+        self.assertEqual([], json.loads(duplicate.stdout)["messages"])
+        # Default wait still replays unread backlog, including after process restart.
+        ordinary = json.loads(self.cli(*args).stdout)
+        self.assertEqual([1], [m["seq"] for m in ordinary["messages"]])
+        receipt = (self.channel.runtime / "beta.json").read_bytes()
+        self.channel.wait("beta", "beta-session", timeout=0, new_since=1)
+        self.assertEqual(receipt, (self.channel.runtime / "beta.json").read_bytes())
+
+    def test_notification_pagination_retains_unread_topics_and_byte_bound(self):
+        self.send(key="first", topic="first")
+        self.send(key="outgoing", author="beta")
+        self.send(key="second", topic="second")
+        first = self.channel.wait("beta", "beta-session", timeout=0, limit=1, new_since=0)
+        self.assertEqual([1], [m["seq"] for m in first["messages"]])
+        self.assertEqual(2, first["notification_through"])
+        self.assertTrue(first["more"])
+        second = self.channel.wait("beta", "beta-session", timeout=0, limit=1,
+                                   new_since=first["notification_through"])
+        self.assertEqual([3], [m["seq"] for m in second["messages"]])
+        self.assertFalse(second["more"])
+        unread = self.channel.inbox("beta", "beta-session")
+        self.assertEqual([1, 3], [m["seq"] for m in unread["messages"]])
+        self.channel.ack("beta", "beta-session", unread["through"])
+        self.assertEqual([], self.channel.wait("beta", "beta-session", timeout=0,
+                                               new_since=0)["messages"])
+        for n in range(5):
+            self.send(key=f"large-{n}", body="x" * 60000)
+        page = self.channel.wait("beta", "beta-session", timeout=0, new_since=3)
+        self.assertEqual(4, len(page["messages"]))
+        self.assertTrue(page["more"])
+        self.assertLessEqual(sum(len(ac.canonical(m)) for m in page["messages"]), 256 * 1024)
+
+    def test_notification_rejects_invalid_cursor_stale_identity_and_corrupt_receipt(self):
+        for cursor in (-1, True, 0.5, "0", 1, 999999999):
+            with self.subTest(cursor=cursor), self.assertRaises(ac.ProtocolError):
+                self.channel.wait("beta", "beta-session", timeout=0, new_since=cursor)
+        self.channel.join("beta", "claude", "beta-new", takeover=True)
+        with self.assertRaises(ac.ProtocolError):
+            self.channel.wait("beta", "beta-session", timeout=0, new_since=0)
+        receipt = self.channel.runtime / "beta.json"
+        receipt.write_bytes(b'{"v":')
+        with self.assertRaises(ac.ProtocolError):
+            self.channel.wait("beta", "beta-new", timeout=0, new_since=0)
+        receipt.unlink()
+        target = self.root / "sentinel"
+        target.write_text("unchanged")
+        receipt.symlink_to(target)
+        with self.assertRaises(ac.ProtocolError):
+            self.channel.wait("beta", "beta-new", timeout=0, new_since=0)
+        self.assertEqual("unchanged", target.read_text())
+
+    def test_notification_wait_observes_later_arrival_without_ack(self):
+        self.send()
+        with mock.patch.object(ac.time, "sleep", side_effect=lambda _: self.send(key="later")):
+            page = self.channel.wait("beta", "beta-session", timeout=10, new_since=1)
+        self.assertEqual([2], [m["seq"] for m in page["messages"]])
+        self.assertFalse(page["timed_out"])
+        with self.assertRaises(ac.ProtocolError):
+            self.channel.ack("beta", "beta-session", 2)
+        self.assertEqual([1, 2], [m["seq"] for m in self.channel.inbox("beta", "beta-session")["messages"]])
+
     def test_receipt_corruption_traversal_and_symlink(self):
         for method in (lambda: self.channel.ack("../outside", "x", 0),
                        lambda: self.channel.join("../outside", "codex", "x"),

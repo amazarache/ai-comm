@@ -391,19 +391,38 @@ class Channel:
         with self.lock():
             state = self.snapshot()
             path, receipt = self.receipt(state, handle, session)
-            messages, through, size = [], receipt["read"], 0
-            for message in state.messages[receipt["read"]:]:
-                if handle in message["to"]:
-                    length = len(canonical(message))
-                    if len(messages) >= limit or size + length > 256 * 1024:
-                        break
-                    messages.append(message)
-                    size += length
-                through = message["seq"]
+            messages, through = self._page(state, handle, receipt["read"], limit)
             receipt["seen"] = max(receipt["seen"], through)
             atomic_json(path, receipt)
             return {"head": state.head, "read_through": receipt["read"], "through": through,
                     "messages": messages, "more": through < len(state.messages)}
+
+    @staticmethod
+    def _page(state, handle, after, limit):
+        messages, through, size = [], after, 0
+        for message in state.messages[after:]:
+            if handle in message["to"]:
+                length = len(canonical(message))
+                if len(messages) >= limit or size + length > 256 * 1024:
+                    break
+                messages.append(message)
+                size += length
+            through = message["seq"]
+        return messages, through
+
+    def notifications(self, handle, session, new_since, limit=10):
+        """Caller-owned alert cursor; never authorize or advance a receipt."""
+        integer(new_since, "notification sequence")
+        integer(limit, "limit", 1, 100)
+        with self.lock():
+            state = self.snapshot()
+            _, receipt = self.receipt(state, handle, session)
+            require(new_since <= len(state.messages), "notification cursor exceeds channel history")
+            after = max(receipt["read"], new_since)
+            messages, through = self._page(state, handle, after, limit)
+            return {"head": state.head, "mode": "notifications", "read_through": receipt["read"],
+                    "notification_through": through, "messages": messages,
+                    "more": through < len(state.messages)}
 
     def ack(self, handle, session, through):
         integer(through, "receipt sequence")
@@ -416,11 +435,12 @@ class Channel:
             atomic_json(path, receipt)
             return {"read_through": through, "head": state.head}
 
-    def wait(self, handle, session, timeout=30, limit=10):
+    def wait(self, handle, session, timeout=30, limit=10, new_since=None):
         require(type(timeout) in (int, float) and 0 <= timeout <= 60, "timeout must be 0–60 seconds")
         deadline = time.monotonic() + timeout
         while True:
-            result = self.inbox(handle, session, limit)
+            result = (self.inbox(handle, session, limit) if new_since is None else
+                      self.notifications(handle, session, new_since, limit))
             if result["messages"] or time.monotonic() >= deadline:
                 return dict(result, timed_out=not bool(result["messages"]))
             time.sleep(min(0.5, max(0, deadline - time.monotonic())))
@@ -705,6 +725,8 @@ def parser():
             p.add_argument("--limit", type=int, default=10)
             if command == "wait":
                 p.add_argument("--timeout", type=float, default=30)
+                p.add_argument("--new-since", type=int,
+                               help="notification cursor only; does not scan or acknowledge the inbox")
         elif command == "ack":
             p.add_argument("--through", type=int, required=True)
         elif command == "artifact":
@@ -746,7 +768,7 @@ def main(argv=None):
         elif cmd == "inbox":
             value = channel.inbox(args.actor, args.session, args.limit)
         elif cmd == "wait":
-            value = channel.wait(args.actor, args.session, args.timeout, args.limit)
+            value = channel.wait(args.actor, args.session, args.timeout, args.limit, args.new_since)
         elif cmd == "ack":
             value = channel.ack(args.actor, args.session, args.through)
         elif cmd == "artifact":
