@@ -6,9 +6,14 @@
       "sha256": "48959b88edd74ee1136127969f2d2d6df25387b8b743e73b056f9c64036c9fa8"
     },
     {
-      "bytes": 3602,
+      "bytes": 3984,
       "path": "ACTIVATE.md",
-      "sha256": "56e576c13508c1c52cccc042cc8bcef93f7dc02260c327f37bdb039ec85f717f"
+      "sha256": "484a82cad7675b4a5e5049b6051d00cb72d444b067dfef61432f6c1843904887"
+    },
+    {
+      "bytes": 1057,
+      "path": "CHANGELOG.md",
+      "sha256": "d5b21a672fe116ac36fb190c205bc911d9bba8637a69bffedebd37c3789524b3"
     },
     {
       "bytes": 11938,
@@ -16,19 +21,19 @@
       "sha256": "709af4b00ffcabeeca1b175d7d7d6db5103df829dabba1e529eef26dce23a000"
     },
     {
-      "bytes": 8367,
+      "bytes": 10444,
       "path": "README.md",
-      "sha256": "cbc4ed9564a4117687856977399828d348f15adab8cd284363bfe9c4d27ee8f7"
+      "sha256": "be5433d5e282bc306f860c5607a9da17d88e2305133224d56a093f51965ceda1"
     },
     {
-      "bytes": 4406,
+      "bytes": 5110,
       "path": "SECURITY.md",
-      "sha256": "4ac88ade9c202045800addb314acd33150baf5e8bf34b222dd863596fabe6c7d"
+      "sha256": "5a1248fed37f6af2f9aae29291c74b0fcae3e6758a35a45441554d16253dde07"
     },
     {
-      "bytes": 41252,
+      "bytes": 42931,
       "path": "ai_comm.py",
-      "sha256": "ec0c4b453f186acfcfc084fa58d0b1327a0621034d5eefa82a555f66a2dc3194"
+      "sha256": "eb3404f924abdcf163801c3407ae18bed485345a31e5c1ab0af4d54904774b79"
     },
     {
       "bytes": 2411,
@@ -36,14 +41,24 @@
       "sha256": "949e60f217e0742f08f0a48b156a0990d6b1c4438022f89ed3dd22a8c1d25d0b"
     },
     {
+      "bytes": 3083,
+      "path": "docs/PERFORMANCE.md",
+      "sha256": "cfcdc55e137ed8b10833e767a338d516eff571c21ecb16cfcacb491f709c001d"
+    },
+    {
       "bytes": 317,
       "path": "examples/ask.json",
       "sha256": "5c4c7e06350e0dddb10fb624e3a6d1cfa95b53bed182973858461cf2fb7392e2"
     },
     {
-      "bytes": 17552,
+      "bytes": 4884,
+      "path": "scripts/benchmark_snapshot.py",
+      "sha256": "eb983ed2c861f6e2f437c3f090af443c97873311c4eb5db6b9962d90f9019b01"
+    },
+    {
+      "bytes": 26520,
       "path": "tests/test_protocol.py",
-      "sha256": "239c4b5b7734af4bf250237dffe43296d598f264e5c49be8d07c85d46671b8ef"
+      "sha256": "02ec6d130cf62452c9ee0d056de58f510f5a6c88166bc239149002cf31a1a89a"
     }
   ],
   "format": "ai-comm-review-manifest/1",
@@ -59,7 +74,7 @@
     "git": "git version 2.43.0",
     "python": "3.12.3",
     "result": "PASS",
-    "scope": "local POSIX filesystem; synthetic fixtures; includes killed-writer and concurrency tests",
-    "tests": 20
+    "scope": "local POSIX filesystem; synthetic fixtures; killed-writer/concurrency tests; notification receipt isolation; full Unicode code-point equivalence in both multiline modes",
+    "tests": 27
   }
 }
