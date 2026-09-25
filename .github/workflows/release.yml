@@ -17,10 +17,10 @@ jobs:
       matrix:
         python: ["3.10", "3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python }}
       - run: python scripts/check_release_manifest.py
@@ -31,8 +31,10 @@ jobs:
   package:
     needs: verify
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Build source archive, checksums and release notes
@@ -41,17 +43,16 @@ jobs:
           version=$(python -c 'import re; print(re.search(r"^VERSION = \"([0-9.]+)\"$", open("ai_comm.py").read(), re.M).group(1))')
           mkdir -p dist
           git archive --format=tar HEAD | gzip -n > "dist/ai-comm-${version}.tar.gz"
-          cat > dist/RELEASE-NOTES.md <<'EOF'
-          This release was checked by the tagged GitHub Actions workflow.
+          python scripts/extract_release_notes.py "$version" > dist/RELEASE-NOTES.md
+          cat >> dist/RELEASE-NOTES.md <<'EOF'
 
+          This release was checked by the tagged GitHub Actions workflow.
           SHA256SUMS verifies the downloadable files. This private repository does
           not publish a provenance attestation, so publisher authenticity is not
           independently verified by the release archive.
           EOF
-          (cd dist && sha256sum "ai-comm-${version}.tar.gz" RELEASE-NOTES.md > SHA256SUMS && sha256sum -c SHA256SUMS)
-      - uses: actions/upload-artifact@v7
-        with:
-          name: ai-comm-${{ github.ref_name }}
-          path: dist/
-          if-no-files-found: error
-          retention-days: 90
+          (cd dist && sha256sum "ai-comm-${version}.tar.gz" > SHA256SUMS && sha256sum -c SHA256SUMS)
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --title "$GITHUB_REF_NAME" --notes-file dist/RELEASE-NOTES.md

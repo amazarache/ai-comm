@@ -48,6 +48,7 @@ Python 3.10–3.13. It validates the release manifest and protocol digest, runs 
 test suite, and scans source files for common credential patterns. CI provides
 evidence only; it does not ACCEPT or DECIDE a release. `stability.yml` is
 manual-only and runs the repeated stability suite. `release.yml` repeats checks
-for tags, builds a source archive and SHA256SUMS, and uploads the workflow
-artifact. It does not publish a provenance attestation or claim publisher
-authenticity.
+for tags, then creates a GitHub Release containing the source archive,
+SHA256SUMS, and the matching `CHANGELOG.md` section. Only its package job gets
+`contents:write`; no additional action is used to publish. It does not publish a
+provenance attestation or claim publisher authenticity.

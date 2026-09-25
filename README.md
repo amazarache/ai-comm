@@ -205,8 +205,9 @@ initialized new channel with a reference to the old ledger. Version 0.2 adds
 offline release awareness. `release-status` reads only already-fetched local Git
 refs; the CLI never fetches or contacts a URL. See [release awareness](docs/RELEASES.md)
 for explicit fetch commands and advisory rules. GitHub Actions checks Linux with
-Python 3.10–3.13; repeated stability checks are manual-only. Tagged builds include
-SHA256SUMS. This private repository has no provenance attestation and makes no
+Python 3.10–3.13; repeated stability checks are manual-only. Tagged releases
+include a source archive and SHA256SUMS, with notes from the matching changelog
+section. This private repository has no provenance attestation and makes no
 publisher-authenticity claim.
 
 ## Durability and limits

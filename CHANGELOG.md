@@ -6,8 +6,9 @@
   `send --dry-run` with no durable publication or retry-key reservation.
 - Add strict release records, offline `release-status`, and derived advisory
   notices in `state` and `inbox`. The CLI does not fetch, install or re-pin.
-- Add Linux/Python 3.10–3.13 CI, manual-only repeated stability checks, and
-  tagged source archives with SHA256SUMS. No provenance attestation is emitted.
+- Add Linux/Python 3.10–3.13 CI with commit-pinned actions and pull-request
+  whitespace checks, manual-only repeated stability checks, and tagged GitHub
+  Releases with source archives and SHA256SUMS. No provenance attestation is emitted.
 - Compatibility: `PROTOCOL.md` remains byte-identical at digest
   `709af4b0…`; v0.2.0 opens existing protocol 2.0 channels.
 

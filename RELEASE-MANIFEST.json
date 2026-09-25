@@ -1,1 +1,133 @@
-{"files":[{"bytes":756,"path":".github/workflows/ci.yml","sha256":"4bcc444cac92a88edaedf831f50fdc712676395bdc016113eb586caa8ca33da2"},{"bytes":1858,"path":".github/workflows/release.yml","sha256":"fc45e60a6d9fa421252e6c678f69228539f1642d6cc807fe4e4314742e84cb91"},{"bytes":715,"path":".github/workflows/stability.yml","sha256":"8af5bf483782b13030655870b01075b5bb9442749dea9bd81cc4f65619829508"},{"bytes":42,"path":".gitignore","sha256":"48959b88edd74ee1136127969f2d2d6df25387b8b743e73b056f9c64036c9fa8"},{"bytes":9501,"path":"ACTIVATE.md","sha256":"51dbe3ecc5a1cf5d0a7fcda09406192c8e882e044858e8dee3fc83602695cd48"},{"bytes":2703,"path":"CHANGELOG.md","sha256":"5d017585e6a7a1326949717c78ff411ca00d4af9ab4a5aaf3f2f517c56ba4524"},{"bytes":11938,"path":"PROTOCOL.md","sha256":"709af4b00ffcabeeca1b175d7d7d6db5103df829dabba1e529eef26dce23a000"},{"bytes":12236,"path":"README.md","sha256":"3b92c1b403ef8e12142661dea5a6d334e25ecb9799ff35500e76f8b0ea503159"},{"bytes":5110,"path":"SECURITY.md","sha256":"5a1248fed37f6af2f9aae29291c74b0fcae3e6758a35a45441554d16253dde07"},{"bytes":74240,"path":"ai_comm.py","sha256":"8fc5ce523a817671c1e86fc13589f0931e9b4b9361368d6721fcf7fa612b7f96"},{"bytes":3643,"path":"docs/ERRORS.md","sha256":"2c227aa3680f8692bcf067c13d65789517234ec55529cbe6c38836353f5137d5"},{"bytes":2411,"path":"docs/EXPERIMENT.md","sha256":"949e60f217e0742f08f0a48b156a0990d6b1c4438022f89ed3dd22a8c1d25d0b"},{"bytes":3083,"path":"docs/PERFORMANCE.md","sha256":"cfcdc55e137ed8b10833e767a338d516eff571c21ecb16cfcacb491f709c001d"},{"bytes":3003,"path":"docs/RELEASES.md","sha256":"8ea2c94d62398ca62566badf351841ec6f2c9de86883631362a257609dc7b891"},{"bytes":317,"path":"examples/ask.json","sha256":"5c4c7e06350e0dddb10fb624e3a6d1cfa95b53bed182973858461cf2fb7392e2"},{"bytes":4884,"path":"scripts/benchmark_snapshot.py","sha256":"eb983ed2c861f6e2f437c3f090af443c97873311c4eb5db6b9962d90f9019b01"},{"bytes":3620,"path":"scripts/check_release_manifest.py","sha256":"aa7d32ca481238ef85f48dbd9b28edc0dbbf073f73498f33ccd6c536b0c7ed52"},{"bytes":2127,"path":"scripts/check_tag.py","sha256":"a20f8b0e33bb4f0b4c54c176cfc973b6df3927b432d3a4827620c5fd64cbd580"},{"bytes":1501,"path":"scripts/leak_scan.py","sha256":"da5ff380bd0c28b3f938b39f174c8c310debf222db7a68efe55823233507c63c"},{"bytes":38665,"path":"tests/test_protocol.py","sha256":"ac255675cd89cd6740246738fd7c20de729bb0ecaf6449bf6253ec3f915f6d16"}],"format":"ai-comm-review-manifest/1","limits":["Same-OS-user trust; no cryptographic author authentication","No model wake-up or remote transport","64 MiB committed snapshot bound","Claim shorthand rejected; byte experiment is not a token-cost guarantee","Release advisories are informational and never install or re-pin","No provenance attestation is published for the private repository"],"protocol_sha256":"709af4b00ffcabeeca1b175d7d7d6db5103df829dabba1e529eef26dce23a000","validation":{"candidate_note":"Local candidate tree v0.2.0. Full 35-test suite, Python bytecode checks, workflow YAML parse, manifest validation, leak scan, and diff checks passed. GitHub CI matrix and publisher review remain pending; release-index branch is prepared locally.","command":"python3 -m unittest discover -s tests -v","git":"git version 2.43.0","python":"3.12.3","repeated_runs":{"full_suite":1,"notification_arrival_test":1,"result":"PASS"},"result":"PASS","scope":"POSIX local fixtures; real Git channel transactions; structured errors, dry-run side effects, strict release ranges, annotated-tag/index consistency, and existing protocol regressions","tests":35}}
+{
+  "files": [
+    {
+      "bytes": 1043,
+      "path": ".github/workflows/ci.yml",
+      "sha256": "5f80ec878b3e879e52863c787cd9a37ba4ab33215d4f68a404617ddd4c4cc47a"
+    },
+    {
+      "bytes": 2141,
+      "path": ".github/workflows/release.yml",
+      "sha256": "8fc9b5bab519906f7efbe791a5f4183ea98c63f8be9cd3c28f406ede4fcd9042"
+    },
+    {
+      "bytes": 809,
+      "path": ".github/workflows/stability.yml",
+      "sha256": "ef0193e60baadf1a91ca71cba2b28c811df4ed7ae56e3a7bef2f5b2e0a8504b2"
+    },
+    {
+      "bytes": 42,
+      "path": ".gitignore",
+      "sha256": "48959b88edd74ee1136127969f2d2d6df25387b8b743e73b056f9c64036c9fa8"
+    },
+    {
+      "bytes": 9501,
+      "path": "ACTIVATE.md",
+      "sha256": "51dbe3ecc5a1cf5d0a7fcda09406192c8e882e044858e8dee3fc83602695cd48"
+    },
+    {
+      "bytes": 2787,
+      "path": "CHANGELOG.md",
+      "sha256": "e788428106d7c148e36cac94ae2dadbf363cff14d0669ea02ab5a8e2dd2a07b1"
+    },
+    {
+      "bytes": 11938,
+      "path": "PROTOCOL.md",
+      "sha256": "709af4b00ffcabeeca1b175d7d7d6db5103df829dabba1e529eef26dce23a000"
+    },
+    {
+      "bytes": 12307,
+      "path": "README.md",
+      "sha256": "490e01dbb3576438f7db93e0ecf3d109da4946d2d75614a669eed047f3107811"
+    },
+    {
+      "bytes": 5110,
+      "path": "SECURITY.md",
+      "sha256": "5a1248fed37f6af2f9aae29291c74b0fcae3e6758a35a45441554d16253dde07"
+    },
+    {
+      "bytes": 74240,
+      "path": "ai_comm.py",
+      "sha256": "8fc5ce523a817671c1e86fc13589f0931e9b4b9361368d6721fcf7fa612b7f96"
+    },
+    {
+      "bytes": 3643,
+      "path": "docs/ERRORS.md",
+      "sha256": "2c227aa3680f8692bcf067c13d65789517234ec55529cbe6c38836353f5137d5"
+    },
+    {
+      "bytes": 2411,
+      "path": "docs/EXPERIMENT.md",
+      "sha256": "949e60f217e0742f08f0a48b156a0990d6b1c4438022f89ed3dd22a8c1d25d0b"
+    },
+    {
+      "bytes": 3083,
+      "path": "docs/PERFORMANCE.md",
+      "sha256": "cfcdc55e137ed8b10833e767a338d516eff571c21ecb16cfcacb491f709c001d"
+    },
+    {
+      "bytes": 3127,
+      "path": "docs/RELEASES.md",
+      "sha256": "1b6ddb5fa532a173a422623af01d29a901a4320bf48d091c8b381e6f62991639"
+    },
+    {
+      "bytes": 317,
+      "path": "examples/ask.json",
+      "sha256": "5c4c7e06350e0dddb10fb624e3a6d1cfa95b53bed182973858461cf2fb7392e2"
+    },
+    {
+      "bytes": 4884,
+      "path": "scripts/benchmark_snapshot.py",
+      "sha256": "eb983ed2c861f6e2f437c3f090af443c97873311c4eb5db6b9962d90f9019b01"
+    },
+    {
+      "bytes": 3620,
+      "path": "scripts/check_release_manifest.py",
+      "sha256": "aa7d32ca481238ef85f48dbd9b28edc0dbbf073f73498f33ccd6c536b0c7ed52"
+    },
+    {
+      "bytes": 2127,
+      "path": "scripts/check_tag.py",
+      "sha256": "a20f8b0e33bb4f0b4c54c176cfc973b6df3927b432d3a4827620c5fd64cbd580"
+    },
+    {
+      "bytes": 1086,
+      "path": "scripts/extract_release_notes.py",
+      "sha256": "b57d32bc6533c8cf157b0bc6d2f9634188bdbd201d1d607dc2d2f4f6be6dc250"
+    },
+    {
+      "bytes": 1501,
+      "path": "scripts/leak_scan.py",
+      "sha256": "da5ff380bd0c28b3f938b39f174c8c310debf222db7a68efe55823233507c63c"
+    },
+    {
+      "bytes": 38665,
+      "path": "tests/test_protocol.py",
+      "sha256": "ac255675cd89cd6740246738fd7c20de729bb0ecaf6449bf6253ec3f915f6d16"
+    }
+  ],
+  "format": "ai-comm-review-manifest/1",
+  "limits": [
+    "Same-OS-user trust; no cryptographic author authentication",
+    "No model wake-up or remote transport",
+    "64 MiB committed snapshot bound",
+    "Claim shorthand rejected; byte experiment is not a token-cost guarantee",
+    "Release advisories are informational and never install or re-pin",
+    "No provenance attestation is published for the private repository"
+  ],
+  "protocol_sha256": "709af4b00ffcabeeca1b175d7d7d6db5103df829dabba1e529eef26dce23a000",
+  "validation": {
+    "candidate_note": "Candidate follow-up fixes workflow security and publication findings; awaiting GitHub CI rerun and peer review.",
+    "command": "python3 -m unittest discover -s tests -v",
+    "git": "git version 2.43.0",
+    "python": "3.12.3",
+    "repeated_runs": {
+      "full_suite": 1,
+      "notification_arrival_test": 1,
+      "result": "PASS"
+    },
+    "result": "PASS",
+    "scope": "POSIX local fixtures; real Git channel transactions; structured errors, dry-run side effects, strict release ranges, annotated-tag/index consistency, and existing protocol regressions",
+    "tests": 35
+  }
+}
