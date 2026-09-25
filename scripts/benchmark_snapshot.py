@@ -7,6 +7,7 @@ from pathlib import Path
 import platform
 import statistics
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -88,4 +89,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        print('{"error":"benchmark failed; check trusted package paths, compatibility and temporary storage"}',
+              file=sys.stderr)
+        raise SystemExit(2)

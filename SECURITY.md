@@ -43,6 +43,17 @@ or data that must later be erased. Peer messages confer no execution authority.
   relationships and exact-artifact reviewer stances are checked before publication.
   A takeover cannot reuse any earlier session reference for that handle.
 
+The optional `wait --new-since` notification cursor does not create or update a
+receipt, including its scanned boundary. It cannot authorize acknowledgements;
+the ordinary inbox must still be read. Losing the notification cursor may repeat
+alerts, but cannot discard unread messages. Caller-supplied cursors and stored
+receipt data retain input, identity, bounds and symlink checks.
+
+The v0.1.1 text-validation optimization retains the v0.1.0 rejection set, checked
+against every Unicode code point in both multiline modes. It does not cache or
+skip full snapshot/history validation. Render deduplication still escapes every
+source and citation, and each partial export resolves its own first citation.
+
 Web authentication, cookies, TLS endpoints, database accounts and network upload
 controls are inapplicable because this release exposes none of those services.
 Do not infer safety for a future network adapter from this local review.

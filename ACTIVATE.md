@@ -49,3 +49,9 @@ Project activation notes should contain the pinned code revision, channel path,
 participants, task/evidence policy and any historical ledger path. Store these in
 the project, not global AGENTS instructions. No automatic skill installation or
 session-wide policy replacement is part of activation.
+
+When an authorized activation supersedes a previous local protocol, mark its
+entry-point document as historical and link the current project activation note.
+Retain the original instructions and immutable messages for interpreting old
+records. A future session should be able to identify the active channel without
+mistaking historical setup instructions for the current workflow.
