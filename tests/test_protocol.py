@@ -252,6 +252,57 @@ class ProtocolTests(unittest.TestCase):
                     self.channel.put_artifact("alpha", "alpha-session", ("before" + character).encode())
         self.send(body="Readable multilingual text: français, română, 日本語.\nNew line.")
 
+    def test_text_validation_preserves_control_ranges_and_multiline_rules(self):
+        for codepoint in range(256):
+            character = chr(codepoint)
+            for multiline in (False, True):
+                permitted = not (codepoint < 32 or 127 <= codepoint <= 159 or codepoint == 173)
+                permitted = permitted or (multiline and codepoint == 10)
+                value = "before" + character + "after"
+                if permitted:
+                    self.assertEqual(value, ac.text_field(value, "test", 100, multiline))
+                else:
+                    with self.subTest(codepoint=codepoint, multiline=multiline), self.assertRaises(ac.ProtocolError):
+                        ac.text_field(value, "test", 100, multiline)
+        for value in ("ASCII prose", "français 日本語", "Words\nwith lines"):
+            self.assertEqual(value, ac.text_field(value, "test", 100, True))
+        for character in ("\u061c", "\u202e", "\ud800", "\u2028", "\u2029", "\U000e0001"):
+            with self.assertRaises(ac.ProtocolError):
+                ac.text_field("before" + character + "after", "test", 100, True)
+
+    def test_text_validation_matches_v010_for_every_unicode_codepoint(self):
+        # Frozen v0.1.0 oracle: a security-sensitive optimization must preserve
+        # its complete rejection set, including lone surrogates and unassigned text.
+        def previous(value, name, maximum, multiline=False):
+            ac.require(isinstance(value, str) and 0 < len(value) <= maximum,
+                       f"invalid {name} length or type")
+            ac.require(value.strip() != "", f"empty {name}")
+            ac.require(not any((ord(c) < 32 and not (multiline and c == "\n"))
+                               or 127 <= ord(c) <= 159
+                               or ac.unicodedata.category(c) in {"Cf", "Cs", "Zl", "Zp"}
+                               for c in value), f"invalid control character in {name}")
+            return value
+
+        def accepted(function, value, maximum, multiline):
+            try:
+                function(value, "test", maximum, multiline)
+                return True
+            except ac.ProtocolError:
+                return False
+
+        for point in range(0x110000):
+            value = "a" + chr(point) + "b"
+            for multiline in (False, True):
+                old = accepted(previous, value, 3, multiline)
+                new = accepted(ac.text_field, value, 3, multiline)
+                if old != new:
+                    self.fail(f"v0.1.0 mismatch at U+{point:06X}, multiline={multiline}")
+        for value in (None, 0, b"a", "", " ", "\t", "\n", "\u00a0", "\u3000", "a", "ab", "a\nb"):
+            for maximum in (0, 1, 2, 3):
+                for multiline in (False, True):
+                    self.assertEqual(accepted(previous, value, maximum, multiline),
+                                     accepted(ac.text_field, value, maximum, multiline))
+
     def test_malformed_stored_artifact_is_not_trusted(self):
         data = b"\xff"
         state = self.channel.snapshot()

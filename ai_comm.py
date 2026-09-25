@@ -33,6 +33,8 @@ IDENT = re.compile(r"[a-z][a-z0-9_.-]{0,63}\Z")
 KEY = re.compile(r"[A-Za-z0-9_.:-]{1,96}\Z")
 HEX = re.compile(r"[0-9a-f]{64}\Z")
 NONCE = re.compile(r"[0-9a-f]{32}\Z")
+TEXT_CONTROLS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+MULTILINE_CONTROLS = re.compile(r"[\x00-\x09\x0b-\x1f\x7f-\x9f]")
 MID = re.compile(r"[0-9]{8}-[a-z][a-z0-9-]{0,31}\Z")
 MAX_DRAFT = 65536
 MAX_MESSAGE = 131072
@@ -92,10 +94,10 @@ def text_field(value, name, maximum, multiline=False):
     require(isinstance(value, str) and 0 < len(value) <= maximum,
             f"invalid {name} length or type")
     require(value.strip() != "", f"empty {name}")
-    require(not any((ord(c) < 32 and not (multiline and c == "\n"))
-                    or 127 <= ord(c) <= 159
-                    or unicodedata.category(c) in {"Cf", "Cs", "Zl", "Zp"}
-                    for c in value), f"invalid control character in {name}")
+    controls = MULTILINE_CONTROLS if multiline else TEXT_CONTROLS
+    require(controls.search(value) is None and
+            (value.isascii() or not any(unicodedata.category(c) in {"Cf", "Cs", "Zl", "Zp"}
+                                       for c in value)), f"invalid control character in {name}")
     return value
 
 

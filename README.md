@@ -186,6 +186,14 @@ to 1 MiB and a loaded channel snapshot to 64 MiB. It revalidates the snapshot on
 each operation; it is designed for small review/work sessions, not high-volume
 telemetry. Archive explicitly before that bound. No remote synchronization,
 network-filesystem locking or Windows support is claimed.
+Every snapshot read visits all messages, so cost grows at least linearly with
+history and content size; source/question-heavy or agreement-heavy histories can
+add more validation work. In the synthetic 3,000-message benchmark, median full
+snapshot validation improved from 0.736 s to 0.570 s for ASCII prose, and from
+0.759 s to 0.675 s for multilingual prose. These are local warm-filesystem
+measurements, not latency guarantees. [Method and reproduction](docs/PERFORMANCE.md)
+describe the fixture and limitations. Full history and integrity checks remain;
+there is no persistent cache or index that can bypass validation.
 Text accepts UTF-8 prose but rejects invisible Unicode format/bidi controls and
 Unicode line/paragraph separators; use ordinary LF for multiline text. This also
 excludes zero-width joiners. Stored artifacts are revalidated on every read.
