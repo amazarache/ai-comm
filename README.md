@@ -155,6 +155,9 @@ python3 ai_comm.py --channel /tmp/example-channel render --out history.md
 STATE output is bounded to 8 KiB with visible overflow counts. Deep inspection
 is paginated. Rendering expands acts, preserves original wording and resolves
 source/question references; it never applies later corrections to old text.
+Each source's details appear once per export; later citations name the message
+where those details appeared. A partial `render --since N` includes full details
+at the first retained citation, even if the original declaration predates N.
 An existing output file is not overwritten. The render is not a second ledger.
 
 An owner-authorized handover uses `join --takeover` with a new session reference.

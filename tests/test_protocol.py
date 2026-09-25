@@ -312,6 +312,29 @@ class ProtocolTests(unittest.TestCase):
             "id": "estimate", "kind": "inference", "ref": "draft-1", "detail": "Not measured"}])
         c.send("alpha", "alpha-session", "fact", draft)
 
+    def test_render_deduplicates_sources_within_each_export(self):
+        source = {"id": "record", "kind": "measurement", "ref": "local-reading",
+                  "detail": "Uncertain: <script>7 ± 2 units</script> `literal`."}
+        first = self.send(act="FACT", summary="Original estimate.", sources=[source], refs=["record"])
+        second = self.send(key="second", act="CORRECT", reply_to=first["id"], refs=["record"],
+                           summary="Correction remains uncertain.")
+        self.send(key="third", sources=[source], refs=["record"])
+        state = self.channel.snapshot()
+        rendered = state.render()
+        detail = "Uncertain: &lt;script&gt;7 ± 2 units&lt;/script&gt; &#96;literal&#96;."
+        self.assertEqual(1, rendered.count(detail))
+        self.assertEqual(2, rendered.count(f"Source record: see {first['id']} above."))
+        self.assertNotIn("<script>", rendered)
+        self.assertEqual(rendered, state.render())
+        # A partial export resolves its first citation even if declaration was omitted.
+        partial = state.render(since=1)
+        self.assertEqual(1, partial.count(detail))
+        self.assertIn(f"Source record: see {second['id']} above.", partial)
+        self.assertNotIn(f"Source record: see {first['id']}", partial)
+        self.assertIn("Original estimate.", rendered)
+        self.assertIn("Correction remains uncertain.", partial)
+        self.assertEqual(first, state.by_id[first["id"]])
+
     def test_exact_digest_consensus_not_ack(self):
         a = self.channel.put_artifact("alpha", "alpha-session", b"Candidate A\n")["artifact"]
         b = self.channel.put_artifact("alpha", "alpha-session", b"Candidate B\n")["artifact"]

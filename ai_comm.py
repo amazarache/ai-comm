@@ -673,6 +673,7 @@ class Snapshot:
         # HTML-escape all text so content cannot become executable markup or links.
         def safe(value):
             return html.escape(str(value), quote=True).replace("`", "&#96;")
+        source_first_seen = {}
         for message in self.messages:
             if message["seq"] <= since:
                 continue
@@ -686,8 +687,13 @@ class Snapshot:
                     lines += [f"{field}: `{safe(message[field])}`", ""]
             refs = list(dict.fromkeys(message.get("refs", []) + [s["id"] for s in message.get("sources", [])]))
             for sid in refs:
-                source = self.sources[sid]
-                lines += ["<pre>" + safe(f"Source {sid} ({source['kind']}): {source['ref']}\n{source['detail']}") + "</pre>", ""]
+                if sid in source_first_seen:
+                    citation = f"Source {sid}: see {source_first_seen[sid]} above."
+                else:
+                    source = self.sources[sid]
+                    citation = f"Source {sid} ({source['kind']}): {source['ref']}\n{source['detail']}"
+                    source_first_seen[sid] = message["id"]
+                lines += ["<pre>" + safe(citation) + "</pre>", ""]
             for delta in message.get("questions", []):
                 question = self.questions[delta["id"]]
                 lines += ["<pre>" + safe(f"Question {delta['id']}: {delta['op']} — {question['text']}") + "</pre>", ""]
