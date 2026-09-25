@@ -1,5 +1,14 @@
 # Changes
 
+## 0.1.2
+
+- Fix an intermittent notification-arrival test failure. The test now uses a
+  real sender thread coordinated after the first empty scan. Its previous global
+  `time.sleep` mock also intercepted Python subprocess waits, causing a send to
+  re-enter a channel lock already held by the test.
+- Runtime behavior and protocol bytes are unchanged from 0.1.1; only the package
+  version, test harness and release records change.
+
 ## 0.1.1
 
 - Add opt-in `wait --new-since N` notifications with a separate

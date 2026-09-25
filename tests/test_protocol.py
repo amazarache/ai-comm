@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from unittest import mock
 
@@ -178,8 +179,26 @@ class ProtocolTests(unittest.TestCase):
 
     def test_notification_wait_observes_later_arrival_without_ack(self):
         self.send()
-        with mock.patch.object(ac.time, "sleep", side_effect=lambda _: self.send(key="later")):
-            page = self.channel.wait("beta", "beta-session", timeout=10, new_since=1)
+        scanned = threading.Event()
+        notifications = self.channel.notifications
+
+        def observe_empty_page(*args, **kwargs):
+            page = notifications(*args, **kwargs)
+            if not page["messages"]:
+                scanned.set()
+            return page
+
+        def send_after_scan():
+            self.assertTrue(scanned.wait(5), "wait did not reach its first empty notification scan")
+            return self.send(key="later")
+
+        # Do not patch time.sleep: it is also used by subprocess waits and lock
+        # backoff, including while Git operations hold the channel lock.
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            pending = pool.submit(send_after_scan)
+            with mock.patch.object(self.channel, "notifications", side_effect=observe_empty_page):
+                page = self.channel.wait("beta", "beta-session", timeout=10, new_since=1)
+            self.assertEqual(2, pending.result(timeout=10)["seq"])
         self.assertEqual([2], [m["seq"] for m in page["messages"]])
         self.assertFalse(page["timed_out"])
         with self.assertRaises(ac.ProtocolError):
