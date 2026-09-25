@@ -53,7 +53,7 @@ class ProtocolError(Exception):
         super().__init__(message)
         self.message = message
         safe_field = field if isinstance(field, str) and re.fullmatch(r"[a-z_]{1,32}", field) else "input"
-        safe_code = code or re.sub(r"[^a-z0-9]+", "_", message.lower()).strip("_")[:64]
+        safe_code = code or "operation_failed"
         if not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", safe_code):
             safe_code = "operation_failed"
         self.details = {"error": message, "code": safe_code, "field": safe_field,
@@ -71,6 +71,8 @@ class ProtocolError(Exception):
                 if name in details and type(value) is int and 0 <= value <= 99999999:
                     self.details[name] = value
 
+
+ERROR_CODES = frozenset(['ack_out_of_range', 'advisory_requires_affects', 'agreement_must_reference_the_exact_proposal_and_artifact', 'agreement_topic_differs_from_proposal', 'all_required_reviewers_must_accept_this_exact_proposal', 'artifact_exceeds_1_mib', 'artifact_hash_mismatch', 'artifact_must_be_published_first', 'artifact_must_be_utf_8_text', 'artifact_not_found', 'assigned_envelope_exceeds_size_limit', 'at_least_two_distinct_reviewers_required', 'bounded_advisory_requires_fixed_in', 'channel_busy_retry_with_the_same_key', 'channel_does_not_exist_initialize_it_explicitly', 'channel_history_modified_or_removed_a_durable_record', 'channel_initialization_failed', 'channel_must_be_a_dedicated_bare_git_repository', 'channel_required', 'channel_snapshot_exceeds_64_mib_limit_archive_explicitly', 'channel_symlink_refused', 'confidence_not_allowed', 'confidence_required_by_channel_policy', 'control_nonce_does_not_match', 'corrupt_receipt', 'corrupt_receipt_bounds', 'draft_digest_mismatch', 'draft_exceeds_size_limit', 'duplicate_json_key', 'duplicate_recipient', 'duplicate_retry_key_in_history', 'durable_records_are_append_only', 'empty_affects_range', 'empty_artifact', 'empty_body', 'empty_non_secret_session_reference', 'empty_question', 'empty_reason', 'empty_session_reference', 'empty_source_detail', 'empty_source_reference', 'empty_stored_artifact', 'empty_summary', 'empty_task', 'fixed_in_inside_range', 'fixed_in_not_above_range', 'fixed_in_requires_affects', 'git_operation_failed_no_success_is_implied', 'handle_already_active_explicit_takeover_required', 'index_inconsistent', 'index_invalid', 'init_refuses_an_existing_path', 'input_exceeds_size_limit', 'invalid_affects_range', 'invalid_after', 'invalid_artifact_digest', 'invalid_artifact_length', 'invalid_body_length', 'invalid_cli_arguments', 'invalid_confidence', 'invalid_confidence_policy', 'invalid_control_character_in_artifact', 'invalid_control_character_in_body', 'invalid_control_character_in_non_secret_session_reference', 'invalid_control_character_in_question', 'invalid_control_character_in_reason', 'invalid_control_character_in_session_reference', 'invalid_control_character_in_source_detail', 'invalid_control_character_in_source_reference', 'invalid_control_character_in_stored_artifact', 'invalid_control_character_in_summary', 'invalid_control_character_in_task', 'invalid_control_nonce', 'invalid_control_reply_relationship', 'invalid_draft_digest', 'invalid_envelope_fields', 'invalid_generation', 'invalid_git_object_response', 'invalid_git_size_response', 'invalid_handle', 'invalid_historical_session', 'invalid_limit', 'invalid_manifest_sha256', 'invalid_message_id', 'invalid_non_secret_session_reference_length', 'invalid_notification_sequence', 'invalid_offset', 'invalid_open_question_delta', 'invalid_platform', 'invalid_policy', 'invalid_policy_acts', 'invalid_protocol_digest', 'invalid_protocol_sha256', 'invalid_question_delta', 'invalid_question_deltas', 'invalid_question_id', 'invalid_question_length', 'invalid_reason_length', 'invalid_receipt_field', 'invalid_receipt_sequence', 'invalid_recipient', 'invalid_recipients', 'invalid_release_advisory', 'invalid_release_commit', 'invalid_release_record', 'invalid_release_record_kind', 'invalid_reply_target', 'invalid_retry_key', 'invalid_reviewer', 'invalid_reviewer_configuration', 'invalid_sender', 'invalid_sequence', 'invalid_session_record', 'invalid_session_reference_length', 'invalid_since', 'invalid_source_declaration', 'invalid_source_declarations', 'invalid_source_detail_length', 'invalid_source_id', 'invalid_source_kind', 'invalid_source_policy', 'invalid_source_reference_length', 'invalid_source_references', 'invalid_stored_artifact_length', 'invalid_summary_length', 'invalid_task_length', 'invalid_timestamp', 'invalid_topic', 'invalid_utf_8_json', 'json_exceeds_size_limit', 'json_must_be_an_object', 'local_git_inspection_failed', 'message_id_mismatch', 'message_not_found', 'message_path_mismatch', 'message_sequence_gap_or_collision', 'missing_draft_field', 'non_finite_json_number', 'noncanonical_stored_message', 'not_an_ai_comm_channel', 'notification_cursor_exceeds_channel_history', 'one_delta_per_question_per_message', 'only_configured_reviewers_may_record_agreement', 'operation_failed', 'package_contract_does_not_match_channel_select_its_pinned_revisi', 'package_version_missing', 'partial_clone_release_check_unsupported', 'pong_nonce_must_be_fresh', 'proposal_already_decided_propose_a_new_revision', 'question_id_already_used', 'question_is_not_open', 'receipt_symlink_refused', 'release_record_must_be_canonical_json', 'release_record_not_canonical', 'release_tag_version_mismatch', 'reply_target_must_be_an_earlier_committed_message', 'retry_key_reused_with_changed_draft', 'reused_historical_session_reference', 'reviewer_not_addressed_by_proposal', 'reviewers_must_be_distinct', 'runtime_symlink_refused', 'session_history_gap', 'session_path_mismatch', 'source_evidence_required_by_channel_policy', 'source_id_is_immutable', 'state_budget_too_small', 'stored_artifact_must_be_utf_8_text', 'stored_draft_exceeds_limit', 'stored_object_exceeds_limit', 'takeover_requires_a_never_used_session_reference_for_this_handle', 'this_act_requires_a_reply_target', 'this_act_requires_an_artifact', 'timeout_must_be_0_60_seconds', 'truncated_git_object', 'truncated_git_object_response', 'unbounded_advisory_fixed_in', 'unexpected_channel_entry_path', 'unexpected_channel_entry_type', 'unexpected_control_echo', 'unexpected_control_nonce', 'unknown_act', 'unknown_draft_field', 'unknown_question_operation', 'unknown_source_reference', 'unregistered_or_stale_session', 'unregistered_recipients', 'unsupported_message_version', 'unsupported_or_malformed_channel', 'upgrade_requires_release_record', 'upgrade_summary_incomplete'])
 
 FIELD_HINTS = {
     "act": "Choose one of the documented communication acts; each act has a distinct meaning.",
@@ -207,6 +209,8 @@ def parse_affects(value):
                      equal < v if op == "<" else equal <= v if op == "<=" else equal == v)
                     for op, v in parsed), "empty affects range", code="empty_affects_range",
                 field="affects", hint="Choose compatible comparators that include at least one version.")
+        # Equality is a closed, bounded interval for fixed_in validation.
+        upper, upper_inclusive = equal, True
     if upper is not None and lower is not None:
         require(lower < upper or (lower == upper and lower_inclusive and upper_inclusive),
                 "empty affects range", code="empty_affects_range", field="affects",
@@ -242,7 +246,7 @@ def validate_release_record(record):
             hint="Set tag to v followed by package_version.")
     for field in ("manifest_sha256", "protocol_sha256"):
         pattern(record[field], HEX, field)
-    require(record["advisory"] in RELEASE_ADVISORIES, "invalid release advisory",
+    require(isinstance(record["advisory"], str) and record["advisory"] in RELEASE_ADVISORIES, "invalid release advisory",
             code="invalid_release_advisory", field="advisory",
             allowed=sorted(RELEASE_ADVISORIES), hint="Choose optional, recommended, or required.")
     text_field(record["reason"], "reason", 2000, True)
@@ -278,20 +282,20 @@ def validate_release_record(record):
 def _pairs(pairs):
     result = {}
     for key, value in pairs:
-        require(key not in result, "duplicate JSON key")
+        require(key not in result, "duplicate JSON key", code="duplicate_json_key")
         result[key] = value
     return result
 
 
 def parse(data, limit=MAX_MESSAGE):
-    require(len(data) <= limit, "JSON exceeds size limit")
+    require(len(data) <= limit, "JSON exceeds size limit", code="json_exceeds_size_limit")
     try:
         result = json.loads(data.decode("utf-8"), object_pairs_hook=_pairs,
                             parse_constant=lambda _: (_ for _ in ()).throw(
-                                ProtocolError("non-finite JSON number")))
+                                ProtocolError("non-finite JSON number", code="non_finite_json_number")))
     except (UnicodeError, ValueError, RecursionError) as exc:
-        raise ProtocolError("invalid UTF-8 JSON") from exc
-    require(isinstance(result, dict), "JSON must be an object")
+        raise ProtocolError("invalid UTF-8 JSON", code="invalid_utf_8_json") from exc
+    require(isinstance(result, dict), "JSON must be an object", code="json_must_be_an_object")
     return result
 
 
@@ -301,29 +305,39 @@ def read_input(path, limit=MAX_DRAFT):
     else:
         with open(path, "rb") as stream:
             data = stream.read(limit + 1)
-    require(len(data) <= limit, "input exceeds size limit")
+    require(len(data) <= limit, "input exceeds size limit", code="input_exceeds_size_limit")
     return data
 
 
 def text_field(value, name, maximum, multiline=False):
+    safe_name = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
     require(isinstance(value, str) and 0 < len(value) <= maximum,
-            f"invalid {name} length or type")
-    require(value.strip() != "", f"empty {name}")
+            f"invalid {name} length or type", code=f"invalid_{safe_name}_length",
+            field=safe_name, hint=f"Use nonempty text within the {maximum}-character limit.")
+    require(value.strip() != "", f"empty {name}", code=f"empty_{safe_name}",
+            field=safe_name, hint=f"Provide nonempty {name} text.")
     controls = MULTILINE_CONTROLS if multiline else TEXT_CONTROLS
     require(controls.search(value) is None and
             (value.isascii() or not any(unicodedata.category(c) in {"Cf", "Cs", "Zl", "Zp"}
-                                       for c in value)), f"invalid control character in {name}")
+                                       for c in value)), f"invalid control character in {name}",
+            code=f"invalid_control_character_in_{safe_name}", field=safe_name,
+            hint=f"Remove control and formatting characters from {name}.")
     return value
 
 
 def pattern(value, regex, name):
+    safe_name = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
     require(isinstance(value, str) and regex.fullmatch(value) is not None,
-            f"invalid {name}")
+            f"invalid {name}", code=f"invalid_{safe_name}", field=safe_name,
+            hint=f"Use a valid {name} value.")
     return value
 
 
 def integer(value, name, low=0, high=99999999):
-    require(type(value) is int and low <= value <= high, f"invalid {name}")
+    safe_name = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+    require(type(value) is int and low <= value <= high, f"invalid {name}",
+            code=f"invalid_{safe_name}", field=safe_name,
+            hint=f"Use an integer {low} through {high} for {name}.")
     return value
 
 
@@ -332,18 +346,18 @@ def now():
 
 
 def timestamp(value):
-    require(isinstance(value, str), "invalid timestamp")
+    require(isinstance(value, str), "invalid timestamp", code="invalid_timestamp")
     try:
         parsed = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
     except ValueError as exc:
-        raise ProtocolError("invalid timestamp") from exc
-    require(parsed.strftime("%Y-%m-%dT%H:%M:%SZ") == value, "invalid timestamp")
+        raise ProtocolError("invalid timestamp", code="invalid_timestamp") from exc
+    require(parsed.strftime("%Y-%m-%dT%H:%M:%SZ") == value, "invalid timestamp", code="invalid_timestamp")
 
 
 def git_env(extra=None):
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull,
-               GIT_TERMINAL_PROMPT="0", LC_ALL="C")
+               GIT_TERMINAL_PROMPT="0", GIT_NO_LAZY_FETCH="1", LC_ALL="C")
     env.update(extra or {})
     return env
 
@@ -352,7 +366,7 @@ def git(directory, *args, data=None, extra=None, ok=(0,)):
     proc = subprocess.run(["git", "--git-dir", str(directory), *args],
                           input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                           env=git_env(extra), timeout=30)
-    require(proc.returncode in ok, "Git operation failed; no success is implied")
+    require(proc.returncode in ok, "Git operation failed; no success is implied", code="git_operation_failed_no_success_is_implied")
     return proc.stdout
 
 
@@ -415,6 +429,30 @@ def package_identity(directory=None):
 
 def release_status(directory=None):
     repo = Path(directory or Path(__file__).resolve().parent).resolve()
+    try:
+        return _release_status(repo)
+    except Exception:
+        # Release metadata is advisory only and must never affect channel operations.
+        try:
+            identity = package_identity(repo)
+            version, head = identity["version"], identity["commit"]
+        except Exception:
+            version, head = VERSION, None
+        return {"status": "index_invalid", "pinned_version": version, "head": head,
+                "advice": [], "message": "release index could not be safely validated; no advice given",
+                "authenticity": "not verified (no attestation)"}
+
+
+def _release_status(repo):
+    partial = work_git(repo, "config", "--get", "extensions.partialClone", ok=(0, 1)).strip()
+    if partial:
+        version_output = subprocess.run(["git", "--version"], stdout=subprocess.PIPE,
+                                        stderr=subprocess.PIPE, env=git_env(), timeout=10).stdout
+        version_match = re.search(rb"git version (\d+)\.(\d+)", version_output)
+        require(version_match is not None and tuple(map(int, version_match.groups())) >= (2, 44),
+                "partial clone cannot be inspected without lazy fetching",
+                code="partial_clone_release_check_unsupported", field="channel",
+                hint="Use Git 2.44 or newer so release checks can disable lazy fetching.")
     identity = package_identity(repo)
     ref = "refs/remotes/origin/release-index"
     exists = work_git(repo, "show-ref", "--verify", ref, ok=(0, 128)).strip()
@@ -473,6 +511,11 @@ def release_status(directory=None):
                     "release tag manifest file differs from index",
                     code="index_inconsistent", field="manifest_sha256",
                     hint="Correct the index to match the manifest file in the tagged commit.")
+            tagged_protocol = work_git(repo, "show", f"{tag_ref}^{{}}:PROTOCOL.md")
+            require(sha(tagged_protocol) == entry["protocol_sha256"],
+                    "release tag protocol differs from index", code="index_inconsistent",
+                    field="protocol_sha256",
+                    hint="Correct the index to match the protocol digest in the tagged commit.")
     except (ProtocolError, UnicodeError):
         return {"status": "index_inconsistent",
                 "pinned_version": identity["version"], "head": identity["commit"],
@@ -518,7 +561,7 @@ def sync_directory(path):
 
 
 def atomic_json(path, value):
-    require(not path.is_symlink(), "runtime symlink refused")
+    require(not path.is_symlink(), "runtime symlink refused", code="runtime_symlink_refused")
     fd, name = tempfile.mkstemp(prefix=".receipt-", dir=path.parent)
     try:
         with os.fdopen(fd, "wb") as stream:
@@ -535,32 +578,32 @@ def atomic_json(path, value):
 class Channel:
     def __init__(self, path):
         raw = Path(path).expanduser().absolute()
-        require(not raw.is_symlink(), "channel symlink refused")
+        require(not raw.is_symlink(), "channel symlink refused", code="channel_symlink_refused")
         self.path = raw.resolve()
-        require(self.path.is_dir(), "channel does not exist; initialize it explicitly")
+        require(self.path.is_dir(), "channel does not exist; initialize it explicitly", code="channel_does_not_exist_initialize_it_explicitly")
         require(git(self.path, "rev-parse", "--is-bare-repository").strip() == b"true",
-                "channel must be a dedicated bare Git repository")
+                "channel must be a dedicated bare Git repository", code="channel_must_be_a_dedicated_bare_git_repository")
         self.runtime = self.path / "ai-comm-runtime"
-        require(not self.runtime.is_symlink(), "runtime symlink refused")
+        require(not self.runtime.is_symlink(), "runtime symlink refused", code="runtime_symlink_refused")
         self.runtime.mkdir(mode=0o700, exist_ok=True)
 
     @classmethod
     def init(cls, path, task, reviewers, require_confidence=(), require_sources=()):
         text_field(task, "task", 2000, True)
         require(2 <= len(reviewers) <= 16 and len(set(reviewers)) == len(reviewers),
-                "at least two distinct reviewers required")
+                "at least two distinct reviewers required", code="at_least_two_distinct_reviewers_required")
         for handle in reviewers:
             pattern(handle, HANDLE, "reviewer")
-        require(set(require_confidence) <= CONF_ACTS, "invalid confidence policy")
-        require(set(require_sources) <= ACTS, "invalid source policy")
+        require(set(require_confidence) <= CONF_ACTS, "invalid confidence policy", code="invalid_confidence_policy")
+        require(set(require_sources) <= ACTS, "invalid source policy", code="invalid_source_policy")
         target = Path(path).expanduser().absolute()
         require(not target.exists() and not target.is_symlink(),
-                "init refuses an existing path")
+                "init refuses an existing path", code="init_refuses_an_existing_path")
         target.mkdir(mode=0o700, parents=False)
         proc = subprocess.run(["git", "init", "--bare", "--initial-branch=main", str(target)],
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                               env=git_env(), timeout=30)
-        require(proc.returncode == 0, "channel initialization failed")
+        require(proc.returncode == 0, "channel initialization failed", code="channel_initialization_failed")
         channel = cls(target)
         config = {"kind": "ai-comm-channel", "v": 2, "task": task,
                   "reviewers": reviewers, "policy": {
@@ -581,7 +624,7 @@ class Channel:
                     fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                     break
                 except BlockingIOError:
-                    require(time.monotonic() < deadline, "channel busy; retry with the same key")
+                    require(time.monotonic() < deadline, "channel busy; retry with the same key", code="channel_busy_retry_with_the_same_key")
                     time.sleep(0.05)
             yield
         finally:
@@ -592,7 +635,7 @@ class Channel:
         if parent:
             for path in changes:
                 require(not git(self.path, "ls-tree", parent, "--", path).strip(),
-                        "durable records are append-only")
+                        "durable records are append-only", code="durable_records_are_append_only")
         with tempfile.TemporaryDirectory(prefix="index-", dir=self.runtime) as directory:
             env = {"GIT_INDEX_FILE": str(Path(directory) / "index"),
                    "GIT_AUTHOR_NAME": author, "GIT_AUTHOR_EMAIL": author + "@ai-comm.invalid",
@@ -620,7 +663,7 @@ class Channel:
     def snapshot(self):
         head = git(self.path, "rev-parse", "--verify", REF).decode().strip()
         require(not git(self.path, "log", "--format=", "--name-only", "--diff-filter=MDRT", head).strip(),
-                "channel history modified or removed a durable record")
+                "channel history modified or removed a durable record", code="channel_history_modified_or_removed_a_durable_record")
         entries = git(self.path, "ls-tree", "-r", "-z", head).split(b"\0")
         tree = {}
         for entry in entries:
@@ -628,26 +671,26 @@ class Channel:
                 continue
             prefix, raw_path = entry.split(b"\t", 1)
             mode, kind, oid = prefix.decode().split()
-            require(mode == "100644" and kind == "blob", "unexpected channel entry type")
+            require(mode == "100644" and kind == "blob", "unexpected channel entry type", code="unexpected_channel_entry_type")
             path = raw_path.decode("ascii")
             require(path == "channel.json" or re.fullmatch(
                 r"messages/[0-9]{8}-[a-z][a-z0-9-]{0,31}\.json|"
                 r"sessions/[a-z][a-z0-9-]{0,31}/[0-9]{8}\.json|"
-                r"artifacts/[0-9a-f]{64}", path), "unexpected channel entry path")
+                r"artifacts/[0-9a-f]{64}", path), "unexpected channel entry path", code="unexpected_channel_entry_path")
             tree[path] = oid
-        require("channel.json" in tree, "not an ai-comm channel")
+        require("channel.json" in tree, "not an ai-comm channel", code="not_an_ai_comm_channel")
         request = ("\n".join(tree[p] for p in tree) + "\n").encode()
         sizes = git(self.path, "cat-file", "--batch-check", data=request).splitlines()
-        require(len(sizes) == len(tree), "invalid Git size response")
+        require(len(sizes) == len(tree), "invalid Git size response", code="invalid_git_size_response")
         total = 0
         for path, line in zip(tree, sizes):
             parts = line.split()
-            require(len(parts) == 3 and parts[1] == b"blob", "invalid Git size response")
+            require(len(parts) == 3 and parts[1] == b"blob", "invalid Git size response", code="invalid_git_size_response")
             length = int(parts[2])
             bound = MAX_ARTIFACT if path.startswith("artifacts/") else MAX_MESSAGE
-            require(length <= bound, "stored object exceeds limit")
+            require(length <= bound, "stored object exceeds limit", code="stored_object_exceeds_limit")
             total += length
-        require(total <= 64 * 1024 * 1024, "channel snapshot exceeds 64 MiB limit; archive explicitly")
+        require(total <= 64 * 1024 * 1024, "channel snapshot exceeds 64 MiB limit; archive explicitly", code="channel_snapshot_exceeds_64_mib_limit_archive_explicitly")
         # One batch read; Git object identifiers are generated by Git, never peer strings.
         names = list(tree)
         raw = git(self.path, "cat-file", "--batch",
@@ -656,15 +699,15 @@ class Channel:
         offset = 0
         for path in names:
             end = raw.find(b"\n", offset)
-            require(end >= offset, "truncated Git object response")
+            require(end >= offset, "truncated Git object response", code="truncated_git_object_response")
             fields = raw[offset:end].split()
-            require(len(fields) == 3 and fields[1] == b"blob", "invalid Git object response")
+            require(len(fields) == 3 and fields[1] == b"blob", "invalid Git object response", code="invalid_git_object_response")
             size = int(fields[2])
-            require(size <= MAX_ARTIFACT, "stored object exceeds limit")
+            require(size <= MAX_ARTIFACT, "stored object exceeds limit", code="stored_object_exceeds_limit")
             offset = end + 1
             blobs[path] = raw[offset:offset + size]
             require(len(blobs[path]) == size and raw[offset + size:offset + size + 1] == b"\n",
-                    "truncated Git object")
+                    "truncated Git object", code="truncated_git_object")
             offset += size + 1
         return Snapshot(head, blobs)
 
@@ -677,10 +720,10 @@ class Channel:
             current = state.current.get(handle)
             if current and current["platform"] == platform and current["session"] == session:
                 return {"joined": current, "head": state.head, "duplicate": True}
-            require(not current or takeover, "handle already active; explicit takeover required")
+            require(not current or takeover, "handle already active; explicit takeover required", code="handle_already_active_explicit_takeover_required")
             require(not any(record["handle"] == handle and record["session"] == session
                             for record in state.sessions.values()),
-                    "takeover requires a never-used session reference for this handle")
+                    "takeover requires a never-used session reference for this handle", code="takeover_requires_a_never_used_session_reference_for_this_handle")
             generation = current["generation"] + 1 if current else 1
             record = {"handle": handle, "platform": platform, "session": session,
                       "generation": generation, "ts": now()}
@@ -691,24 +734,21 @@ class Channel:
 
     def send(self, handle, session, key, draft, dry_run=False):
         pattern(key, KEY, "retry key")
-        require(len(canonical(draft)) <= MAX_DRAFT, "draft exceeds size limit")
+        require(len(canonical(draft)) <= MAX_DRAFT, "draft exceeds size limit", code="draft_exceeds_size_limit")
         with self.lock():
             state = self.snapshot()
             current = state.identity(handle, session)
             digest = sha(canonical(draft))
-            if dry_run:
-                state.validate_draft(draft, handle)
             previous = state.retries.get((handle, current["generation"], key))
             if previous:
-                require(previous["draft_sha256"] == digest, "retry key reused with changed draft")
+                require(previous["draft_sha256"] == digest, "retry key reused with changed draft", code="retry_key_reused_with_changed_draft")
                 if dry_run:
                     return {"dry_run": True, "published": False, "duplicate": True,
                             "message": {"id": previous["id"], "seq": previous["seq"],
                                         "ts": previous["ts"], "provisional": False},
                             "head": state.head, "warnings": []}
                 return {"message": previous, "head": state.head, "duplicate": True}
-            if not dry_run:
-                state.validate_draft(draft, handle)
+            state.validate_draft(draft, handle)
             seq = len(state.messages) + 1
             integer(seq, "sequence", 1)
             message = dict(draft, v=2, id=f"{seq:08d}-{handle}", seq=seq, ts=now(),
@@ -723,7 +763,7 @@ class Channel:
                 message["echo"] = target["nonce"]
             state.add_message(message)  # validates the complete assigned envelope too
             data = canonical(message)
-            require(len(data) <= MAX_MESSAGE, "assigned envelope exceeds size limit")
+            require(len(data) <= MAX_MESSAGE, "assigned envelope exceeds size limit", code="assigned_envelope_exceeds_size_limit")
             warnings = ([f"body is {len(message.get('body', ''))} characters (soft limit 2000; Unicode code points, as counted by Python len): publish the detail with 'artifact --file PATH' and put the returned digest in this message's 'artifact' field"]
                         if len(message.get("body", "")) > 2000 else [])
             if dry_run:
@@ -739,11 +779,11 @@ class Channel:
                     "warnings": warnings}
 
     def put_artifact(self, handle, session, data):
-        require(len(data) <= MAX_ARTIFACT, "artifact exceeds 1 MiB")
+        require(len(data) <= MAX_ARTIFACT, "artifact exceeds 1 MiB", code="artifact_exceeds_1_mib")
         try:
             text_field(data.decode("utf-8"), "artifact", MAX_ARTIFACT, True)
         except UnicodeError as exc:
-            raise ProtocolError("artifact must be UTF-8 text") from exc
+            raise ProtocolError("artifact must be UTF-8 text", code="artifact_must_be_utf_8_text") from exc
         digest = sha(data)
         with self.lock():
             state = self.snapshot()
@@ -757,15 +797,15 @@ class Channel:
     def receipt(self, state, handle, session):
         current = state.identity(handle, session)
         path = self.runtime / (handle + ".json")
-        require(not path.is_symlink(), "receipt symlink refused")
+        require(not path.is_symlink(), "receipt symlink refused", code="receipt_symlink_refused")
         if path.exists():
             record = parse(read_input(path, 4096), 4096)
             require(set(record) == {"v", "generation", "read", "seen"} and record["v"] == 2,
-                    "corrupt receipt")
+                    "corrupt receipt", code="corrupt_receipt")
             for field in ("generation", "read", "seen"):
                 integer(record[field], "receipt field")
             require(1 <= record["generation"] <= current["generation"] and
-                    0 <= record["read"] <= record["seen"] <= len(state.messages), "corrupt receipt bounds")
+                    0 <= record["read"] <= record["seen"] <= len(state.messages), "corrupt receipt bounds", code="corrupt_receipt_bounds")
             if record["generation"] != current["generation"]:
                 record = dict(record, generation=current["generation"], seen=record["read"])
         else:
@@ -803,7 +843,7 @@ class Channel:
         with self.lock():
             state = self.snapshot()
             _, receipt = self.receipt(state, handle, session)
-            require(new_since <= len(state.messages), "notification cursor exceeds channel history")
+            require(new_since <= len(state.messages), "notification cursor exceeds channel history", code="notification_cursor_exceeds_channel_history")
             after = max(receipt["read"], new_since)
             messages, through = self._page(state, handle, after, limit)
             messages = [state.message_view(message) for message in messages]
@@ -825,7 +865,7 @@ class Channel:
             return {"read_through": through, "head": state.head}
 
     def wait(self, handle, session, timeout=30, limit=10, new_since=None):
-        require(type(timeout) in (int, float) and 0 <= timeout <= 60, "timeout must be 0–60 seconds")
+        require(type(timeout) in (int, float) and 0 <= timeout <= 60, "timeout must be 0–60 seconds", code="timeout_must_be_0_60_seconds")
         deadline = time.monotonic() + timeout
         while True:
             result = (self.inbox(handle, session, limit) if new_since is None else
@@ -842,85 +882,92 @@ class Snapshot:
         cfg = self.config
         require(set(cfg) == {"kind", "v", "task", "reviewers", "policy", "protocol_sha256"}
                 and cfg["kind"] == "ai-comm-channel" and type(cfg["v"]) is int and cfg["v"] == 2,
-                "unsupported or malformed channel")
+                "unsupported or malformed channel", code="unsupported_or_malformed_channel")
         text_field(cfg["task"], "task", 2000, True)
         pattern(cfg["protocol_sha256"], HEX, "protocol digest")
         require(cfg["protocol_sha256"] == sha(Path(__file__).with_name("PROTOCOL.md").read_bytes()),
-                "package contract does not match channel; select its pinned revision")
+                "package contract does not match channel; select its pinned revision", code="package_contract_does_not_match_channel_select_its_pinned_revisi")
         reviewers = cfg["reviewers"]
         require(isinstance(reviewers, list) and 2 <= len(reviewers) <= 16,
-                "invalid reviewer configuration")
+                "invalid reviewer configuration", code="invalid_reviewer_configuration")
         for handle in reviewers:
             pattern(handle, HANDLE, "reviewer")
-        require(len(set(reviewers)) == len(reviewers), "reviewers must be distinct")
+        require(len(set(reviewers)) == len(reviewers), "reviewers must be distinct", code="reviewers_must_be_distinct")
         policy = cfg["policy"]
         require(isinstance(policy, dict) and set(policy) == {"require_confidence", "require_sources"},
-                "invalid policy")
+                "invalid policy", code="invalid_policy")
         for field, allowed in (("require_confidence", CONF_ACTS), ("require_sources", ACTS)):
             require(isinstance(policy[field], list) and all(isinstance(a, str) and a in allowed
-                    for a in policy[field]), "invalid policy acts")
+                    for a in policy[field]), "invalid policy acts", code="invalid_policy_acts")
         self.sessions, self.current, self.artifacts = {}, {}, {}
         for path, data in sorted(blobs.items()):
             if path.startswith("sessions/"):
                 record = parse(data)
                 require(set(record) == {"handle", "platform", "session", "generation", "ts"},
-                        "invalid session record")
+                        "invalid session record", code="invalid_session_record")
                 handle = pattern(record["handle"], HANDLE, "handle")
                 pattern(record["platform"], HANDLE, "platform")
                 text_field(record["session"], "session reference", 160)
                 generation = integer(record["generation"], "generation", 1)
                 timestamp(record["ts"])
-                require(path == f"sessions/{handle}/{generation:08d}.json", "session path mismatch")
+                require(path == f"sessions/{handle}/{generation:08d}.json", "session path mismatch", code="session_path_mismatch")
                 previous = self.current.get(handle)
-                require(generation == (previous["generation"] + 1 if previous else 1), "session history gap")
+                require(generation == (previous["generation"] + 1 if previous else 1), "session history gap", code="session_history_gap")
                 require(not any(old["handle"] == handle and old["session"] == record["session"]
-                                for old in self.sessions.values()), "reused historical session reference")
+                                for old in self.sessions.values()), "reused historical session reference", code="reused_historical_session_reference")
                 self.sessions[(handle, generation)] = record
                 self.current[handle] = record
             elif path.startswith("artifacts/"):
                 digest = path.split("/")[1]
-                require(sha(data) == digest, "artifact hash mismatch")
+                require(sha(data) == digest, "artifact hash mismatch", code="artifact_hash_mismatch")
                 try:
                     text_field(data.decode("utf-8"), "stored artifact", MAX_ARTIFACT, True)
                 except UnicodeError as exc:
-                    raise ProtocolError("stored artifact must be UTF-8 text") from exc
+                    raise ProtocolError("stored artifact must be UTF-8 text", code="stored_artifact_must_be_utf_8_text") from exc
                 self.artifacts[digest] = data
         self.messages, self.by_id, self.retries, self.sources, self.questions = [], {}, {}, {}, {}
         for path, data in sorted(blobs.items()):
             if path.startswith("messages/"):
                 message = parse(data)
-                require(path == f"messages/{message.get('id')}.json", "message path mismatch")
-                require(canonical(message) == data, "noncanonical stored message")
+                require(path == f"messages/{message.get('id')}.json", "message path mismatch", code="message_path_mismatch")
+                require(canonical(message) == data, "noncanonical stored message", code="noncanonical_stored_message")
                 self.add_message(message)
-        manifest_path = Path(__file__).with_name("RELEASE-MANIFEST.json")
-        protocol_path = Path(__file__).with_name("PROTOCOL.md")
-        self._local_identity = {"version": VERSION,
-                                "manifest_sha256": sha(manifest_path.read_bytes()) if manifest_path.is_file() else None,
-                                "protocol_sha256": sha(protocol_path.read_bytes()) if protocol_path.is_file() else None}
         try:
-            status = release_status()
+            self._local_identity = package_identity(Path(__file__).resolve().parent)
+        except Exception:
+            self._local_identity = {"version": VERSION, "manifest_sha256": None,
+                                    "protocol_sha256": None}
+        try:
+            status = release_status(Path(__file__).resolve().parent)
             self._verified_releases = {entry["package_version"]: entry
                                        for entry in status.get("verified_releases", [])}
-        except (ProtocolError, OSError, subprocess.SubprocessError, UnicodeError):
+        except Exception:
             self._verified_releases = {}
 
     def identity(self, handle, session):
         pattern(handle, HANDLE, "handle")
         text_field(session, "session reference", 160)
         record = self.current.get(handle)
-        require(record is not None and record["session"] == session, "unregistered or stale session")
+        require(record is not None and record["session"] == session, "unregistered or stale session", code="unregistered_or_stale_session")
         return record
 
     def release_notice(self, message):
         if message.get("act") != "FACT" or message.get("topic") != "upgrade":
             return None
+        try:
+            return self._release_notice(message)
+        except Exception:
+            return {"status": "unverified", "advisory": "malformed",
+                    "reason": "release notice is invalid; no advisory can be cleared"}
+
+    def _release_notice(self, message):
         data = self.artifacts.get(message.get("artifact"))
         if data is None:
             return {"status": "unverified", "advisory": "malformed",
                     "reason": "release record artifact is unavailable"}
         try:
             record = parse(data, MAX_ARTIFACT)
-            require(canonical(record) == data, "release record must be canonical JSON")
+            require(canonical(record) == data, "release record must be canonical JSON", code="release_record_must_be_canonical_json")
             validate_release_record(record)
         except (ProtocolError, UnicodeError, ValueError):
             return {"status": "unverified", "advisory": "malformed",
@@ -972,20 +1019,20 @@ class Snapshot:
         return dict(message, release_status=notice) if notice else message
 
     def validate_draft(self, draft, author, historical=False):
-        require(isinstance(draft, dict) and set(draft) <= DRAFT_KEYS, "unknown draft field")
-        require({"act", "to", "topic", "summary"} <= set(draft), "missing draft field")
+        require(isinstance(draft, dict) and set(draft) <= DRAFT_KEYS, "unknown draft field", code="unknown_draft_field")
+        require({"act", "to", "topic", "summary"} <= set(draft), "missing draft field", code="missing_draft_field")
         act = draft["act"]
         require(isinstance(act, str) and act in ACTS, "unknown act", code="unknown_act",
                 field="act", allowed=sorted(ACTS), hint="Choose one of the documented communication acts.")
         recipients = draft["to"]
-        require(isinstance(recipients, list) and 1 <= len(recipients) <= 32, "invalid recipients")
+        require(isinstance(recipients, list) and 1 <= len(recipients) <= 32, "invalid recipients", code="invalid_recipients")
         for handle in recipients:
             pattern(handle, HANDLE, "recipient")
         unregistered = sum(1 for handle in recipients if handle not in self.current)
         require(unregistered == 0, "to contains unregistered handles", code="unregistered_recipients",
                 field="to", got=unregistered,
                 hint="Register the intended recipients first; the count is shown without exposing their names.")
-        require(len(set(recipients)) == len(recipients), "duplicate recipient")
+        require(len(set(recipients)) == len(recipients), "duplicate recipient", code="duplicate_recipient")
         pattern(draft["topic"], IDENT, "topic")
         text_field(draft["summary"], "summary", 300)
         if "body" in draft:
@@ -999,21 +1046,21 @@ class Snapshot:
                     "invalid confidence", code="invalid_confidence", field="confidence",
                     allowed=sorted(CONFIDENCE), hint="Choose verified, likely, or unverified.")
         if act in self.config["policy"]["require_confidence"]:
-            require("confidence" in draft, "confidence required by channel policy")
+            require("confidence" in draft, "confidence required by channel policy", code="confidence_required_by_channel_policy")
         target = None
         if "reply_to" in draft:
             pattern(draft["reply_to"], MID, "reply target")
             target = self.by_id.get(draft["reply_to"])
-            require(target is not None, "reply target must be an earlier committed message")
+            require(target is not None, "reply target must be an earlier committed message", code="reply_target_must_be_an_earlier_committed_message")
         if act in {"CORRECT", "PONG", "ACK", "ACCEPT", "REJECT", "DECIDE"}:
-            require(target is not None, "this act requires a reply target")
+            require(target is not None, "this act requires a reply target", code="this_act_requires_a_reply_target")
         if act == "PONG" or (act == "ACK" and target["act"] in {"PING", "PONG"}):
             require(target["act"] in ({"PING"} if act == "PONG" else {"PING", "PONG"})
                     and author in target["to"] and target["from"] in recipients
-                    and author != target["from"], "invalid control reply relationship")
+                    and author != target["from"], "invalid control reply relationship", code="invalid_control_reply_relationship")
         if "artifact" in draft:
             pattern(draft["artifact"], HEX, "artifact digest")
-            require(draft["artifact"] in self.artifacts, "artifact must be published first")
+            require(draft["artifact"] in self.artifacts, "artifact must be published first", code="artifact_must_be_published_first")
         if act == "FACT" and draft["topic"] == "upgrade" and not historical:
             require("artifact" in draft, "upgrade notice requires a release record",
                     code="upgrade_requires_release_record", field="artifact",
@@ -1034,92 +1081,96 @@ class Snapshot:
             except ProtocolError:
                 raise
         if act in {"PROPOSE", "ACCEPT", "REJECT", "DECIDE"}:
-            require("artifact" in draft, "this act requires an artifact")
+            require("artifact" in draft, "this act requires an artifact", code="this_act_requires_an_artifact")
         if act in {"ACCEPT", "REJECT", "DECIDE"}:
             require(target["act"] == "PROPOSE" and target.get("artifact") == draft["artifact"],
-                    "agreement must reference the exact proposal and artifact")
-            require(draft["topic"] == target["topic"], "agreement topic differs from proposal")
-            require(author in self.config["reviewers"], "only configured reviewers may record agreement")
-            require(author == target["from"] or author in target["to"], "reviewer not addressed by proposal")
+                    "agreement must reference the exact proposal and artifact", code="agreement_must_reference_the_exact_proposal_and_artifact")
+            require(draft["topic"] == target["topic"], "agreement topic differs from proposal", code="agreement_topic_differs_from_proposal")
+            require(author in self.config["reviewers"], "only configured reviewers may record agreement", code="only_configured_reviewers_may_record_agreement")
+            require(author == target["from"] or author in target["to"], "reviewer not addressed by proposal", code="reviewer_not_addressed_by_proposal")
             require(not any(m["act"] == "DECIDE" and m.get("reply_to") == target["id"]
-                            for m in self.messages), "proposal already decided; propose a new revision")
+                            for m in self.messages), "proposal already decided; propose a new revision", code="proposal_already_decided_propose_a_new_revision")
             if act == "DECIDE":
                 stances = {}
                 for message in self.messages:
                     if message["act"] in {"ACCEPT", "REJECT"} and message.get("reply_to") == target["id"]:
                         stances[message["from"]] = message["act"]
                 require(all(stances.get(r) == "ACCEPT" for r in self.config["reviewers"]),
-                        "all required reviewers must ACCEPT this exact proposal")
+                        "all required reviewers must ACCEPT this exact proposal", code="all_required_reviewers_must_accept_this_exact_proposal")
         additions = draft.get("sources", [])
-        require(isinstance(additions, list) and len(additions) <= 64, "invalid source declarations")
+        require(isinstance(additions, list) and len(additions) <= 64, "invalid source declarations", code="invalid_source_declarations")
         sources = dict(self.sources)
         for source in additions:
             require(isinstance(source, dict) and set(source) == {"id", "kind", "ref", "detail"},
-                    "invalid source declaration")
+                    "invalid source declaration", code="invalid_source_declaration")
             sid = pattern(source["id"], IDENT, "source id")
             pattern(source["kind"], IDENT, "source kind")
             text_field(source["ref"], "source reference", 4000)
             text_field(source["detail"], "source detail", 8000, True)
-            require(sid not in sources or sources[sid] == source, "source id is immutable")
+            require(sid not in sources or sources[sid] == source, "source id is immutable", code="source_id_is_immutable")
             sources[sid] = source
         refs = draft.get("refs", [])
-        require(isinstance(refs, list) and len(refs) <= 64, "invalid source references")
+        require(isinstance(refs, list) and len(refs) <= 64, "invalid source references", code="invalid_source_references")
         for sid in refs:
             pattern(sid, IDENT, "source id")
-            require(sid in sources, "unknown source reference")
+            require(sid in sources, "unknown source reference", code="unknown_source_reference")
         if act in self.config["policy"]["require_sources"]:
-            require(bool(refs or additions), "source evidence required by channel policy")
+            require(bool(refs or additions), "source evidence required by channel policy", code="source_evidence_required_by_channel_policy")
         deltas = draft.get("questions", [])
-        require(isinstance(deltas, list) and len(deltas) <= 64, "invalid question deltas")
+        require(isinstance(deltas, list) and len(deltas) <= 64, "invalid question deltas", code="invalid_question_deltas")
         questions = dict(self.questions)
         changed_questions = set()
         for delta in deltas:
-            require(isinstance(delta, dict) and isinstance(delta.get("op"), str), "invalid question delta")
+            require(isinstance(delta, dict) and isinstance(delta.get("op"), str), "invalid question delta", code="invalid_question_delta")
             qid = pattern(delta.get("id"), IDENT, "question id")
-            require(qid not in changed_questions, "one delta per question per message")
+            require(qid not in changed_questions, "one delta per question per message", code="one_delta_per_question_per_message")
             changed_questions.add(qid)
             if delta["op"] == "open":
-                require(set(delta) == {"op", "id", "text"} and qid not in questions, "question id already used")
+                require(set(delta) == {"op", "id", "text"}, "invalid open question delta",
+                        code="invalid_open_question_delta", field="questions",
+                        hint="An open delta contains exactly op, id, and text.")
+                require(qid not in questions, "question id already used", code="question_id_already_used",
+                        field="questions", hint="Choose a question id never used in this channel.")
                 text_field(delta["text"], "question", 2000, True)
                 questions[qid] = {"id": qid, "text": delta["text"], "state": "open"}
             else:
-                require(delta["op"] == "close" and set(delta) == {"op", "id"}, "unknown question operation")
-                require(qid in questions and questions[qid]["state"] == "open", "question is not open")
+                require(delta["op"] == "close" and set(delta) == {"op", "id"}, "unknown question operation", code="unknown_question_operation")
+                require(qid in questions and questions[qid]["state"] == "open", "question is not open", code="question_is_not_open")
                 questions[qid] = dict(questions[qid], state="closed")
         return sources, questions
 
     def add_message(self, message):
         required = {"v", "id", "seq", "ts", "from", "session", "generation", "key", "draft_sha256"}
-        require(required <= set(message) <= (DRAFT_KEYS | META_KEYS), "invalid envelope fields")
-        require(type(message["v"]) is int and message["v"] == 2, "unsupported message version")
+        require(required <= set(message) <= (DRAFT_KEYS | META_KEYS), "invalid envelope fields", code="invalid_envelope_fields")
+        require(type(message["v"]) is int and message["v"] == 2, "unsupported message version", code="unsupported_message_version")
         seq = integer(message["seq"], "sequence", 1)
-        require(seq == len(self.messages) + 1, "message sequence gap or collision")
+        require(seq == len(self.messages) + 1, "message sequence gap or collision", code="message_sequence_gap_or_collision")
         author = pattern(message["from"], HANDLE, "sender")
-        require(message["id"] == f"{seq:08d}-{author}", "message id mismatch")
+        require(message["id"] == f"{seq:08d}-{author}", "message id mismatch", code="message_id_mismatch")
         generation = integer(message["generation"], "generation", 1)
         session = self.sessions.get((author, generation))
-        require(session is not None and session["session"] == message["session"], "invalid historical session")
+        require(session is not None and session["session"] == message["session"], "invalid historical session", code="invalid_historical_session")
         timestamp(message["ts"])
         pattern(message["key"], KEY, "retry key")
         pattern(message["draft_sha256"], HEX, "draft digest")
         draft = {k: v for k, v in message.items() if k in DRAFT_KEYS}
-        require(len(canonical(draft)) <= MAX_DRAFT, "stored draft exceeds limit")
-        require(sha(canonical(draft)) == message["draft_sha256"], "draft digest mismatch")
+        require(len(canonical(draft)) <= MAX_DRAFT, "stored draft exceeds limit", code="stored_draft_exceeds_limit")
+        require(sha(canonical(draft)) == message["draft_sha256"], "draft digest mismatch", code="draft_digest_mismatch")
         sources, questions = self.validate_draft(draft, author, historical=True)
         act = message["act"]
         if act in {"PING", "PONG"}:
             pattern(message.get("nonce"), NONCE, "control nonce")
         else:
-            require("nonce" not in message, "unexpected control nonce")
+            require("nonce" not in message, "unexpected control nonce", code="unexpected_control_nonce")
         target = self.by_id.get(message.get("reply_to"))
         if act == "PONG" or (act == "ACK" and target["act"] in {"PING", "PONG"}):
-            require(message.get("echo") == target["nonce"], "control nonce does not match")
+            require(message.get("echo") == target["nonce"], "control nonce does not match", code="control_nonce_does_not_match")
             if act == "PONG":
-                require(message["nonce"] != target["nonce"], "PONG nonce must be fresh")
+                require(message["nonce"] != target["nonce"], "PONG nonce must be fresh", code="pong_nonce_must_be_fresh")
         else:
-            require("echo" not in message, "unexpected control echo")
+            require("echo" not in message, "unexpected control echo", code="unexpected_control_echo")
         retry = (author, generation, message["key"])
-        require(retry not in self.retries, "duplicate retry key in history")
+        require(retry not in self.retries, "duplicate retry key in history", code="duplicate_retry_key_in_history")
         for qid, value in questions.items():
             old = self.questions.get(qid)
             if old is None:
@@ -1147,8 +1198,26 @@ class Snapshot:
                               "recent": 0, "release_notices": 0},
                   "inspect": "registry sessions|questions|sources; log --after N; show ID"}
         while len(canonical(result)) > budget:
-            candidates = [k for k in result["omitted"] if result[k]]
-            require(bool(candidates), "state budget too small")
+            notices = result["release_notices"]
+            disposable = [i for i, notice in enumerate(notices)
+                          if not (notice.get("advisory") in {"required", "recommended"} and
+                                  notice.get("advisory_applies") is True)]
+            if disposable:
+                notices.pop(disposable[0])
+                result["omitted"]["release_notices"] += 1
+                continue
+            # Preserve every applicable required/recommended notice. Compact detail first.
+            shortened = False
+            for notice in notices:
+                for field, limit in (("reason", 80), ("summary", 80)):
+                    value = notice.get(field)
+                    if isinstance(value, str) and len(value) > limit:
+                        notice[field] = value[:limit - 1] + "…"
+                        shortened = True
+            if shortened:
+                continue
+            candidates = [k for k in result["omitted"] if k != "release_notices" and result[k]]
+            require(bool(candidates), "state budget too small", code="state_budget_too_small")
             largest = max(candidates, key=lambda k: len(canonical(result[k])))
             result[largest].pop(0 if largest in {"recent", "decisions", "release_notices"} else -1)
             result["omitted"][largest] += 1
@@ -1196,8 +1265,14 @@ def emit(value):
     sys.stdout.buffer.flush()
 
 
+class SafeArgumentParser(argparse.ArgumentParser):
+    def error(self, message):
+        raise ProtocolError("invalid command-line arguments", code="invalid_cli_arguments",
+                            field="input", hint="Check the command name, option names, and value formats.")
+
+
 def parser():
-    result = argparse.ArgumentParser(description=__doc__)
+    result = SafeArgumentParser(description=__doc__)
     result.add_argument("--version", action="version", version=VERSION)
     result.add_argument("--channel", help="explicit local channel directory")
     sub = result.add_subparsers(dest="command", required=True)
@@ -1251,8 +1326,8 @@ def parser():
 
 
 def main(argv=None):
-    args = parser().parse_args(argv)
     try:
+        args = parser().parse_args(argv)
         if args.command != "release-status":
             require(args.channel is not None, "--channel is required for this command",
                     code="channel_required", field="channel",
@@ -1291,11 +1366,11 @@ def main(argv=None):
                          "sessions": len(state.sessions), "artifacts": len(state.artifacts)}
             elif cmd == "show":
                 pattern(args.id, MID, "message id")
-                require(args.id in state.by_id, "message not found")
+                require(args.id in state.by_id, "message not found", code="message_not_found")
                 value = state.by_id[args.id]
             elif cmd == "show-artifact":
                 pattern(args.digest, HEX, "artifact digest")
-                require(args.digest in state.artifacts, "artifact not found")
+                require(args.digest in state.artifacts, "artifact not found", code="artifact_not_found")
                 sys.stdout.buffer.write(state.artifacts[args.digest])
                 return 0
             elif cmd == "log":

@@ -4,6 +4,7 @@ import copy
 import io
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -78,6 +79,18 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(1, real["message"]["seq"])
         self.assertNotEqual(dry["message"]["nonce"], real["message"]["nonce"])
 
+    def test_dry_run_matches_retry_key_reuse_errors_and_duplicates(self):
+        published = self.channel.send("alpha", "alpha-session", "used-key", self.draft())
+        with self.assertRaises(ac.ProtocolError) as real_changed:
+            self.channel.send("alpha", "alpha-session", "used-key", self.draft(summary="other"))
+        with self.assertRaises(ac.ProtocolError) as dry_changed:
+            self.channel.send("alpha", "alpha-session", "used-key", self.draft(summary="other"), dry_run=True)
+        self.assertEqual(real_changed.exception.details["code"], dry_changed.exception.details["code"])
+        dry_duplicate = self.channel.send("alpha", "alpha-session", "used-key", self.draft(), dry_run=True)
+        self.assertTrue(dry_duplicate["duplicate"])
+        self.assertFalse(dry_duplicate["published"])
+        self.assertEqual(published["message"]["id"], dry_duplicate["message"]["id"])
+
     def test_dry_run_validates_and_returns_structured_safe_errors(self):
         bad = self.draft("ASK", confidence="secret-payload")
         with self.assertRaises(ac.ProtocolError) as caught:
@@ -129,6 +142,90 @@ class ProtocolTests(unittest.TestCase):
         self.assertNotIn("got", unsafe.details)
         self.assertNotIn("allowed", unsafe.details)
         self.assertNotIn("secret-payload", json.dumps(unsafe.details))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in {"require", "ProtocolError"}:
+                with self.subTest(line=node.lineno, call=node.func.id):
+                    self.assertTrue(any(keyword.arg == "code" for keyword in node.keywords),
+                                    "every rule assigns a stable code independently of its wording")
+
+    def test_error_code_catalog_matches_documented_codes(self):
+        docs = (SCRIPT.parent / "docs" / "ERRORS.md").read_text(encoding="utf-8")
+        documented = set(re.findall(r"^\| `([a-z][a-z0-9_]+)` \|", docs, re.MULTILINE))
+        self.assertEqual(ac.ERROR_CODES, documented)
+
+    def test_release_metadata_failures_cannot_break_channel_commands(self):
+        with mock.patch.object(ac, "release_status", side_effect=TypeError("malformed advisory")):
+            state = self.channel.snapshot()
+            self.assertTrue(state.state()["head"])
+            duplicate_join = self.channel.join("alpha", "codex", "alpha-session")
+            self.assertTrue(duplicate_join["duplicate"])
+            dry = self.channel.send("alpha", "alpha-session", "metadata-safe",
+                                    self.draft("ASK"), dry_run=True)
+            self.assertTrue(dry["dry_run"])
+
+    def test_malformed_stored_upgrade_is_a_notice_not_an_exception(self):
+        state = self.channel.snapshot()
+        raw = ac.canonical({"advisory": ["required"]})
+        digest = ac.sha(raw)
+        state.artifacts[digest] = raw
+        notice = state.release_notice({"act": "FACT", "topic": "upgrade",
+                                       "artifact": digest, "summary": "bad record"})
+        self.assertEqual("malformed", notice["advisory"])
+
+    def test_state_keeps_applicable_required_notices_before_optional(self):
+        state = self.channel.snapshot()
+        state.messages = [{"id": str(i), "act": "FACT", "summary": "n"} for i in range(40)]
+        optional = {"advisory": "optional", "advisory_applies": False,
+                    "summary": "Optional", "reason": "Optional detail"}
+        required = {"advisory": "required", "advisory_applies": True,
+                    "summary": "Required disclosure", "reason": "Critical detail"}
+        with mock.patch.object(state, "release_notice", side_effect=[optional] * 39 + [required]):
+            result = state.state(budget=1000)
+        self.assertIn(required, result["release_notices"])
+
+    def test_bad_cli_values_use_safe_json_error(self):
+        result = self.cli("inbox", "--as", "alpha", "--session", "alpha-session", "--limit", "raw-secret")
+        self.assertEqual(2, result.returncode)
+        details = json.loads(result.stderr)
+        self.assertEqual("invalid_cli_arguments", details["code"])
+        self.assertNotIn(b"raw-secret", result.stderr)
+
+    def test_leak_scan_detects_private_addresses_and_home_paths(self):
+        root = self.root / "leak-fixture"
+        scripts = root / "scripts"
+        scripts.mkdir(parents=True)
+        shutil.copyfile(SCRIPT.parent / "scripts" / "leak_scan.py", scripts / "leak_scan.py")
+        source = root / "sample.py"
+        private_ip = "192.168." + "10.12"
+        home_path = "/" + "home" + "/" + "alice/private"
+        users_path = "/" + "Users" + "/" + "alice/private"
+        for secret in (f"private = {private_ip!r}\n", f"path = {home_path!r}\n",
+                       f"path = {users_path!r}\n"):
+            source.write_text(secret, encoding="utf-8")
+            result = subprocess.run([sys.executable, str(scripts / "leak_scan.py")],
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+            self.assertEqual(1, result.returncode, result.stdout.decode())
+        source.write_text("documented = '198.51.100.2'\n", encoding="utf-8")
+        result = subprocess.run([sys.executable, str(scripts / "leak_scan.py")],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+        self.assertEqual(0, result.returncode, result.stderr.decode())
+
+    def test_text_control_errors_report_their_actual_field(self):
+        for field in ("summary", "body", "reason"):
+            with self.subTest(field=field), self.assertRaises(ac.ProtocolError) as caught:
+                ac.text_field("bad\u202evalue", field, 100, True)
+            self.assertEqual(field, caught.exception.details["field"])
+
+    def test_question_open_shape_error_is_distinct_from_reused_id(self):
+        malformed = self.draft(questions=[{"op": "open", "id": "new-q", "text": "Question?", "extra": 1}])
+        with self.assertRaises(ac.ProtocolError) as caught:
+            self.channel.send("alpha", "alpha-session", "bad-question", malformed)
+        self.assertEqual("invalid_open_question_delta", caught.exception.details["code"])
+        valid = self.draft(questions=[{"op": "open", "id": "new-q", "text": "Question?"}])
+        self.channel.send("alpha", "alpha-session", "valid-question", valid)
+        with self.assertRaises(ac.ProtocolError) as reused:
+            self.channel.send("alpha", "alpha-session", "reused-question", valid)
+        self.assertEqual("question_id_already_used", reused.exception.details["code"])
 
     def test_body_warning_counts_unicode_codepoints_and_is_actionable(self):
         result = self.channel.send("alpha", "alpha-session", "long-body",
@@ -154,13 +251,21 @@ class ProtocolTests(unittest.TestCase):
             ac.validate_release_record(dict(base, affects=">=1.0.0", fixed_in="2.0.0"))
         with self.assertRaises(ac.ProtocolError):
             ac.parse_affects(">=01.0.0")
+        equal = dict(base, affects="==1.2.0", fixed_in="1.2.1")
+        ac.validate_release_record(equal)
+        with self.assertRaises(ac.ProtocolError):
+            ac.validate_release_record(dict(equal, fixed_in="1.2.0"))
+        with self.assertRaises(ac.ProtocolError) as bad_advisory:
+            ac.validate_release_record(dict(base, advisory=["required"]))
+        self.assertEqual("invalid_release_advisory", bad_advisory.exception.details["code"])
 
     def test_upgrade_record_is_strict_and_surfaces_advisory_in_state_and_inbox(self):
         package = SCRIPT.parent
+        identity = ac.package_identity(package)
         record = {"kind": "ai-comm-release", "package_version": ac.VERSION,
                   "commit": "a" * 40, "tag": "v" + ac.VERSION,
-                  "manifest_sha256": ac.sha((package / "RELEASE-MANIFEST.json").read_bytes()),
-                  "protocol_sha256": ac.sha((package / "PROTOCOL.md").read_bytes()),
+                  "manifest_sha256": identity["manifest_sha256"],
+                  "protocol_sha256": identity["protocol_sha256"],
                   "advisory": "required", "reason": "A protocol safety defect affects this range.",
                   "affects": ">=0.1.0,<0.3.0", "fixed_in": "0.3.0"}
         digest = self.channel.put_artifact("alpha", "alpha-session", ac.canonical(record))["artifact"]
@@ -219,6 +324,22 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual("not verified (no attestation)", result["authenticity"])
         self.assertEqual("required", result["active_advisories"][0]["advisory"])
         self.assertEqual("1.2.0", result["active_advisories"][0]["fixed_in"])
+
+        malformed = {"format": "ai-comm-releases/1", "releases": [{
+            "package_version": "1.0.0", "commit": commit, "tag": "v1.0.0",
+            "manifest_sha256": manifest_digest, "protocol_sha256": protocol_digest,
+            "summary": "Initial release", "advisory": ["required"],
+            "reason": "Protocol safety defect.", "affects": ">=1.0.0,<1.2.0", "fixed_in": "1.2.0"}]}
+        git("switch", "release-index")
+        (repo / "RELEASES.json").write_bytes(ac.canonical(malformed))
+        git("add", "RELEASES.json")
+        git("commit", "-m", "malformed advisory")
+        git("update-ref", "refs/remotes/origin/release-index", "HEAD")
+        git("switch", "main")
+        self.assertEqual("index_invalid", ac.release_status(repo)["status"])
+        git("config", "extensions.partialClone", "origin")
+        self.assertEqual("index_invalid", ac.release_status(repo)["status"])
+        git("config", "--unset", "extensions.partialClone")
 
         wrong = {"format": "ai-comm-releases/1", "releases": [{
             "package_version": "1.0.0", "commit": "0" * 40, "tag": "v1.0.0",

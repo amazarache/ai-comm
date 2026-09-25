@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to verify without publishing a release
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -20,15 +26,24 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          ref: ${{ inputs.tag || github.ref }}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python }}
       - run: python scripts/check_release_manifest.py
-      - run: python scripts/check_tag.py "$GITHUB_REF_NAME"
+      - name: Fetch and verify the annotated tag object
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          python -c 'import os,re,sys; sys.exit(0 if re.fullmatch(r"v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", os.environ["RELEASE_TAG"]) else 1)'
+          git fetch --force origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+          git checkout --detach "refs/tags/$RELEASE_TAG"
+          python scripts/check_tag.py "$RELEASE_TAG"
       - run: python -m unittest discover -s tests -v
       - run: python scripts/leak_scan.py
 
   package:
+    if: github.event_name == 'push'
     needs: verify
     runs-on: ubuntu-latest
     permissions:
@@ -39,6 +54,8 @@ jobs:
           fetch-depth: 0
       - name: Build source archive, checksums and release notes
         run: |
+          git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+          git checkout --detach "refs/tags/$GITHUB_REF_NAME"
           python scripts/check_tag.py "$GITHUB_REF_NAME"
           version=$(python -c 'import re; print(re.search(r"^VERSION = \"([0-9.]+)\"$", open("ai_comm.py").read(), re.M).group(1))')
           mkdir -p dist
@@ -47,7 +64,7 @@ jobs:
           cat >> dist/RELEASE-NOTES.md <<'EOF'
 
           This release was checked by the tagged GitHub Actions workflow.
-          SHA256SUMS verifies the downloadable files. This private repository does
+          SHA256SUMS verifies the source archive. This private repository does
           not publish a provenance attestation, so publisher authenticity is not
           independently verified by the release archive.
           EOF

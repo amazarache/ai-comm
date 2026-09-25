@@ -8,7 +8,11 @@
   notices in `state` and `inbox`. The CLI does not fetch, install or re-pin.
 - Add Linux/Python 3.10–3.13 CI with commit-pinned actions and pull-request
   whitespace checks, manual-only repeated stability checks, and tagged GitHub
-  Releases with source archives and SHA256SUMS. No provenance attestation is emitted.
+  Releases with source archives and SHA256SUMS. The leak scan covers credentials,
+  private network addresses and home paths. No provenance attestation is emitted.
+- Make release checks total and offline-safe, preserve applicable notices within
+  bounded state output, document every stable error code, and validate equality
+  ranges, reused dry-run keys, and malformed question/advisory inputs.
 - Compatibility: `PROTOCOL.md` remains byte-identical at digest
   `709af4b0…`; v0.2.0 opens existing protocol 2.0 channels.
 

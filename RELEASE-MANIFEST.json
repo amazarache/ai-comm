@@ -6,9 +6,9 @@
       "sha256": "5f80ec878b3e879e52863c787cd9a37ba4ab33215d4f68a404617ddd4c4cc47a"
     },
     {
-      "bytes": 2141,
+      "bytes": 2973,
       "path": ".github/workflows/release.yml",
-      "sha256": "8fc9b5bab519906f7efbe791a5f4183ea98c63f8be9cd3c28f406ede4fcd9042"
+      "sha256": "3b9a2852138b51dd3cd6cff9e03f457ce63278712cb5b4367c3dbc0c392e1cdc"
     },
     {
       "bytes": 809,
@@ -26,9 +26,9 @@
       "sha256": "51dbe3ecc5a1cf5d0a7fcda09406192c8e882e044858e8dee3fc83602695cd48"
     },
     {
-      "bytes": 2787,
+      "bytes": 3097,
       "path": "CHANGELOG.md",
-      "sha256": "e788428106d7c148e36cac94ae2dadbf363cff14d0669ea02ab5a8e2dd2a07b1"
+      "sha256": "977d932ef8b74e10d43be0ce292f4b4a96f82693332b03897bd5b24dbf376326"
     },
     {
       "bytes": 11938,
@@ -36,9 +36,9 @@
       "sha256": "709af4b00ffcabeeca1b175d7d7d6db5103df829dabba1e529eef26dce23a000"
     },
     {
-      "bytes": 12307,
+      "bytes": 12440,
       "path": "README.md",
-      "sha256": "490e01dbb3576438f7db93e0ecf3d109da4946d2d75614a669eed047f3107811"
+      "sha256": "7c9c046898b04de3316d18fc526a12e89d0baf91b348bf4435624761f11a9c80"
     },
     {
       "bytes": 5110,
@@ -46,14 +46,14 @@
       "sha256": "5a1248fed37f6af2f9aae29291c74b0fcae3e6758a35a45441554d16253dde07"
     },
     {
-      "bytes": 74240,
+      "bytes": 88277,
       "path": "ai_comm.py",
-      "sha256": "8fc5ce523a817671c1e86fc13589f0931e9b4b9361368d6721fcf7fa612b7f96"
+      "sha256": "54086c021e7e234b98461b8bc046da9fc36a826d10e5b11f61e500462fb93ec5"
     },
     {
-      "bytes": 3643,
+      "bytes": 15563,
       "path": "docs/ERRORS.md",
-      "sha256": "2c227aa3680f8692bcf067c13d65789517234ec55529cbe6c38836353f5137d5"
+      "sha256": "da7744ceee59c791f88a6561692f5c991dc69e701d81903b2ea89075ad87bd39"
     },
     {
       "bytes": 2411,
@@ -66,9 +66,9 @@
       "sha256": "cfcdc55e137ed8b10833e767a338d516eff571c21ecb16cfcacb491f709c001d"
     },
     {
-      "bytes": 3127,
+      "bytes": 3567,
       "path": "docs/RELEASES.md",
-      "sha256": "1b6ddb5fa532a173a422623af01d29a901a4320bf48d091c8b381e6f62991639"
+      "sha256": "99bac31f0910e0525814f02c95af194b93a798cd7cd8a2bd526e67f1ef4520a7"
     },
     {
       "bytes": 317,
@@ -96,14 +96,14 @@
       "sha256": "b57d32bc6533c8cf157b0bc6d2f9634188bdbd201d1d607dc2d2f4f6be6dc250"
     },
     {
-      "bytes": 1501,
+      "bytes": 2260,
       "path": "scripts/leak_scan.py",
-      "sha256": "da5ff380bd0c28b3f938b39f174c8c310debf222db7a68efe55823233507c63c"
+      "sha256": "622fe13b1e67b6715b40cbcb3b4861c53da2e6b6f99e7fb5d886a363af44f2af"
     },
     {
-      "bytes": 38665,
+      "bytes": 46262,
       "path": "tests/test_protocol.py",
-      "sha256": "ac255675cd89cd6740246738fd7c20de729bb0ecaf6449bf6253ec3f915f6d16"
+      "sha256": "414e2e04a11e049d519c52b0091638fd0304283e889faf01a31b54735177fc56"
     }
   ],
   "format": "ai-comm-review-manifest/1",
@@ -117,17 +117,18 @@
   ],
   "protocol_sha256": "709af4b00ffcabeeca1b175d7d7d6db5103df829dabba1e529eef26dce23a000",
   "validation": {
-    "candidate_note": "Candidate follow-up fixes workflow security and publication findings; awaiting GitHub CI rerun and peer review.",
+    "candidate_note": "Revised candidate addresses all peer review findings; 44-test suite passed locally; 20 full and 200 focused stability repetitions recorded; exact-commit GitHub CI and peer rerun pending.",
     "command": "python3 -m unittest discover -s tests -v",
     "git": "git version 2.43.0",
+    "protocol_sha256": "709af4b00ffcabeeca1b175d7d7d6db5103df829dabba1e529eef26dce23a000",
     "python": "3.12.3",
     "repeated_runs": {
-      "full_suite": 1,
-      "notification_arrival_test": 1,
+      "full_suite": 20,
+      "notification_arrival_test": 200,
       "result": "PASS"
     },
     "result": "PASS",
     "scope": "POSIX local fixtures; real Git channel transactions; structured errors, dry-run side effects, strict release ranges, annotated-tag/index consistency, and existing protocol regressions",
-    "tests": 35
+    "tests": 44
   }
 }

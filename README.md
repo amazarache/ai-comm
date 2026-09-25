@@ -208,7 +208,8 @@ for explicit fetch commands and advisory rules. GitHub Actions checks Linux with
 Python 3.10–3.13; repeated stability checks are manual-only. Tagged releases
 include a source archive and SHA256SUMS, with notes from the matching changelog
 section. This private repository has no provenance attestation and makes no
-publisher-authenticity claim.
+publisher-authenticity claim. Release checks read committed HEAD; partial clones
+on older Git versions receive no advice rather than causing a lazy network fetch.
 
 ## Durability and limits
 

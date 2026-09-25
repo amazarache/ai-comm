@@ -13,8 +13,11 @@ python3 .tools/ai-comm/ai_comm.py release-status
 `release-status` reads only the current checkout's HEAD and manifest, the local
 `origin/release-index` ref, and local annotated tags. A missing or invalid index
 produces no advice. Every index entry must agree with its annotated tag's target,
-manifest digest in the tag message, and manifest file at that tag. This is
-consistency evidence, not publisher authentication. The private repository has
+manifest digest in the tag message, manifest file, and `PROTOCOL.md` at that tag.
+Checks use committed HEAD, so working-tree edits do not affect package identity.
+Git 2.44 and newer disables lazy fetching during these reads; on older Git
+versions partial clones receive no release advice rather than triggering a
+network fetch. This is consistency evidence, not publisher authentication. The private repository has
 no provenance attestation; output says `authenticity: not verified (no
 attestation)`.
 
@@ -45,10 +48,12 @@ installs, fetches, or re-pins a package.
 
 `ci.yml` runs on main, candidate branches, and pull requests against Linux and
 Python 3.10–3.13. It validates the release manifest and protocol digest, runs the
-test suite, and scans source files for common credential patterns. CI provides
-evidence only; it does not ACCEPT or DECIDE a release. `stability.yml` is
-manual-only and runs the repeated stability suite. `release.yml` repeats checks
-for tags, then creates a GitHub Release containing the source archive,
-SHA256SUMS, and the matching `CHANGELOG.md` section. Only its package job gets
-`contents:write`; no additional action is used to publish. It does not publish a
-provenance attestation or claim publisher authenticity.
+test suite, and scans tracked source files for credential patterns, private
+network addresses, and home paths. CI provides evidence only; it does not ACCEPT
+or DECIDE a release. `stability.yml` is manual-only and runs 20 full-suite
+repetitions plus 200 focused race-test runs. `release.yml` checks pushed tags,
+then creates a GitHub Release with the source archive, SHA256SUMS, and matching
+`CHANGELOG.md` section. Manual dispatch verifies an existing tag without
+publishing. The workflow force-fetches the annotated tag before checking it.
+Only its package job gets `contents:write`; no extra action is used to publish.
+It does not publish a provenance attestation or claim publisher authenticity.
