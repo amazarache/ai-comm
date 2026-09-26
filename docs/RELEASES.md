@@ -26,6 +26,13 @@ network fetch. This is consistency evidence, not publisher authentication. The p
 no provenance attestation; output says `authenticity: not verified (no
 attestation)`.
 
+In protocol 3.0, `state` annotates each participant's recorded `tool_version`
+using only this locally verified index. An unavailable or inconsistent index
+produces `advisory: unknown` for every peer. An applicable `recommended` or
+`required` index entry can mark a peer as affected; channel upgrade messages
+remain claims and never establish that a peer is affected or clear an advisory.
+This lookup is offline and never triggers an upgrade.
+
 The `release-index` branch contains one authoritative `RELEASES.json` file.
 The file is strict JSON with format `ai-comm-releases/1` and a `releases` array.
 Each release entry contains `package_version`, `commit`, `tag`,

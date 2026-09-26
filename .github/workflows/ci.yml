@@ -31,6 +31,8 @@ jobs:
         run: python scripts/check_release_manifest.py
       - name: Run tests
         run: python -m unittest discover -s tests -v
+      - name: Verify released tools fail closed on protocol 3
+        run: python scripts/test_old_protocol.py
       - name: Scan tracked source for credential patterns
         run: python scripts/leak_scan.py
       - name: Check patch whitespace

@@ -15,6 +15,7 @@ import unittest
 from unittest import mock
 import hashlib
 import ast
+import importlib.util
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import ai_comm as ac
@@ -152,6 +153,150 @@ class ProtocolTests(unittest.TestCase):
         docs = (SCRIPT.parent / "docs" / "ERRORS.md").read_text(encoding="utf-8")
         documented = set(re.findall(r"^\| `([a-z][a-z0-9_]+)` \|", docs, re.MULTILINE))
         self.assertEqual(ac.ERROR_CODES, documented)
+
+    def test_protocol_versions_are_numeric_and_digest_mapping_is_unambiguous(self):
+        self.assertEqual((3, 10), ac.parse_protocol_version("3.10"))
+        self.assertIsNone(ac.parse_protocol_version("03.1"))
+        self.assertIsNone(ac.parse_protocol_version("3.01"))
+        self.assertIsNone(ac.parse_protocol_version("3.1.0"))
+        self.assertEqual("channel_contract_older_than_package",
+                         ac.classify_protocol_mismatch(ac.PREVIOUS_PROTOCOLS[0][1], None)[0])
+        current = "a" * 64
+        other = "b" * 64
+        cases = [
+            (other, "3.10", "channel_contract_newer_than_package"),
+            (other, "3.0", "channel_contract_unknown"),
+            (other, "2.9", "channel_contract_unknown"),
+            (other, None, "channel_contract_unknown"),
+            (other, "03.1", "channel_contract_unknown"),
+            (ac.PREVIOUS_PROTOCOLS[0][1], "2.1", "channel_contract_unknown"),
+        ]
+        for digest, version, expected in cases:
+            with self.subTest(digest=digest[:4], version=version):
+                self.assertEqual(expected, ac.classify_protocol_mismatch(
+                    digest, version, current_digest=current,
+                    previous=[("2.0", ac.PREVIOUS_PROTOCOLS[0][1], "0.2.0")])[0])
+        self.assertIsNone(ac.protocol_version_table(current, "3.0", [
+            ("2.0", current, "0.2.0")]))
+        self.assertIsNone(ac.protocol_version_table(current, "3.0", [
+            ("3.0", other, "0.2.0")]))
+
+    def test_peer_advisory_is_offline_and_unknown_without_verified_index(self):
+        state = self.channel.snapshot()
+        record = {"tool_version": "0.2.0"}
+        for status in ("index_missing", "index_invalid", "index_inconsistent", "not_git_checkout"):
+            state._release_index_status = {"status": status}
+            self.assertEqual("unknown", state.peer_advisory(record)["advisory"])
+        state._release_index_status = {"status": "ok"}
+        state._verified_releases = {}
+        self.assertEqual("none", state.peer_advisory(record)["advisory"])
+        state._verified_releases = {"1.0.1": {
+            "package_version": "1.0.1", "advisory": "required",
+            "affects": "<1.0.1", "reason": "Upgrade for a protocol safety fix.",
+            "fixed_in": "1.0.1"}}
+        advisory = state.peer_advisory({"tool_version": "1.0.0"})
+        self.assertEqual("required", advisory["advisory"])
+        self.assertEqual("1.0.1", advisory["fixed_in"])
+        self.assertEqual("none", state.peer_advisory({"tool_version": "1.0.1"})["advisory"])
+        self.assertEqual("unknown", state.peer_advisory({"tool_version": "secret"})["advisory"])
+        latest = self.channel.snapshot()
+        latest.messages.append({"id": "legacy-note", "act": "FACT", "topic": "upgrade",
+                                "summary": "Historical upgrade note without a release record."})
+        latest._release_index_status = {"status": "ok"}
+        latest._verified_releases = {}
+        rendered_state = latest.state()
+        self.assertTrue(all(p["advisory"]["advisory"] == "none"
+                            for p in rendered_state["participants"]))
+        self.assertTrue(any(n["advisory"] == "legacy_note"
+                            for n in rendered_state["release_notices"]))
+
+    def test_migration_links_a_frozen_protocol_two_ledger_read_only(self):
+        root = SCRIPT.parent
+        top = subprocess.run(["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+        if top.returncode:
+            self.skipTest("historical release tags are unavailable in release archives")
+        repo = Path(top.stdout.decode().strip())
+        if subprocess.run(["git", "-C", str(repo), "rev-parse", "--verify", "v0.2.0"],
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10).returncode:
+            self.skipTest("v0.2.0 tag is not present in this checkout")
+        old_source = subprocess.run(["git", "-C", str(repo), "show", "v0.2.0:ai_comm.py"],
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10,
+                                    check=True).stdout
+        old_file = self.root / "old_ai_comm.py"
+        old_file.write_bytes(old_source)
+        old_protocol = subprocess.run(["git", "-C", str(repo), "show", "v0.2.0:PROTOCOL.md"],
+                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10,
+                                      check=True).stdout
+        (self.root / "PROTOCOL.md").write_bytes(old_protocol)
+        spec = importlib.util.spec_from_file_location("old_ai_comm", old_file)
+        old = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(old)
+        predecessor = self.root / "old-channel"
+        old.Channel.init(predecessor, "Migrate this exact task", ["alpha", "beta"])
+        previous = old.Channel(predecessor)
+        previous.join("alpha", "codex", "alpha-session")
+        previous.join("beta", "claude", "beta-session")
+        protocol_digest = hashlib.sha256((root / "PROTOCOL.md").read_bytes()).hexdigest()
+        handoff = {"kind": "ai-comm-handoff",
+                   "from_protocol_sha256": previous.snapshot().config["protocol_sha256"],
+                   "to_protocol_sha256": protocol_digest, "to_package_version": "1.0.0",
+                   "task": "Migrate this exact task", "reviewers": ["alpha", "beta"],
+                   "participants": [{"handle": "alpha", "status": "will_upgrade", "reason": "Ready."},
+                                   {"handle": "beta", "status": "will_upgrade", "reason": "Ready."}],
+                   "new_channel_hint": "informative only", "reason": "Accepted contract migration."}
+        handoff_bytes = old.canonical(handoff)
+        digest = previous.put_artifact("alpha", "alpha-session", handoff_bytes)["artifact"]
+        proposal = previous.send("alpha", "alpha-session", "handoff-propose",
+                                 {"act": "PROPOSE", "to": ["beta"], "topic": "migration",
+                                  "summary": "Propose the contract migration.", "artifact": digest})["message"]
+        args = {"act": "ACCEPT", "to": ["alpha"], "topic": "migration",
+                "summary": "Accept the exact migration handoff.", "reply_to": proposal["id"],
+                "artifact": digest}
+        previous.send("alpha", "alpha-session", "handoff-accept-alpha", args)
+        previous.send("beta", "beta-session", "handoff-accept-beta", dict(args, to=["alpha"]))
+        decision = previous.send("alpha", "alpha-session", "handoff-decide",
+                                 dict(args, act="DECIDE", summary="Decide the accepted migration."))["message"]
+        def tree_bytes(path):
+            return {str(item.relative_to(path)): item.read_bytes()
+                    for item in path.rglob("*") if item.is_file()}
+        before_refs = tree_bytes(predecessor / "refs")
+        before_objects = tree_bytes(predecessor / "objects")
+        before_runtime = tree_bytes(previous.runtime)
+        migrated = self.root / "new-channel"
+        ac.Channel.init(migrated, "Migrate this exact task", ["alpha", "beta"],
+                        predecessor=predecessor, handoff=digest)
+        linked = ac.Channel(migrated).snapshot()
+        self.assertEqual(decision["id"], linked.config["policy"]["predecessor"]["decide_message"])
+        self.assertEqual(previous.snapshot().head,
+                         linked.config["policy"]["predecessor"]["channel_head"])
+        self.assertIn(digest, linked.artifacts)
+        self.assertEqual(before_refs, tree_bytes(predecessor / "refs"))
+        self.assertEqual(before_objects, tree_bytes(predecessor / "objects"))
+        self.assertEqual(before_runtime, tree_bytes(previous.runtime))
+        current = ac.Channel(migrated)
+        current.join("alpha", "codex", "new-alpha-session")
+        current.join("beta", "claude", "new-beta-session")
+        with self.assertRaises(ac.ProtocolError) as missing_source:
+            current.send("alpha", "new-alpha-session", "first-no-link-source",
+                         {"act": "ASK", "to": ["beta"], "topic": "migration",
+                          "summary": "Continue the task."})
+        self.assertEqual("predecessor_source_required", missing_source.exception.details["code"])
+        current.send("alpha", "new-alpha-session", "first-linked-message",
+                     {"act": "ASK", "to": ["beta"], "topic": "migration",
+                      "summary": "Continue the task.", "sources": [
+                          {"id": "predecessor-ledger", "kind": "ledger",
+                           "ref": linked.config["policy"]["predecessor"]["channel_head"],
+                           "detail": "Frozen predecessor ledger."}]})
+        previous.send("alpha", "alpha-session", "late-after-decide",
+                      {"act": "ASK", "to": ["beta"], "topic": "migration",
+                       "summary": "This makes the old ledger ineligible for migration."})
+        refused = self.root / "refused-channel"
+        with self.assertRaises(ac.ProtocolError) as late:
+            ac.Channel.init(refused, "Migrate this exact task", ["alpha", "beta"],
+                            predecessor=predecessor, handoff=digest)
+        self.assertEqual("predecessor_not_frozen", late.exception.details["code"])
+        self.assertFalse(refused.exists())
 
     def test_error_fields_use_draft_keys_or_documented_cli_arguments(self):
         tree = ast.parse(SCRIPT.read_text(encoding="utf-8"))
@@ -293,14 +438,14 @@ class ProtocolTests(unittest.TestCase):
     def test_upgrade_record_is_strict_and_surfaces_advisory_in_state_and_inbox(self):
         package = SCRIPT.parent
         identity = ac.package_identity(package)
-        record = {"kind": "ai-comm-release", "package_version": ac.VERSION,
-                  "commit": "a" * 40, "tag": "v" + ac.VERSION,
+        record = {"kind": "ai-comm-release", "package_version": identity["version"],
+                  "commit": "a" * 40, "tag": "v" + identity["version"],
                   "manifest_sha256": identity["manifest_sha256"],
                   "protocol_sha256": identity["protocol_sha256"],
                   "advisory": "required", "reason": "A protocol safety defect affects this range.",
                   "affects": ">=0.1.0,<0.3.0", "fixed_in": "0.3.0"}
         digest = self.channel.put_artifact("alpha", "alpha-session", ac.canonical(record))["artifact"]
-        summary = f"Release v{ac.VERSION} at {record['commit']}; required advisory."
+        summary = f"Release v{identity['version']} at {record['commit']}; required advisory."
         self.channel.send("alpha", "alpha-session", "upgrade-notice",
                           self.draft("FACT", topic="upgrade", artifact=digest,
                                      summary=summary))

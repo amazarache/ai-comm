@@ -220,6 +220,31 @@ Complete code catalog:
 | `upgrade_requires_release_record` | upgrade requires release record |
 | `upgrade_summary_incomplete` | upgrade summary incomplete |
 
+| `channel_contract_newer_than_package` | channel declares a newer protocol version |
+| `channel_contract_older_than_package` | channel contract is older than this package |
+| `channel_contract_unknown` | channel contract is unknown or inconsistent |
+| `handoff_reviewer_cannot_stay_behind` | reviewer cannot stay behind during migration |
+| `invalid_handoff_artifact` | invalid migration handoff artifact |
+| `invalid_handoff_kind` | invalid migration handoff kind |
+| `invalid_handoff_participants` | invalid migration participant list |
+| `invalid_handoff_reviewers` | invalid migration reviewer set |
+| `invalid_tool_version` | invalid tool version |
+| `predecessor_arguments_must_be_paired` | predecessor and handoff must be supplied together |
+| `predecessor_decision_invalid` | predecessor handoff decision is invalid |
+| `predecessor_handoff_invalid` | predecessor handoff is invalid |
+| `predecessor_handoff_missing` | predecessor handoff is missing |
+| `predecessor_invalid_head` | invalid predecessor head |
+| `predecessor_invalid_link` | invalid predecessor link |
+| `predecessor_not_bare` | predecessor is not a bare channel |
+| `predecessor_not_frozen` | predecessor ledger is not frozen at its DECIDE |
+| `predecessor_package_too_old` | package is below the handoff minimum version |
+| `predecessor_participants_mismatch` | handoff participants differ from predecessor |
+| `predecessor_policy_mismatch` | predecessor task or reviewer policy mismatch |
+| `predecessor_protocol_mismatch` | predecessor protocol does not match handoff |
+| `predecessor_source_required` | first message must cite the predecessor ledger |
+| `predecessor_symlink_refused` | predecessor path is a symlink |
+| `tool_version_changed_requires_fresh_session` | package version changed; use a fresh session reference |
+
 Common repair codes:
 
 | Code | Field | Meaning and next step |

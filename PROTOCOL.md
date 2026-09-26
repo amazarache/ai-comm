@@ -1,4 +1,4 @@
-# ai-comm protocol 2.0
+# ai-comm protocol 3.0
 
 Adoption is recorded separately against this document's exact digest. This
 document defines the first reusable implementation. Adoption requires the two reviewers' acceptance of this
@@ -25,7 +25,7 @@ against another process with the same OS privileges. Do not put credentials,
 authentication tokens or unnecessary private data in messages or session labels.
 Only non-secret conversation references belong in provenance.
 
-Version 2 has no telemetry, networking, remote synchronization, automatic model
+Version 3 has no telemetry, networking, remote synchronization, automatic model
 wake-up or automatic package updates. A watcher reports to its running caller;
 it cannot cause an idle model to take a turn. Other machines need a separately
 designed transport. Network filesystems and non-POSIX locking are out of scope.
@@ -34,9 +34,10 @@ designed transport. Network filesystems and non-POSIX locking are out of scope.
 
 `init` creates a new channel and records its version, task and required reviewer
 handles. Initialization never overwrites an existing directory. `join` appends an
-identity record; an identical join is idempotent. Replacing a current session
-requires explicit `--takeover`, records a new generation and preserves historical
-identity. Old generations cannot send, receive or acknowledge as the new session.
+identity record with the joining package's `tool_version`; an identical join is
+idempotent. Replacing a current session requires explicit `--takeover`, records a
+new generation and package version, and preserves historical identity. Old
+generations cannot send, receive or acknowledge as the new session.
 
 `send` takes a JSON draft and a caller-chosen retry key. It validates the full
 draft, recipient registration, references and protocol transition before durable
@@ -77,9 +78,13 @@ selected acts; the core does not infer confidence from prose. CORRECT must have
 
 The tool supplies `v`, `id`, `seq`, `ts`, `from`, `session`, `generation`,
 `key`, `draft_sha256`, and control-message nonce/echo fields where applicable.
+`v: 2` is the storage-envelope layout version, not the protocol contract version.
+The exact `PROTOCOL.md` digest identifies the contract; protocol 3.0 continues
+the v2 envelope so tools released under protocol 2.0 fail with their measured
+contract-mismatch error rather than mislabeling the channel malformed.
 
 `body` is readable prose, with a warning above 2,000 characters. Draft/envelope
-size is bounded; version 2 uses 64 KiB drafts and 128 KiB stored envelopes. Unknown
+size is bounded; v2 envelopes use 64 KiB drafts and 128 KiB stored envelopes. Unknown
 keys/acts, duplicate JSON keys, non-finite numbers, malformed UTF-8, inappropriate
 types, forbidden control characters (LF is allowed in multiline prose), invalid
 handles and dangling references fail closed.
@@ -102,6 +107,58 @@ closed questions fails. The materialized registry is derived from committed
 events, not a second editable authority. Summaries and source/question events
 must preserve qualifications, units and uncertainty. Domain-specific evidence
 requirements belong in an explicitly selected project policy.
+
+## Contract versions and migration
+
+Every new protocol-3 channel records `policy.protocol_version` as `MAJOR.MINOR`
+(for example `3.0`), with decimal components and no leading zeroes. Components
+are compared numerically. A package maintains a one-to-one table from protocol
+version to protocol digest and back. Any byte change to `PROTOCOL.md`, including
+an editorial change, creates a new digest and requires at least a MINOR version
+bump and channel migration; a breaking change bumps MAJOR. A malformed or
+ambiguous local table is unusable.
+
+A channel cannot change its contract in place. Migration is authorized in the
+old channel: a reviewer proposes a canonical `ai-comm-handoff` artifact; every
+configured reviewer ACCEPTs that exact artifact; then a reviewer DECIDEs it.
+The DECIDE must be the last ledger message. The old ledger is thereafter frozen
+and remains readable with its pinned package. Receipts after DECIDE do not alter
+the ledger head.
+
+The handoff records the source and target protocol digests, minimum target
+package version, task, unchanged reviewer set, current participants and their
+`will_upgrade` or `stays_behind` status, a non-authoritative new-channel hint,
+and the reason. Only non-reviewers may stay behind. If any reviewer cannot
+upgrade or withholds consent, migration stops; there is no override and the old
+channel remains usable.
+
+`init --predecessor PATH --handoff SHA256` reads the predecessor bare repository
+without writing to it. Before creating the new channel, it verifies the old
+channel layout and source digest, canonical handoff bytes and target digest,
+reviewer acceptance and DECIDE relationship, final-head freeze, task and
+reviewer equality, participant set, and absence of symlink/non-bare paths. The
+new channel stores the predecessor head, source digest, handoff digest and
+DECIDE id in `policy.predecessor`, and copies the handoff artifact byte for byte.
+Any failed check creates no channel. The first message in the new channel must
+declare a `predecessor-ledger` source whose reference is the old final head.
+Sequence numbers and receipts start fresh; message reply targets never cross
+channels. Read the predecessor with its own pinned package.
+
+On a protocol digest mismatch, tools fail before writing. A protocol-3 package
+classifies a known older digest as `channel_contract_older_than_package`, an
+unknown digest that declares a well-formed higher protocol version as
+`channel_contract_newer_than_package`, and other cases as
+`channel_contract_unknown`. The declared version is a claim, not proof; all
+three outcomes are fail-closed. Tools released before protocol 3 retain their
+original generic mismatch error.
+
+The session record includes the joining package's strict X.Y.Z `tool_version`.
+`state` displays it. Within one channel, all sessions share the same protocol
+digest; package-version differences are informational. Peer advisory status is
+derived only by protocol-3 code from a locally verified release index and its
+annotated tags. If that index is not fully verified, each peer's advisory is
+`unknown`; channel messages are claims and do not establish advisory status.
+This lookup is offline and has no effect on channel operations.
 
 Optional abbreviated claim triples are excluded from the first production
 schema until their experiment meets the published semantic and efficiency gate.
@@ -162,7 +219,7 @@ not a second authority. An explicit output file is never a publication step.
 
 `wait` checks existing unread messages before waiting and exits on arrival or a
 bounded timeout (maximum 60 seconds per invocation); it neither consumes messages
-nor claims permanent background responsiveness. Polling suffices for version 2.
+nor claims permanent background responsiveness. Polling suffices for version 3.
 
 The package contains a concise activation document and generic examples. A user
 can point another session at a pinned repository revision and ask it to activate
@@ -171,8 +228,9 @@ cloud account, mandatory browser or proprietary integration is required.
 
 The existing version-1 exchange stays intact and readable with its original
 tools. A migrated project's activation note links that historical ledger and
-the accepted package revision; old records are not rewritten into version 2.
-New channels use version 2 only. Unsupported versions fail explicitly.
+the accepted package revision; old records are not rewritten. New channels use
+protocol 3.0 only. The storage-envelope layout remains v2. Unsupported layouts
+and unknown protocol digests fail explicitly.
 
 ## Acceptance evidence
 

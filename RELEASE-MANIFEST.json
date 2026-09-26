@@ -1,135 +1,116 @@
 {
+  "format": "ai-comm-review-manifest/1",
+  "protocol_sha256": "7242b13f489a393492539b2e835ed69da65d57a0d39f4acce2e18df757ef3377",
   "files": [
     {
-      "bytes": 1994,
       "path": ".github/workflows/ci.yml",
-      "sha256": "0ddc7b29deb8b0b9e14fb8a872856eddaf5fae38afd9f12d9e1c4bcf5d6d71af"
+      "bytes": 2105,
+      "sha256": "93c5181e9ff1363282e15c414737895ad75c8fad3cea3558d409c7732460be61"
     },
     {
-      "bytes": 2973,
       "path": ".github/workflows/release.yml",
+      "bytes": 2973,
       "sha256": "3b9a2852138b51dd3cd6cff9e03f457ce63278712cb5b4367c3dbc0c392e1cdc"
     },
     {
-      "bytes": 809,
       "path": ".github/workflows/stability.yml",
+      "bytes": 809,
       "sha256": "ef0193e60baadf1a91ca71cba2b28c811df4ed7ae56e3a7bef2f5b2e0a8504b2"
     },
     {
-      "bytes": 42,
       "path": ".gitignore",
+      "bytes": 42,
       "sha256": "48959b88edd74ee1136127969f2d2d6df25387b8b743e73b056f9c64036c9fa8"
     },
     {
-      "bytes": 11179,
       "path": "ACTIVATE.md",
-      "sha256": "e6bd7062c508fd434413316f5933e3928408782f3bba0b9ceb86c9f0ec8651b1"
+      "bytes": 12026,
+      "sha256": "5febd1be5697ff9970a39ef6fcc8dc50e5fa600b7b8419f25494895645bc512b"
     },
     {
-      "bytes": 3708,
       "path": "CHANGELOG.md",
-      "sha256": "f28804d5cf9ae0ea4aff684b740b99cc4f6cc57845f3b5eba3b1a3f1d010e181"
+      "bytes": 4275,
+      "sha256": "5b66ba55771a80957c5dee9d1976d77121b5dd1e76e9beec285c5d48d3f68473"
     },
     {
-      "bytes": 11938,
       "path": "PROTOCOL.md",
-      "sha256": "709af4b00ffcabeeca1b175d7d7d6db5103df829dabba1e529eef26dce23a000"
+      "bytes": 15581,
+      "sha256": "7242b13f489a393492539b2e835ed69da65d57a0d39f4acce2e18df757ef3377"
     },
     {
-      "bytes": 12716,
       "path": "README.md",
-      "sha256": "39bc22ec9bb7ed1cf802bbae00b02fefe14959517fde6e789c471d30c5da1d1d"
+      "bytes": 13540,
+      "sha256": "909816994b5e50ae04fd7d219f5c33dd47d9a383f88b2af49930507abc755a73"
     },
     {
-      "bytes": 5110,
       "path": "SECURITY.md",
+      "bytes": 5110,
       "sha256": "5a1248fed37f6af2f9aae29291c74b0fcae3e6758a35a45441554d16253dde07"
     },
     {
-      "bytes": 92154,
       "path": "ai_comm.py",
-      "sha256": "78f4a345282ea38da90af6561a1a016fd12be351577ad20b32e732a7cac135f8"
+      "bytes": 111755,
+      "sha256": "5a953b2a003d5c75cfbe5bd567f8a1f5c38239c8ec7207d47a221472f89ba657"
     },
     {
-      "bytes": 16133,
       "path": "docs/ERRORS.md",
-      "sha256": "deca5d7f036a23f006c88bc1a48fa77467fd321ae5281dd231fe21d88b950856"
+      "bytes": 17939,
+      "sha256": "04b46e19c0631a45469c8325db828da315dc6122139ad43acade23289914c15e"
     },
     {
-      "bytes": 2411,
       "path": "docs/EXPERIMENT.md",
+      "bytes": 2411,
       "sha256": "949e60f217e0742f08f0a48b156a0990d6b1c4438022f89ed3dd22a8c1d25d0b"
     },
     {
-      "bytes": 3083,
       "path": "docs/PERFORMANCE.md",
+      "bytes": 3083,
       "sha256": "cfcdc55e137ed8b10833e767a338d516eff571c21ecb16cfcacb491f709c001d"
     },
     {
-      "bytes": 4276,
       "path": "docs/RELEASES.md",
-      "sha256": "8ffb6062d3af2477eb946a1a3d1019a1c35d9e239e51893bf10249ec51e428f8"
+      "bytes": 4719,
+      "sha256": "2e386e6e48216b3b74a207173ca7ff252f9cff52fb2811ce388bdedac3d0e751"
     },
     {
-      "bytes": 317,
       "path": "examples/ask.json",
+      "bytes": 317,
       "sha256": "5c4c7e06350e0dddb10fb624e3a6d1cfa95b53bed182973858461cf2fb7392e2"
     },
     {
-      "bytes": 4884,
       "path": "scripts/benchmark_snapshot.py",
+      "bytes": 4884,
       "sha256": "eb983ed2c861f6e2f437c3f090af443c97873311c4eb5db6b9962d90f9019b01"
     },
     {
-      "bytes": 4250,
       "path": "scripts/check_release_manifest.py",
+      "bytes": 4250,
       "sha256": "6d2622b546d72024779123a6d5f9f04602df5cc3d77a88b29c83dbee06cd15ec"
     },
     {
-      "bytes": 2127,
       "path": "scripts/check_tag.py",
+      "bytes": 2127,
       "sha256": "a20f8b0e33bb4f0b4c54c176cfc973b6df3927b432d3a4827620c5fd64cbd580"
     },
     {
-      "bytes": 1086,
       "path": "scripts/extract_release_notes.py",
+      "bytes": 1086,
       "sha256": "b57d32bc6533c8cf157b0bc6d2f9634188bdbd201d1d607dc2d2f4f6be6dc250"
     },
     {
-      "bytes": 2260,
       "path": "scripts/leak_scan.py",
+      "bytes": 2260,
       "sha256": "622fe13b1e67b6715b40cbcb3b4861c53da2e6b6f99e7fb5d886a363af44f2af"
     },
     {
-      "bytes": 50908,
-      "path": "tests/test_protocol.py",
-      "sha256": "0569d0469c329cecaaedae4cfa33dea28e286e99aa274af90ace125d5b2b3e0b"
-    }
-  ],
-  "format": "ai-comm-review-manifest/1",
-  "limits": [
-    "Same-OS-user trust; no cryptographic author authentication",
-    "No model wake-up or remote transport",
-    "64 MiB committed snapshot bound",
-    "Claim shorthand rejected; byte experiment is not a token-cost guarantee",
-    "Release advisories are informational and never install or re-pin",
-    "No provenance attestation is published for the private repository"
-  ],
-  "protocol_sha256": "709af4b00ffcabeeca1b175d7d7d6db5103df829dabba1e529eef26dce23a000",
-  "validation": {
-    "candidate_note": "Release-archive follow-up: 46-test suite passes locally, in a git checkout and from an extracted git archive. The 20 full + 200 focused stability repetitions passed on parent 774d28e (git checkout); exact-commit CI, adversarial rerun and 20/200 for this follow-up are pending.",
-    "command": "python3 -m unittest discover -s tests -q",
-    "git": "git version 2.43.0",
-    "protocol_sha256": "709af4b00ffcabeeca1b175d7d7d6db5103df829dabba1e529eef26dce23a000",
-    "python": "3.12.3",
-    "repeated_runs": {
-      "full_suite": 20,
-      "notification_arrival_test": 200,
-      "result": "PASS",
-      "tested_commit": "774d28ef4f447035d80063d01b45a6a9f51eb490"
+      "path": "scripts/test_old_protocol.py",
+      "bytes": 3871,
+      "sha256": "8c476e419d66221f7ac9a84d0c201f8d6a90a7cd20032ac8f4b7c3e11216ff66"
     },
-    "result": "PASS",
-    "scope": "POSIX local fixtures; real Git channel transactions; structured errors, dry-run side effects, strict release ranges, annotated-tag/index consistency, and existing protocol regressions, release-archive installs without Git metadata",
-    "tests": 46
-  }
+    {
+      "path": "tests/test_protocol.py",
+      "bytes": 60426,
+      "sha256": "8a91d01a67a9e06778bde1c086531772ef9756a01b33f4350ede36e132ef5f8d"
+    }
+  ]
 }

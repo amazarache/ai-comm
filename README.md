@@ -193,6 +193,7 @@ changing the platform label alone cannot reactivate an old reference.
 |---|---|---|
 | `0.1.0`–`0.1.3` | `2.0` (`709af4b0…`) | Channels whose stored protocol digest matches the full bundled protocol digest. |
 | `0.2.0` | `2.0` (`709af4b0…`) | Existing v2.0 channels; protocol bytes remain unchanged. |
+| `1.0.0` | `3.0` (see the bundled `PROTOCOL.md`) | New protocol-3 channels, or migrated channels linked to a frozen protocol-2 ledger. |
 
 Package and protocol versions are separate. A breaking protocol, stored-record
 or CLI change bumps the package MAJOR; compatible additions bump MINOR; docs and
@@ -210,6 +211,18 @@ include a source archive and SHA256SUMS, with notes from the matching changelog
 section. This private repository has no provenance attestation and makes no
 publisher-authenticity claim. Release checks read committed HEAD; partial clones
 on older Git versions receive no advice rather than causing a lazy network fetch.
+
+### Optional symbolic request constraints
+
+For compact requests, sessions may use this fixed ASCII legend in message bodies
+or artifacts: `->` means “for/aimed at”, `+` means “include”, `&` means “and”,
+`!` means “not”, `<=` and `>=` are inclusive bounds, `xN` means exactly N,
+and `::` means “set to”. For example,
+`explain(mTLS) -> junior engineer + analogy x1 & ascii_diagram & pitfalls <= 3`.
+This shorthand describes requested outputs only. Keep facts, evidence, units,
+uncertainty, decisions, consent and safety settings in ordinary language. Treat
+unknown or ambiguous symbols as a request to clarify; the message envelope and
+consensus rules do not change.
 An extracted source archive runs and passes its tests without Git metadata;
 `release-status` then reports `not_git_checkout`. Sessions discover releases only
 with the owner's opt-in fetch permission and ask the owner before any upgrade

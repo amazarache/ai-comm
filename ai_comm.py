@@ -19,7 +19,9 @@ import time
 import unicodedata
 from datetime import datetime, timezone
 
-VERSION = "0.2.0"
+VERSION = "1.0.0"
+PROTOCOL_VERSION = "3.0"
+PREVIOUS_PROTOCOLS = (("2.0", "709af4b00ffcabeeca1b175d7d7d6db5103df829dabba1e529eef26dce23a000", "0.2.0"),)
 ACTS = {"PING", "ACK", "PONG", "ASK", "FACT", "CORRECT", "PROPOSE",
         "REVIEW", "ACCEPT", "REJECT", "DECIDE"}
 CONFIDENCE = {"verified", "likely", "unverified"}
@@ -60,6 +62,7 @@ KEY = re.compile(r"[A-Za-z0-9_.:-]{1,96}\Z")
 HEX = re.compile(r"[0-9a-f]{64}\Z")
 NONCE = re.compile(r"[0-9a-f]{32}\Z")
 SEMVER = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
+PROTOCOL_SEMVER = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
 TEXT_CONTROLS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 MULTILINE_CONTROLS = re.compile(r"[\x00-\x09\x0b-\x1f\x7f-\x9f]")
 MID = re.compile(r"[0-9]{8}-[a-z][a-z0-9-]{0,31}\Z")
@@ -107,7 +110,222 @@ class ProtocolError(Exception):
                     self.details[name] = value
 
 
-ERROR_CODES = frozenset(['ack_out_of_range', 'advisory_requires_affects', 'agreement_must_reference_the_exact_proposal_and_artifact', 'agreement_topic_differs_from_proposal', 'all_required_reviewers_must_accept_this_exact_proposal', 'artifact_exceeds_1_mib', 'artifact_hash_mismatch', 'artifact_must_be_published_first', 'artifact_must_be_utf_8_text', 'artifact_not_found', 'assigned_envelope_exceeds_size_limit', 'at_least_two_distinct_reviewers_required', 'bounded_advisory_requires_fixed_in', 'channel_busy_retry_with_the_same_key', 'channel_does_not_exist_initialize_it_explicitly', 'channel_history_modified_or_removed_a_durable_record', 'channel_initialization_failed', 'channel_must_be_a_dedicated_bare_git_repository', 'channel_required', 'channel_snapshot_exceeds_64_mib_limit_archive_explicitly', 'channel_symlink_refused', 'confidence_not_allowed', 'confidence_required_by_channel_policy', 'control_nonce_does_not_match', 'corrupt_receipt', 'corrupt_receipt_bounds', 'draft_digest_mismatch', 'draft_exceeds_size_limit', 'duplicate_json_key', 'duplicate_recipient', 'duplicate_retry_key_in_history', 'durable_records_are_append_only', 'empty_affects_range', 'empty_artifact', 'empty_body', 'empty_non_secret_session_reference', 'empty_question', 'empty_reason', 'empty_session_reference', 'empty_source_detail', 'empty_source_reference', 'empty_stored_artifact', 'empty_summary', 'empty_task', 'fixed_in_inside_range', 'fixed_in_not_above_range', 'fixed_in_requires_affects', 'git_operation_failed_no_success_is_implied', 'handle_already_active_explicit_takeover_required', 'index_inconsistent', 'index_invalid', 'init_refuses_an_existing_path', 'input_exceeds_size_limit', 'invalid_affects_range', 'invalid_after', 'invalid_artifact_digest', 'invalid_artifact_length', 'invalid_body_length', 'invalid_cli_arguments', 'invalid_confidence', 'invalid_confidence_policy', 'invalid_control_character_in_artifact', 'invalid_control_character_in_body', 'invalid_control_character_in_non_secret_session_reference', 'invalid_control_character_in_question', 'invalid_control_character_in_reason', 'invalid_control_character_in_session_reference', 'invalid_control_character_in_source_detail', 'invalid_control_character_in_source_reference', 'invalid_control_character_in_stored_artifact', 'invalid_control_character_in_summary', 'invalid_control_character_in_task', 'invalid_control_nonce', 'invalid_control_reply_relationship', 'invalid_draft_digest', 'invalid_envelope_fields', 'invalid_generation', 'invalid_git_object_response', 'invalid_git_size_response', 'invalid_handle', 'invalid_historical_session', 'invalid_limit', 'invalid_manifest_sha256', 'invalid_message_id', 'invalid_non_secret_session_reference_length', 'invalid_notification_sequence', 'invalid_offset', 'invalid_open_question_delta', 'invalid_platform', 'invalid_policy', 'invalid_policy_acts', 'invalid_protocol_digest', 'invalid_protocol_sha256', 'invalid_question_delta', 'invalid_question_deltas', 'invalid_question_id', 'invalid_question_length', 'invalid_reason_length', 'invalid_receipt_field', 'invalid_receipt_sequence', 'invalid_recipient', 'invalid_recipients', 'invalid_release_advisory', 'invalid_release_commit', 'invalid_release_record', 'invalid_release_record_kind', 'invalid_reply_target', 'invalid_retry_key', 'invalid_reviewer', 'invalid_reviewer_configuration', 'invalid_sender', 'invalid_sequence', 'invalid_session_record', 'invalid_session_reference_length', 'invalid_since', 'invalid_source_declaration', 'invalid_source_declarations', 'invalid_source_detail_length', 'invalid_source_id', 'invalid_source_kind', 'invalid_source_policy', 'invalid_source_reference_length', 'invalid_source_references', 'invalid_stored_artifact_length', 'invalid_summary_length', 'invalid_task_length', 'invalid_timestamp', 'invalid_topic', 'invalid_utf_8_json', 'json_exceeds_size_limit', 'json_must_be_an_object', 'local_git_inspection_failed', 'message_id_mismatch', 'message_not_found', 'message_path_mismatch', 'message_sequence_gap_or_collision', 'missing_draft_field', 'non_finite_json_number', 'noncanonical_stored_message', 'not_an_ai_comm_channel', 'notification_cursor_exceeds_channel_history', 'one_delta_per_question_per_message', 'only_configured_reviewers_may_record_agreement', 'operation_failed', 'package_contract_does_not_match_channel_select_its_pinned_revisi', 'package_version_missing', 'partial_clone_release_check_unsupported', 'pong_nonce_must_be_fresh', 'proposal_already_decided_propose_a_new_revision', 'question_id_already_used', 'question_is_not_open', 'receipt_symlink_refused', 'release_record_must_be_canonical_json', 'release_record_not_canonical', 'release_tag_version_mismatch', 'reply_target_must_be_an_earlier_committed_message', 'retry_key_reused_with_changed_draft', 'reused_historical_session_reference', 'reviewer_not_addressed_by_proposal', 'reviewers_must_be_distinct', 'runtime_symlink_refused', 'session_history_gap', 'session_path_mismatch', 'source_evidence_required_by_channel_policy', 'source_id_is_immutable', 'state_budget_too_small', 'stored_artifact_must_be_utf_8_text', 'stored_draft_exceeds_limit', 'stored_object_exceeds_limit', 'takeover_requires_a_never_used_session_reference_for_this_handle', 'this_act_requires_a_reply_target', 'this_act_requires_an_artifact', 'timeout_must_be_0_60_seconds', 'truncated_git_object', 'truncated_git_object_response', 'unbounded_advisory_fixed_in', 'unexpected_channel_entry_path', 'unexpected_channel_entry_type', 'unexpected_control_echo', 'unexpected_control_nonce', 'unknown_act', 'unknown_draft_field', 'unknown_question_operation', 'unknown_source_reference', 'unregistered_or_stale_session', 'unregistered_recipients', 'unsupported_message_version', 'unsupported_or_malformed_channel', 'upgrade_requires_release_record', 'upgrade_summary_incomplete'])
+ERROR_CODES = frozenset([
+    'ack_out_of_range',
+    'advisory_requires_affects',
+    'agreement_must_reference_the_exact_proposal_and_artifact',
+    'agreement_topic_differs_from_proposal',
+    'all_required_reviewers_must_accept_this_exact_proposal',
+    'artifact_exceeds_1_mib',
+    'artifact_hash_mismatch',
+    'artifact_must_be_published_first',
+    'artifact_must_be_utf_8_text',
+    'artifact_not_found',
+    'assigned_envelope_exceeds_size_limit',
+    'at_least_two_distinct_reviewers_required',
+    'bounded_advisory_requires_fixed_in',
+    'channel_busy_retry_with_the_same_key',
+    'channel_contract_newer_than_package',
+    'channel_contract_older_than_package',
+    'channel_contract_unknown',
+    'channel_does_not_exist_initialize_it_explicitly',
+    'channel_history_modified_or_removed_a_durable_record',
+    'channel_initialization_failed',
+    'channel_must_be_a_dedicated_bare_git_repository',
+    'channel_required',
+    'channel_snapshot_exceeds_64_mib_limit_archive_explicitly',
+    'channel_symlink_refused',
+    'confidence_not_allowed',
+    'confidence_required_by_channel_policy',
+    'control_nonce_does_not_match',
+    'corrupt_receipt',
+    'corrupt_receipt_bounds',
+    'draft_digest_mismatch',
+    'draft_exceeds_size_limit',
+    'duplicate_json_key',
+    'duplicate_recipient',
+    'duplicate_retry_key_in_history',
+    'durable_records_are_append_only',
+    'empty_affects_range',
+    'empty_artifact',
+    'empty_body',
+    'empty_non_secret_session_reference',
+    'empty_question',
+    'empty_reason',
+    'empty_session_reference',
+    'empty_source_detail',
+    'empty_source_reference',
+    'empty_stored_artifact',
+    'empty_summary',
+    'empty_task',
+    'fixed_in_inside_range',
+    'fixed_in_not_above_range',
+    'fixed_in_requires_affects',
+    'git_operation_failed_no_success_is_implied',
+    'handle_already_active_explicit_takeover_required',
+    'handoff_reviewer_cannot_stay_behind',
+    'index_inconsistent',
+    'index_invalid',
+    'init_refuses_an_existing_path',
+    'input_exceeds_size_limit',
+    'invalid_affects_range',
+    'invalid_after',
+    'invalid_artifact_digest',
+    'invalid_artifact_length',
+    'invalid_body_length',
+    'invalid_cli_arguments',
+    'invalid_confidence',
+    'invalid_confidence_policy',
+    'invalid_control_character_in_artifact',
+    'invalid_control_character_in_body',
+    'invalid_control_character_in_non_secret_session_reference',
+    'invalid_control_character_in_question',
+    'invalid_control_character_in_reason',
+    'invalid_control_character_in_session_reference',
+    'invalid_control_character_in_source_detail',
+    'invalid_control_character_in_source_reference',
+    'invalid_control_character_in_stored_artifact',
+    'invalid_control_character_in_summary',
+    'invalid_control_character_in_task',
+    'invalid_control_nonce',
+    'invalid_control_reply_relationship',
+    'invalid_draft_digest',
+    'invalid_envelope_fields',
+    'invalid_generation',
+    'invalid_git_object_response',
+    'invalid_git_size_response',
+    'invalid_handle',
+    'invalid_handoff_artifact',
+    'invalid_handoff_kind',
+    'invalid_handoff_participants',
+    'invalid_handoff_reviewers',
+    'invalid_historical_session',
+    'invalid_limit',
+    'invalid_manifest_sha256',
+    'invalid_message_id',
+    'invalid_non_secret_session_reference_length',
+    'invalid_notification_sequence',
+    'invalid_offset',
+    'invalid_open_question_delta',
+    'invalid_platform',
+    'invalid_policy',
+    'invalid_policy_acts',
+    'invalid_protocol_digest',
+    'invalid_protocol_sha256',
+    'invalid_question_delta',
+    'invalid_question_deltas',
+    'invalid_question_id',
+    'invalid_question_length',
+    'invalid_reason_length',
+    'invalid_receipt_field',
+    'invalid_receipt_sequence',
+    'invalid_recipient',
+    'invalid_recipients',
+    'invalid_release_advisory',
+    'invalid_release_commit',
+    'invalid_release_record',
+    'invalid_release_record_kind',
+    'invalid_reply_target',
+    'invalid_retry_key',
+    'invalid_reviewer',
+    'invalid_reviewer_configuration',
+    'invalid_sender',
+    'invalid_sequence',
+    'invalid_session_record',
+    'invalid_session_reference_length',
+    'invalid_since',
+    'invalid_source_declaration',
+    'invalid_source_declarations',
+    'invalid_source_detail_length',
+    'invalid_source_id',
+    'invalid_source_kind',
+    'invalid_source_policy',
+    'invalid_source_reference_length',
+    'invalid_source_references',
+    'invalid_stored_artifact_length',
+    'invalid_summary_length',
+    'invalid_task_length',
+    'invalid_timestamp',
+    'invalid_tool_version',
+    'invalid_topic',
+    'invalid_utf_8_json',
+    'json_exceeds_size_limit',
+    'json_must_be_an_object',
+    'local_git_inspection_failed',
+    'message_id_mismatch',
+    'message_not_found',
+    'message_path_mismatch',
+    'message_sequence_gap_or_collision',
+    'missing_draft_field',
+    'non_finite_json_number',
+    'noncanonical_stored_message',
+    'not_an_ai_comm_channel',
+    'notification_cursor_exceeds_channel_history',
+    'one_delta_per_question_per_message',
+    'only_configured_reviewers_may_record_agreement',
+    'operation_failed',
+    'package_contract_does_not_match_channel_select_its_pinned_revisi',
+    'package_version_missing',
+    'partial_clone_release_check_unsupported',
+    'pong_nonce_must_be_fresh',
+    'predecessor_arguments_must_be_paired',
+    'predecessor_decision_invalid',
+    'predecessor_handoff_invalid',
+    'predecessor_handoff_missing',
+    'predecessor_invalid_head',
+    'predecessor_invalid_link',
+    'predecessor_not_bare',
+    'predecessor_not_frozen',
+    'predecessor_package_too_old',
+    'predecessor_participants_mismatch',
+    'predecessor_policy_mismatch',
+    'predecessor_protocol_mismatch',
+    'predecessor_source_required',
+    'predecessor_symlink_refused',
+    'proposal_already_decided_propose_a_new_revision',
+    'question_id_already_used',
+    'question_is_not_open',
+    'receipt_symlink_refused',
+    'release_record_must_be_canonical_json',
+    'release_record_not_canonical',
+    'release_tag_version_mismatch',
+    'reply_target_must_be_an_earlier_committed_message',
+    'retry_key_reused_with_changed_draft',
+    'reused_historical_session_reference',
+    'reviewer_not_addressed_by_proposal',
+    'reviewers_must_be_distinct',
+    'runtime_symlink_refused',
+    'session_history_gap',
+    'session_path_mismatch',
+    'source_evidence_required_by_channel_policy',
+    'source_id_is_immutable',
+    'state_budget_too_small',
+    'stored_artifact_must_be_utf_8_text',
+    'stored_draft_exceeds_limit',
+    'stored_object_exceeds_limit',
+    'takeover_requires_a_never_used_session_reference_for_this_handle',
+    'this_act_requires_a_reply_target',
+    'this_act_requires_an_artifact',
+    'timeout_must_be_0_60_seconds',
+    'tool_version_changed_requires_fresh_session',
+    'truncated_git_object',
+    'truncated_git_object_response',
+    'unbounded_advisory_fixed_in',
+    'unexpected_channel_entry_path',
+    'unexpected_channel_entry_type',
+    'unexpected_control_echo',
+    'unexpected_control_nonce',
+    'unknown_act',
+    'unknown_draft_field',
+    'unknown_question_operation',
+    'unknown_source_reference',
+    'unregistered_or_stale_session',
+    'unregistered_recipients',
+    'unsupported_message_version',
+    'unsupported_or_malformed_channel',
+    'upgrade_requires_release_record',
+    'upgrade_summary_incomplete',
+])
 
 FIELD_HINTS = {
     "act": "Choose one of the documented communication acts; each act has a distinct meaning.",
@@ -208,6 +426,53 @@ def semver(value, name="version"):
     require(match is not None, f"invalid {name}", code=f"invalid_{name}", field=name,
             hint=f"Use a three-part numeric {name} such as 1.2.3, without leading zeroes.")
     return tuple(int(part) for part in match.groups())
+
+
+def parse_protocol_version(value):
+    match = PROTOCOL_SEMVER.fullmatch(value) if isinstance(value, str) else None
+    return tuple(int(part) for part in match.groups()) if match else None
+
+
+def protocol_version_table(current_digest=None, current_version=PROTOCOL_VERSION,
+                           previous=PREVIOUS_PROTOCOLS):
+    """Return digest -> (version, last package), or None for an ambiguous table."""
+    digest = current_digest or sha(Path(__file__).with_name("PROTOCOL.md").read_bytes())
+    rows = list(previous) + [(current_version, digest, VERSION)]
+    by_digest, by_version = {}, {}
+    for version, protocol_digest, package in rows:
+        parsed = parse_protocol_version(version)
+        if parsed is None or not HEX.fullmatch(protocol_digest) or not SEMVER.fullmatch(package):
+            return None
+        if protocol_digest in by_digest or version in by_version:
+            return None
+        by_digest[protocol_digest] = (version, package)
+        by_version[version] = protocol_digest
+    return by_digest
+
+
+def classify_protocol_mismatch(channel_digest, declared_version, current_digest=None,
+                               current_version=PROTOCOL_VERSION, previous=PREVIOUS_PROTOCOLS):
+    table = protocol_version_table(current_digest, current_version, previous)
+    declared = parse_protocol_version(declared_version)
+    current = parse_protocol_version(current_version)
+    if table is None or current is None:
+        return "channel_contract_unknown", None
+    known = table.get(channel_digest)
+    if known:
+        version, last_package = known
+        # Protocol 2.0 predates policy.protocol_version; its exact known digest
+        # remains classifiable without trusting or requiring that new field.
+        if declared_version is None and version == "2.0":
+            return "channel_contract_older_than_package", last_package
+        if declared_version != version:
+            return "channel_contract_unknown", None
+        known_version = parse_protocol_version(version)
+        if known_version < current:
+            return "channel_contract_older_than_package", last_package
+        return "channel_contract_unknown", None
+    if declared is not None and declared > current:
+        return "channel_contract_newer_than_package", None
+    return "channel_contract_unknown", None
 
 
 def parse_affects(value):
@@ -392,7 +657,8 @@ def timestamp(value):
 def git_env(extra=None):
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull,
-               GIT_TERMINAL_PROMPT="0", GIT_NO_LAZY_FETCH="1", LC_ALL="C")
+               GIT_TERMINAL_PROMPT="0", GIT_NO_LAZY_FETCH="1",
+               GIT_OPTIONAL_LOCKS="0", LC_ALL="C")
     env.update(extra or {})
     return env
 
@@ -445,6 +711,84 @@ def validate_index_entry(entry):
         record["fixed_in"] = entry["fixed_in"]
     validate_release_record(record)
     return entry
+
+
+HANDOFF_FIELDS = {"kind", "from_protocol_sha256", "to_protocol_sha256",
+                  "to_package_version", "task", "reviewers", "participants",
+                  "new_channel_hint", "reason"}
+
+
+def validate_handoff(record, *, target_protocol_digest=None):
+    require(isinstance(record, dict) and set(record) == HANDOFF_FIELDS,
+            "invalid migration handoff", code="invalid_handoff_artifact", field="artifact")
+    require(record["kind"] == "ai-comm-handoff", "invalid migration handoff kind",
+            code="invalid_handoff_kind", field="artifact")
+    pattern(record["from_protocol_sha256"], HEX, "protocol digest")
+    pattern(record["to_protocol_sha256"], HEX, "protocol digest")
+    if target_protocol_digest is not None:
+        require(record["to_protocol_sha256"] == target_protocol_digest,
+                "handoff targets a different protocol", code="predecessor_protocol_mismatch",
+                field="artifact")
+    semver(record["to_package_version"], "package_version")
+    text_field(record["task"], "task", 2000, True)
+    reviewers = record["reviewers"]
+    require(isinstance(reviewers, list) and 2 <= len(reviewers) <= 16,
+            "invalid handoff reviewers", code="invalid_handoff_reviewers", field="artifact")
+    for handle in reviewers:
+        pattern(handle, HANDLE, "reviewer")
+    require(len(set(reviewers)) == len(reviewers), "duplicate handoff reviewer",
+            code="invalid_handoff_reviewers", field="artifact")
+    participants = record["participants"]
+    require(isinstance(participants, list) and 1 <= len(participants) <= 32,
+            "invalid handoff participants", code="invalid_handoff_participants", field="artifact")
+    seen = set()
+    for participant in participants:
+        require(isinstance(participant, dict) and
+                set(participant) == {"handle", "status", "reason"},
+                "invalid handoff participant", code="invalid_handoff_participants", field="artifact")
+        handle = pattern(participant["handle"], HANDLE, "handle")
+        require(handle not in seen, "duplicate handoff participant",
+                code="invalid_handoff_participants", field="artifact")
+        seen.add(handle)
+        require(participant["status"] in {"will_upgrade", "stays_behind"},
+                "invalid handoff participant status", code="invalid_handoff_participants", field="artifact")
+        text_field(participant["reason"], "reason", 2000, True)
+        require(participant["status"] != "stays_behind" or handle not in reviewers,
+                "reviewers cannot stay behind", code="handoff_reviewer_cannot_stay_behind",
+                field="artifact")
+    require(set(reviewers) <= seen, "handoff omits a reviewer",
+            code="invalid_handoff_participants", field="artifact")
+    text_field(record["new_channel_hint"], "channel", 2000, True)
+    text_field(record["reason"], "reason", 8000, True)
+    return record
+
+
+def validate_predecessor_record(predecessor, artifacts, protocol_digest, task, reviewers):
+    required = {"channel_head", "protocol_sha256", "handoff_artifact", "decide_message"}
+    require(isinstance(predecessor, dict) and set(predecessor) == required,
+            "invalid predecessor link", code="predecessor_invalid_link", field="channel")
+    require(isinstance(predecessor["channel_head"], str) and
+            re.fullmatch(r"[0-9a-f]{40,64}", predecessor["channel_head"]),
+            "invalid predecessor head", code="predecessor_invalid_head", field="channel")
+    pattern(predecessor["protocol_sha256"], HEX, "protocol digest")
+    pattern(predecessor["handoff_artifact"], HEX, "artifact digest")
+    pattern(predecessor["decide_message"], MID, "message id")
+    raw = artifacts.get(predecessor["handoff_artifact"])
+    require(raw is not None and sha(raw) == predecessor["handoff_artifact"],
+            "predecessor handoff is missing", code="predecessor_handoff_missing", field="artifact")
+    handoff = parse(raw, MAX_ARTIFACT)
+    require(canonical(handoff) == raw, "predecessor handoff is not canonical",
+            code="predecessor_handoff_invalid", field="artifact")
+    validate_handoff(handoff, target_protocol_digest=protocol_digest)
+    require(handoff["from_protocol_sha256"] == predecessor["protocol_sha256"],
+            "predecessor protocol differs from handoff", code="predecessor_protocol_mismatch",
+            field="channel")
+    require(handoff["task"] == task and set(handoff["reviewers"]) == set(reviewers),
+            "predecessor task or reviewers differ from handoff",
+            code="predecessor_policy_mismatch", field="channel")
+    require(semver(handoff["to_package_version"]) <= semver(VERSION),
+            "package is older than handoff requirement", code="predecessor_package_too_old",
+            field="channel")
 
 
 def package_is_checkout(repo):
@@ -609,7 +953,11 @@ def _release_status(repo):
             "verified_releases": [{"package_version": entry["package_version"],
                                    "manifest_sha256": entry["manifest_sha256"],
                                    "protocol_sha256": entry["protocol_sha256"],
-                                   "commit": entry["commit"]} for entry in entries],
+                                   "commit": entry["commit"], "advisory": entry["advisory"],
+                                   "summary": entry["summary"], "reason": entry["reason"],
+                                   **({"affects": entry["affects"]} if "affects" in entry else {}),
+                                   **({"fixed_in": entry["fixed_in"]} if "fixed_in" in entry else {})}
+                                  for entry in entries],
             "authenticity": "not verified (no attestation)"}
 
 
@@ -636,6 +984,57 @@ def atomic_json(path, value):
             os.unlink(name)
 
 
+def read_snapshot_blobs(repo):
+    head = git(repo, "rev-parse", "--verify", REF).decode().strip()
+    require(not git(repo, "log", "--format=", "--name-only", "--diff-filter=MDRT", head).strip(),
+            "channel history modified or removed a durable record", code="channel_history_modified_or_removed_a_durable_record")
+    entries = git(repo, "ls-tree", "-r", "-z", head).split(b"\0")
+    tree = {}
+    for entry in entries:
+        if not entry:
+            continue
+        prefix, raw_path = entry.split(b"\t", 1)
+        mode, kind, oid = prefix.decode().split()
+        require(mode == "100644" and kind == "blob", "unexpected channel entry type", code="unexpected_channel_entry_type")
+        path = raw_path.decode("ascii")
+        require(path == "channel.json" or re.fullmatch(
+            r"messages/[0-9]{8}-[a-z][a-z0-9-]{0,31}\.json|"
+            r"sessions/[a-z][a-z0-9-]{0,31}/[0-9]{8}\.json|"
+            r"artifacts/[0-9a-f]{64}", path), "unexpected channel entry path", code="unexpected_channel_entry_path")
+        tree[path] = oid
+    require("channel.json" in tree, "not an ai-comm channel", code="not_an_ai_comm_channel")
+    request = ("\n".join(tree[p] for p in tree) + "\n").encode()
+    sizes = git(repo, "cat-file", "--batch-check", data=request).splitlines()
+    require(len(sizes) == len(tree), "invalid Git size response", code="invalid_git_size_response")
+    total = 0
+    for path, line in zip(tree, sizes):
+        parts = line.split()
+        require(len(parts) == 3 and parts[1] == b"blob", "invalid Git size response", code="invalid_git_size_response")
+        length = int(parts[2])
+        bound = MAX_ARTIFACT if path.startswith("artifacts/") else MAX_MESSAGE
+        require(length <= bound, "stored object exceeds limit", code="stored_object_exceeds_limit")
+        total += length
+    require(total <= 64 * 1024 * 1024,
+            "channel snapshot exceeds 64 MiB limit; archive explicitly",
+            code="channel_snapshot_exceeds_64_mib_limit_archive_explicitly")
+    names = list(tree)
+    raw = git(repo, "cat-file", "--batch", data=("\n".join(tree[p] for p in names) + "\n").encode())
+    blobs, offset = {}, 0
+    for path in names:
+        end = raw.find(b"\n", offset)
+        require(end >= offset, "truncated Git object response", code="truncated_git_object_response")
+        fields = raw[offset:end].split()
+        require(len(fields) == 3 and fields[1] == b"blob", "invalid Git object response", code="invalid_git_object_response")
+        size = int(fields[2])
+        require(size <= MAX_ARTIFACT, "stored object exceeds limit", code="stored_object_exceeds_limit")
+        offset = end + 1
+        blobs[path] = raw[offset:offset + size]
+        require(len(blobs[path]) == size and raw[offset + size:offset + size + 1] == b"\n",
+                "truncated Git object", code="truncated_git_object")
+        offset += size + 1
+    return head, blobs
+
+
 class Channel:
     def __init__(self, path):
         raw = Path(path).expanduser().absolute()
@@ -649,7 +1048,8 @@ class Channel:
         self.runtime.mkdir(mode=0o700, exist_ok=True)
 
     @classmethod
-    def init(cls, path, task, reviewers, require_confidence=(), require_sources=()):
+    def init(cls, path, task, reviewers, require_confidence=(), require_sources=(),
+             predecessor=None, handoff=None):
         text_field(task, "task", 2000, True)
         require(2 <= len(reviewers) <= 16 and len(set(reviewers)) == len(reviewers),
                 "at least two distinct reviewers required", code="at_least_two_distinct_reviewers_required")
@@ -657,6 +1057,13 @@ class Channel:
             pattern(handle, HANDLE, "reviewer")
         require(set(require_confidence) <= CONF_ACTS, "invalid confidence policy", code="invalid_confidence_policy")
         require(set(require_sources) <= ACTS, "invalid source policy", code="invalid_source_policy")
+        require((predecessor is None) == (handoff is None),
+                "predecessor and handoff must be supplied together",
+                code="predecessor_arguments_must_be_paired", field="channel")
+        protocol_digest = sha(Path(__file__).with_name("PROTOCOL.md").read_bytes())
+        predecessor_info = (validate_predecessor(predecessor, handoff, task, reviewers,
+                                                 protocol_digest)
+                            if predecessor is not None else None)
         target = Path(path).expanduser().absolute()
         require(not target.exists() and not target.is_symlink(),
                 "init refuses an existing path", code="init_refuses_an_existing_path")
@@ -666,13 +1073,20 @@ class Channel:
                               env=git_env(), timeout=30)
         require(proc.returncode == 0, "channel initialization failed", code="channel_initialization_failed")
         channel = cls(target)
-        config = {"kind": "ai-comm-channel", "v": 2, "task": task,
-                  "reviewers": reviewers, "policy": {
-                      "require_confidence": list(require_confidence),
-                      "require_sources": list(require_sources)},
-                  "protocol_sha256": sha(Path(__file__).with_name("PROTOCOL.md").read_bytes())}
+        policy = {"require_confidence": list(require_confidence),
+                  "require_sources": list(require_sources),
+                  "protocol_version": PROTOCOL_VERSION}
+        changes = {"channel.json": canonical({"kind": "ai-comm-channel", "v": 2,
+                  "task": task, "reviewers": reviewers, "policy": policy,
+                  "protocol_sha256": protocol_digest})}
+        if predecessor_info is not None:
+            policy["predecessor"] = predecessor_info["record"]
+            changes["channel.json"] = canonical({"kind": "ai-comm-channel", "v": 2,
+                  "task": task, "reviewers": reviewers, "policy": policy,
+                  "protocol_sha256": protocol_digest})
+            changes[f"artifacts/{handoff}"] = predecessor_info["handoff_bytes"]
         with channel.lock():
-            head = channel.publish(None, {"channel.json": canonical(config)}, "initialize channel", "system")
+            head = channel.publish(None, changes, "initialize channel", "system")
         return {"channel": str(channel.path), "head": head, "v": 2}
 
     @contextlib.contextmanager
@@ -722,54 +1136,7 @@ class Channel:
         pass
 
     def snapshot(self):
-        head = git(self.path, "rev-parse", "--verify", REF).decode().strip()
-        require(not git(self.path, "log", "--format=", "--name-only", "--diff-filter=MDRT", head).strip(),
-                "channel history modified or removed a durable record", code="channel_history_modified_or_removed_a_durable_record")
-        entries = git(self.path, "ls-tree", "-r", "-z", head).split(b"\0")
-        tree = {}
-        for entry in entries:
-            if not entry:
-                continue
-            prefix, raw_path = entry.split(b"\t", 1)
-            mode, kind, oid = prefix.decode().split()
-            require(mode == "100644" and kind == "blob", "unexpected channel entry type", code="unexpected_channel_entry_type")
-            path = raw_path.decode("ascii")
-            require(path == "channel.json" or re.fullmatch(
-                r"messages/[0-9]{8}-[a-z][a-z0-9-]{0,31}\.json|"
-                r"sessions/[a-z][a-z0-9-]{0,31}/[0-9]{8}\.json|"
-                r"artifacts/[0-9a-f]{64}", path), "unexpected channel entry path", code="unexpected_channel_entry_path")
-            tree[path] = oid
-        require("channel.json" in tree, "not an ai-comm channel", code="not_an_ai_comm_channel")
-        request = ("\n".join(tree[p] for p in tree) + "\n").encode()
-        sizes = git(self.path, "cat-file", "--batch-check", data=request).splitlines()
-        require(len(sizes) == len(tree), "invalid Git size response", code="invalid_git_size_response")
-        total = 0
-        for path, line in zip(tree, sizes):
-            parts = line.split()
-            require(len(parts) == 3 and parts[1] == b"blob", "invalid Git size response", code="invalid_git_size_response")
-            length = int(parts[2])
-            bound = MAX_ARTIFACT if path.startswith("artifacts/") else MAX_MESSAGE
-            require(length <= bound, "stored object exceeds limit", code="stored_object_exceeds_limit")
-            total += length
-        require(total <= 64 * 1024 * 1024, "channel snapshot exceeds 64 MiB limit; archive explicitly", code="channel_snapshot_exceeds_64_mib_limit_archive_explicitly")
-        # One batch read; Git object identifiers are generated by Git, never peer strings.
-        names = list(tree)
-        raw = git(self.path, "cat-file", "--batch",
-                  data=("\n".join(tree[p] for p in names) + "\n").encode())
-        blobs = {}
-        offset = 0
-        for path in names:
-            end = raw.find(b"\n", offset)
-            require(end >= offset, "truncated Git object response", code="truncated_git_object_response")
-            fields = raw[offset:end].split()
-            require(len(fields) == 3 and fields[1] == b"blob", "invalid Git object response", code="invalid_git_object_response")
-            size = int(fields[2])
-            require(size <= MAX_ARTIFACT, "stored object exceeds limit", code="stored_object_exceeds_limit")
-            offset = end + 1
-            blobs[path] = raw[offset:offset + size]
-            require(len(blobs[path]) == size and raw[offset + size:offset + size + 1] == b"\n",
-                    "truncated Git object", code="truncated_git_object")
-            offset += size + 1
+        head, blobs = read_snapshot_blobs(self.path)
         return Snapshot(head, blobs)
 
     def join(self, handle, platform, session, takeover=False):
@@ -780,6 +1147,10 @@ class Channel:
             state = self.snapshot()
             current = state.current.get(handle)
             if current and current["platform"] == platform and current["session"] == session:
+                require(current["tool_version"] == VERSION,
+                        "package version changed; use a fresh session reference and explicit takeover",
+                        code="tool_version_changed_requires_fresh_session", field="session",
+                        hint="Register the upgraded tool with a fresh conversation reference and authorized takeover.")
                 return {"joined": current, "head": state.head, "duplicate": True}
             require(not current or takeover, "handle already active; explicit takeover required", code="handle_already_active_explicit_takeover_required")
             require(not any(record["handle"] == handle and record["session"] == session
@@ -787,7 +1158,7 @@ class Channel:
                     "takeover requires a never-used session reference for this handle", code="takeover_requires_a_never_used_session_reference_for_this_handle")
             generation = current["generation"] + 1 if current else 1
             record = {"handle": handle, "platform": platform, "session": session,
-                      "generation": generation, "ts": now()}
+                      "generation": generation, "ts": now(), "tool_version": VERSION}
             path = f"sessions/{handle}/{generation:08d}.json"
             head = self.publish(state.head, {path: canonical(record)},
                                 f"join {handle} generation {generation}", handle)
@@ -937,7 +1308,7 @@ class Channel:
 
 
 class Snapshot:
-    def __init__(self, head, blobs):
+    def __init__(self, head, blobs, *, allow_legacy=False):
         self.head = head
         self.config = parse(blobs["channel.json"])
         cfg = self.config
@@ -946,8 +1317,22 @@ class Snapshot:
                 "unsupported or malformed channel", code="unsupported_or_malformed_channel")
         text_field(cfg["task"], "task", 2000, True)
         pattern(cfg["protocol_sha256"], HEX, "protocol digest")
-        require(cfg["protocol_sha256"] == sha(Path(__file__).with_name("PROTOCOL.md").read_bytes()),
-                "package contract does not match channel; select its pinned revision", code="package_contract_does_not_match_channel_select_its_pinned_revisi")
+        local_protocol_digest = sha(Path(__file__).with_name("PROTOCOL.md").read_bytes())
+        if not allow_legacy and cfg["protocol_sha256"] != local_protocol_digest:
+            code, last_package = classify_protocol_mismatch(
+                cfg["protocol_sha256"],
+                cfg.get("policy", {}).get("protocol_version") if isinstance(cfg.get("policy"), dict) else None,
+                local_protocol_digest)
+            if code == "channel_contract_older_than_package":
+                message = "channel uses an older contract; use its last compatible package"
+                hint = f"The last indexed implementation is package v{last_package}; keep the pinned revision for this channel."
+            elif code == "channel_contract_newer_than_package":
+                message = "channel claims a newer contract; select a package that supports it"
+                hint = "The declared protocol version is not evidence; verify the release and manifest before upgrading."
+            else:
+                message = "channel contract is unknown or inconsistent; no write was made"
+                hint = "Use only a package whose known protocol digest matches the channel, or ask the owner to verify it."
+            raise ProtocolError(message, code=code, field="channel", hint=hint)
         reviewers = cfg["reviewers"]
         require(isinstance(reviewers, list) and 2 <= len(reviewers) <= 16,
                 "invalid reviewer configuration", code="invalid_reviewer_configuration")
@@ -955,8 +1340,19 @@ class Snapshot:
             pattern(handle, HANDLE, "reviewer")
         require(len(set(reviewers)) == len(reviewers), "reviewers must be distinct", code="reviewers_must_be_distinct")
         policy = cfg["policy"]
-        require(isinstance(policy, dict) and set(policy) == {"require_confidence", "require_sources"},
+        base_policy = {"require_confidence", "require_sources"}
+        expected_policy = (base_policy if allow_legacy else
+                           base_policy | {"protocol_version"})
+        require(isinstance(policy, dict) and
+                (set(policy) == expected_policy or
+                 (not allow_legacy and set(policy) == expected_policy | {"predecessor"})),
                 "invalid policy", code="invalid_policy")
+        if not allow_legacy:
+            require(policy.get("protocol_version") == PROTOCOL_VERSION and
+                    protocol_version_table(local_protocol_digest) is not None,
+                    "channel protocol version or package table is inconsistent",
+                    code="channel_contract_unknown", field="channel",
+                    hint="Use a package with a valid one-to-one protocol version and digest table.")
         for field, allowed in (("require_confidence", CONF_ACTS), ("require_sources", ACTS)):
             require(isinstance(policy[field], list) and all(isinstance(a, str) and a in allowed
                     for a in policy[field]), "invalid policy acts", code="invalid_policy_acts")
@@ -964,13 +1360,17 @@ class Snapshot:
         for path, data in sorted(blobs.items()):
             if path.startswith("sessions/"):
                 record = parse(data)
-                require(set(record) == {"handle", "platform", "session", "generation", "ts"},
+                session_fields = {"handle", "platform", "session", "generation", "ts"}
+                required_session_fields = session_fields if allow_legacy else session_fields | {"tool_version"}
+                require(set(record) == required_session_fields,
                         "invalid session record", code="invalid_session_record")
                 handle = pattern(record["handle"], HANDLE, "handle")
                 pattern(record["platform"], HANDLE, "platform")
                 text_field(record["session"], "session reference", 160)
                 generation = integer(record["generation"], "generation", 1)
                 timestamp(record["ts"])
+                if not allow_legacy:
+                    semver(record["tool_version"], "tool_version")
                 require(path == f"sessions/{handle}/{generation:08d}.json", "session path mismatch", code="session_path_mismatch")
                 previous = self.current.get(handle)
                 require(generation == (previous["generation"] + 1 if previous else 1), "session history gap", code="session_history_gap")
@@ -986,6 +1386,9 @@ class Snapshot:
                 except UnicodeError as exc:
                     raise ProtocolError("stored artifact must be UTF-8 text", code="stored_artifact_must_be_utf_8_text") from exc
                 self.artifacts[digest] = data
+        if not allow_legacy and "predecessor" in policy:
+            validate_predecessor_record(policy["predecessor"], self.artifacts,
+                                        cfg["protocol_sha256"], cfg["task"], reviewers)
         self.messages, self.by_id, self.retries, self.sources, self.questions = [], {}, {}, {}, {}
         for path, data in sorted(blobs.items()):
             if path.startswith("messages/"):
@@ -1000,10 +1403,43 @@ class Snapshot:
                                     "protocol_sha256": None}
         try:
             status = release_status(Path(__file__).resolve().parent)
+            self._release_index_status = status
             self._verified_releases = {entry["package_version"]: entry
                                        for entry in status.get("verified_releases", [])}
         except Exception:
+            self._release_index_status = {"status": "index_invalid",
+                                          "message": "local release status unavailable"}
             self._verified_releases = {}
+
+    def peer_advisory(self, record):
+        """A total, offline annotation; never infer safety from unavailable release data."""
+        status = self._release_index_status.get("status")
+        if status != "ok":
+            return {"advisory": "unknown", "reason": str(status or "release index unavailable")}
+        try:
+            version = semver(record.get("tool_version"), "tool_version")
+            matches = []
+            for entry in self._verified_releases.values():
+                if entry.get("advisory") not in {"recommended", "required"} or "affects" not in entry:
+                    continue
+                parsed, _, _ = parse_affects(entry["affects"])
+                if range_matches(parsed, version):
+                    matches.append(entry)
+            if not matches:
+                return {"advisory": "none",
+                        "reason": "no applicable advisory in the locally verified release index"}
+            selected = max(matches, key=lambda entry: (
+                entry["advisory"] == "required", semver(entry["package_version"])))
+            value = {"advisory": selected["advisory"],
+                     "package_version": selected["package_version"],
+                     "reason": selected["reason"][:240]}
+            if "fixed_in" in selected:
+                value["fixed_in"] = selected["fixed_in"]
+            if len(matches) > 1:
+                value["additional_applicable_advisories"] = len(matches) - 1
+            return value
+        except Exception:
+            return {"advisory": "unknown", "reason": "peer advisory evaluation failed safely"}
 
     def identity(self, handle, session):
         pattern(handle, HANDLE, "handle")
@@ -1015,6 +1451,9 @@ class Snapshot:
     def release_notice(self, message):
         if message.get("act") != "FACT" or message.get("topic") != "upgrade":
             return None
+        if "artifact" not in message:
+            return {"status": "legacy_note", "advisory": "legacy_note",
+                    "reason": "historical upgrade note has no release record; no advisory inferred"}
         try:
             return self._release_notice(message)
         except Exception:
@@ -1218,6 +1657,15 @@ class Snapshot:
         require(len(canonical(draft)) <= MAX_DRAFT, "stored draft exceeds limit", code="stored_draft_exceeds_limit")
         require(sha(canonical(draft)) == message["draft_sha256"], "draft digest mismatch", code="draft_digest_mismatch")
         sources, questions = self.validate_draft(draft, author, historical=True)
+        predecessor = self.config["policy"].get("predecessor")
+        if seq == 1 and predecessor is not None:
+            declaration = next((source for source in draft.get("sources", [])
+                                if source.get("id") == "predecessor-ledger"), None)
+            require(declaration is not None and declaration["kind"] == "ledger" and
+                    declaration["ref"] == predecessor["channel_head"],
+                    "first message must cite the predecessor ledger",
+                    code="predecessor_source_required", field="sources",
+                    hint="Declare predecessor-ledger with kind ledger and ref equal to the linked channel head.")
         act = message["act"]
         if act in {"PING", "PONG"}:
             pattern(message.get("nonce"), NONCE, "control nonce")
@@ -1246,7 +1694,8 @@ class Snapshot:
 
     def state(self, budget=8192):
         result = {"v": 2, "head": self.head, "task": self.config["task"],
-                  "participants": list(self.current.values()),
+                  "participants": [dict(record, advisory=self.peer_advisory(record))
+                                  for record in self.current.values()],
                   "open_questions": [{"id": q["id"], "opened_by": q["opened_by"]}
                                      for q in self.questions.values() if q["state"] == "open"],
                   "decisions": [{"id": m["id"], "artifact": m["artifact"], "proposal": m["reply_to"]}
@@ -1321,6 +1770,66 @@ class Snapshot:
         return "\n".join(lines) + "\n"
 
 
+def validate_predecessor(path, digest, task, reviewers, target_protocol_digest):
+    raw_path = Path(path).expanduser().absolute()
+    require(not raw_path.is_symlink(), "predecessor path is a symlink",
+            code="predecessor_symlink_refused", field="channel")
+    require(raw_path.is_dir(), "predecessor must be an existing bare channel",
+            code="predecessor_not_bare", field="channel")
+    repo = raw_path.resolve()
+    require(git(repo, "rev-parse", "--is-bare-repository").strip() == b"true",
+            "predecessor must be a bare channel", code="predecessor_not_bare", field="channel")
+    pattern(digest, HEX, "artifact digest")
+    head, blobs = read_snapshot_blobs(repo)
+    old = Snapshot(head, blobs, allow_legacy=True)
+    handoff_bytes = old.artifacts.get(digest)
+    require(handoff_bytes is not None, "handoff artifact is missing from predecessor",
+            code="predecessor_handoff_missing", field="artifact")
+    try:
+        handoff = parse(handoff_bytes, MAX_ARTIFACT)
+    except ProtocolError as exc:
+        raise ProtocolError("predecessor handoff is invalid", code="predecessor_handoff_invalid",
+                            field="artifact") from exc
+    require(canonical(handoff) == handoff_bytes, "predecessor handoff is not canonical",
+            code="predecessor_handoff_invalid", field="artifact")
+    validate_handoff(handoff, target_protocol_digest=target_protocol_digest)
+    require(semver(handoff["to_package_version"]) <= semver(VERSION),
+            "package is older than handoff requirement", code="predecessor_package_too_old",
+            field="channel")
+    require(handoff["from_protocol_sha256"] == old.config["protocol_sha256"],
+            "handoff source digest does not match predecessor",
+            code="predecessor_protocol_mismatch", field="channel")
+    require(handoff["task"] == task and set(handoff["reviewers"]) == set(old.config["reviewers"]) and
+            set(reviewers) == set(old.config["reviewers"]),
+            "task or reviewer set differs from handoff",
+            code="predecessor_policy_mismatch", field="channel")
+    expected_handles = set(old.current)
+    supplied_handles = {participant["handle"] for participant in handoff["participants"]}
+    require(supplied_handles == expected_handles,
+            "handoff participants differ from predecessor", code="predecessor_participants_mismatch",
+            field="artifact")
+    decisions = [message for message in old.messages
+                 if message["act"] == "DECIDE" and message.get("artifact") == digest]
+    require(len(decisions) == 1, "predecessor must have one decision for the handoff",
+            code="predecessor_decision_invalid", field="channel")
+    decision = decisions[0]
+    require(old.messages and old.messages[-1]["id"] == decision["id"],
+            "handoff DECIDE must be the final ledger message",
+            code="predecessor_not_frozen", field="channel")
+    parent = git(repo, "rev-parse", "--verify", f"{head}^", ok=(0, 128)).decode().strip()
+    require(bool(parent), "predecessor decision commit has no parent",
+            code="predecessor_decision_invalid", field="channel")
+    changes = git(repo, "diff-tree", "--no-commit-id", "--name-status", "-r", parent, head).splitlines()
+    require(changes == [f"A\tmessages/{decision['id']}.json".encode()],
+            "predecessor head must be the commit that added DECIDE",
+            code="predecessor_not_frozen", field="channel")
+    return {"record": {"channel_head": head,
+                        "protocol_sha256": old.config["protocol_sha256"],
+                        "handoff_artifact": digest,
+                        "decide_message": decision["id"]},
+            "handoff_bytes": handoff_bytes}
+
+
 def emit(value):
     sys.stdout.buffer.write(canonical(value))
     sys.stdout.buffer.flush()
@@ -1342,6 +1851,8 @@ def parser():
     p.add_argument("--reviewers", nargs="+", required=True)
     p.add_argument("--require-confidence", nargs="*", default=[])
     p.add_argument("--require-sources", nargs="*", default=[])
+    p.add_argument("--predecessor", help="read-only path to a frozen predecessor channel")
+    p.add_argument("--handoff", help="SHA-256 of the accepted migration handoff artifact")
     p = sub.add_parser("join")
     p.add_argument("--as", dest="actor", required=True)
     p.add_argument("--platform", required=True)
@@ -1395,7 +1906,8 @@ def main(argv=None):
                     hint="Pass --channel PATH before the command.")
         if args.command == "init":
             emit(Channel.init(args.channel, args.task, args.reviewers,
-                              args.require_confidence, args.require_sources))
+                              args.require_confidence, args.require_sources,
+                              args.predecessor, args.handoff))
             return 0
         if args.command == "release-status":
             emit(release_status())

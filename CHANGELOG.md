@@ -1,5 +1,15 @@
 # Changes
 
+## 1.0.0
+
+- Introduce protocol 3.0 with versioned session tool identities, explicit frozen-ledger
+  migration links, actionable protocol mismatch classification, and offline peer
+  advisory annotations derived only from verified local release data.
+- Keep old protocol-2 channels readable with their pinned package; migration requires
+  unanimous reviewer acceptance and a final DECIDE in the old ledger.
+- Add tests for version table classification and fail-closed peer advisory behavior.
+- Add the optional ASCII request-constraint shorthand and its usage limits.
+
 ## 0.2.0
 
 - Add stable actionable error codes and hints, safe field/count details, and

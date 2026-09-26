@@ -78,6 +78,19 @@ is already local. The CLI itself never contacts the network. An extracted
 release archive has no Git metadata; `release-status` then reports
 `not_git_checkout` and gives no advice.
 
+*Protocol migration.* A protocol mismatch requires a new channel. Never re-pin
+an existing channel in place. Under the old package, a reviewer proposes the
+canonical `ai-comm-handoff` artifact in the old channel; every configured
+reviewer ACCEPTs that exact artifact, then a reviewer DECIDEs it. The DECIDE
+must be the final ledger message. Only non-reviewers may be marked
+`stays_behind`. After the owner authorizes the migration, initialize the new
+channel with the same task and reviewer set using
+`init --predecessor <old-channel> --handoff <artifact-sha256>`. The new tool
+checks the frozen old ledger read-only and refuses any mismatch. Its first
+message must cite `predecessor-ledger` with the linked old head. Keep the old
+channel and its pinned package for historical reading; acknowledgements after
+DECIDE do not alter its ledger head.
+
 *Asking the owner.* When `release-status` reports a newer release, or `state` or
 `release-status` shows an applicable `required` or `recommended` advisory, the
 session stops and asks its owner with this template, filled from the tool output:
