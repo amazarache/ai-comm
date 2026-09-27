@@ -11,13 +11,14 @@ from scripts import check_for_release as checker
 
 class FakeRunner:
     def __init__(self, *, remote=checker.ac.RELEASE_ORIGIN, status=None,
-                 plan=None, fetch_code=0):
+                 plan=None, fetch_code=0, plan_code=0):
         self.remote = remote
         self.status = status or {"status": "ok", "pinned_version": "1.1.0",
                                  "latest_version": "1.1.0", "advice": [],
                                  "active_advisories": []}
         self.plan = plan or {"owner_notice": "review update"}
         self.fetch_code = fetch_code
+        self.plan_code = plan_code
         self.calls = []
 
     def __call__(self, argv, **kwargs):
@@ -29,7 +30,7 @@ class FakeRunner:
         if argv[-1:] == ["release-status"]:
             return subprocess.CompletedProcess(argv, 0, json.dumps(self.status).encode(), b"")
         if argv[-1:] == ["upgrade-plan"]:
-            return subprocess.CompletedProcess(argv, 0, json.dumps(self.plan).encode(), b"")
+            return subprocess.CompletedProcess(argv, self.plan_code, json.dumps(self.plan).encode(), b"")
         return subprocess.CompletedProcess(argv, 1, b"", b"")
 
     def run(self, **kwargs):
@@ -122,6 +123,16 @@ class ReleaseCheckTests(unittest.TestCase):
                                  (code, result["result"], result["status"], result["latest"]))
                 self.assertIsNotNone(result["fetch_error"])
 
+    def test_upgrade_plan_failure_preserves_valid_index_status(self):
+        status = {"status": "ok", "pinned_version": "1.1.0", "latest_version": "1.2.0",
+                  "advice": [{"package_version": "1.2.0", "advisory": "optional"}],
+                  "active_advisories": []}
+        fake = self.runner(status=status, plan_code=1)
+        result, code = fake.run(repo=self.repo, fetch_permitted=False)
+        self.assertEqual(2, code)
+        self.assertEqual(("error", "ok", "upgrade_plan_failed", "1.2.0"),
+                         (result["result"], result["status"], result["fetch_error"], result["latest"]))
+
     def test_archive_with_fetch_permission_fails_as_not_git_without_network(self):
         archive = Path(self.temp.name) / "archive package"
         archive.mkdir()
@@ -138,9 +149,9 @@ class ReleaseCheckTests(unittest.TestCase):
         fake = self.runner(status=status)
         result, code = fake.run(repo=self.repo, fetch_permitted=False)
         self.assertEqual(2, code)
-        self.assertEqual("ok", result["status"])
-        self.assertEqual("operation_failed", result["fetch_error"])
-        self.assertEqual(("1.1.0", "1.2.0"), (result["pinned"], result["latest"]))
+        self.assertEqual("index_invalid", result["status"])
+        self.assertEqual("release_status_invalid_shape", result["fetch_error"])
+        self.assertEqual(("1.1.0", None), (result["pinned"], result["latest"]))
 
     def test_origin_is_checked_before_fetch_and_credential_urls_are_refused(self):
         for remote in ("https://wrong.example/repo.git", "https://user:pass@github.com/amazarache/ai-comm.git"):

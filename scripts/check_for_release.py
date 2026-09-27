@@ -107,13 +107,13 @@ def _local_status(repo, runner):
 def _run_upgrade_plan(repo, runner):
     proc = _run([sys.executable, str(repo / "ai_comm.py"), "upgrade-plan"], runner=runner)
     if proc.returncode != 0:
-        raise CheckError("upgrade_plan_failed", "index_invalid")
+        raise CheckError("upgrade_plan_failed", "ok")
     try:
         value = json.loads(proc.stdout.decode("utf-8"))
     except (UnicodeError, json.JSONDecodeError) as exc:
-        raise CheckError("upgrade_plan_invalid_json", "index_invalid") from exc
+        raise CheckError("upgrade_plan_invalid_json", "ok") from exc
     if not isinstance(value, dict) or not isinstance(value.get("owner_notice"), str):
-        raise CheckError("upgrade_plan_invalid_shape", "index_invalid")
+        raise CheckError("upgrade_plan_invalid_shape", "ok")
     return value
 
 
@@ -198,8 +198,13 @@ def run_check(*, repo=ROOT, fetch_permitted=False, expected_origin=None,
             ac.semver(latest, "latest")
         except ac.ProtocolError as exc:
             raise CheckError("release_status_invalid_version", "index_invalid") from exc
-        advisory = _active_advisory(release_data)
-        advice = _newer_advice(release_data)
+        try:
+            advisory = _active_advisory(release_data)
+            advice = _newer_advice(release_data)
+        except CheckError:
+            raise
+        except Exception as exc:
+            raise CheckError("release_status_invalid_shape", "index_invalid") from exc
         owner_notice = None
         if advice is not None:
             owner_notice = _run_upgrade_plan(repo, runner)["owner_notice"]
@@ -221,7 +226,7 @@ def run_check(*, repo=ROOT, fetch_permitted=False, expected_origin=None,
                         latest=latest), 0)
     except CheckError as exc:
         return (_result(exc.status, fetched=fetched, fetch_error=exc.code, pinned=pinned,
-                        latest=latest if status_name == "ok" else None), 2)
+                        latest=latest if exc.status == "ok" else None), 2)
     except Exception:
         safe_status = status_name if status_name in RELEASE_STATUSES else "error"
         return (_result(safe_status, fetched=fetched, fetch_error="operation_failed",
