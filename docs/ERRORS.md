@@ -35,7 +35,7 @@ For the frozen mismatch code used by packages before 1.0.0,
 your pinned package implements a different contract from the channel. Do not
 edit anything; ask the owner about the upgrade in ACTIVATE.md section 6.
 
-CLI argument error fields: `ack`, `actor`, `after`, `channel`, `draft`, `dry_run`, `file`, `id`, `input`, `key`, `kind`, `limit`, `new_since`, `offset`, `out`, `participant`, `platform`, `require_confidence`, `require_sources`, `reviewers`, `session`, `since`, `takeover`, `target`, `task`, `through`, `timeout`.
+CLI argument error fields: `ack`, `actor`, `after`, `channel`, `draft`, `dry_run`, `file`, `id`, `input`, `key`, `kind`, `limit`, `new_since`, `offset`, `out`, `participant`, `platform`, `require_confidence`, `require_sources`, `reviewers`, `session`, `since`, `stale_after`, `takeover`, `target`, `task`, `through`, `timeout`.
 
 Complete code catalog:
 
@@ -125,6 +125,7 @@ Complete code catalog:
 | `invalid_git_object_response` | invalid git object response |
 | `invalid_git_size_response` | invalid git size response |
 | `invalid_handle` | invalid handle |
+| `invalid_heartbeat_command` | invalid heartbeat command |
 | `invalid_handoff_artifact` | invalid handoff artifact |
 | `invalid_handoff_kind` | invalid handoff kind |
 | `invalid_handoff_participants` | invalid handoff participants |
@@ -164,6 +165,7 @@ Complete code catalog:
 | `invalid_session_record` | invalid session record |
 | `invalid_session_reference_length` | invalid session reference length |
 | `invalid_since` | invalid since |
+| `invalid_stale_after` | invalid stale after |
 | `invalid_source_declaration` | invalid source declaration |
 | `invalid_source_declarations` | invalid source declarations |
 | `invalid_source_detail_length` | invalid source detail length |

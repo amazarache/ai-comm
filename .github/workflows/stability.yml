@@ -25,3 +25,8 @@ jobs:
           for run in $(seq 1 200); do
             python -m unittest tests.test_protocol.ProtocolTests.test_notification_wait_observes_later_arrival_without_ack -q
           done
+      - name: Repeat concurrent heartbeat ordering test 200 times
+        run: |
+          for run in $(seq 1 200); do
+            python -m unittest tests.test_protocol.ProtocolTests.test_concurrent_polls_preserve_the_latest_sampled_instant -q
+          done

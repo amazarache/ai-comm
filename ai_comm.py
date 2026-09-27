@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import errno
 import fcntl
 import hashlib
 import html
@@ -12,6 +13,7 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import secrets
+import stat
 import subprocess
 import sys
 import tempfile
@@ -19,7 +21,7 @@ import time
 import unicodedata
 from datetime import datetime, timezone
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 RELEASE_ORIGIN = "https://github.com/amazarache/ai-comm.git"
 PROTOCOL_VERSION = "3.0"
 PREVIOUS_PROTOCOLS = (("2.0", "709af4b00ffcabeeca1b175d7d7d6db5103df829dabba1e529eef26dce23a000", "0.2.0"),)
@@ -32,7 +34,7 @@ DRAFT_KEYS = {"act", "to", "topic", "summary", "body", "reply_to", "refs",
 CLI_ERROR_FIELDS = {"actor", "ack", "after", "channel", "draft", "dry_run", "file",
                     "id", "input", "key", "kind", "limit", "new_since", "offset", "out",
                     "participant", "platform", "require_confidence", "require_sources", "reviewers",
-                    "session", "since", "takeover", "target", "task", "through", "timeout"}
+                    "session", "since", "stale_after", "takeover", "target", "task", "through", "timeout"}
 PUBLIC_ERROR_FIELDS = DRAFT_KEYS | CLI_ERROR_FIELDS
 INTERNAL_FIELD_MAP = {
     "recipient": ("to", "recipient"), "handle": ("actor", None),
@@ -201,6 +203,7 @@ ERROR_CODES = frozenset([
     'invalid_git_object_response',
     'invalid_git_size_response',
     'invalid_handle',
+    'invalid_heartbeat_command',
     'invalid_handoff_artifact',
     'invalid_handoff_kind',
     'invalid_handoff_participants',
@@ -240,6 +243,7 @@ ERROR_CODES = frozenset([
     'invalid_session_record',
     'invalid_session_reference_length',
     'invalid_since',
+    'invalid_stale_after',
     'invalid_source_declaration',
     'invalid_source_declarations',
     'invalid_source_detail_length',
@@ -683,6 +687,19 @@ def integer(value, name, low=0, high=99999999):
 
 def now():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def poll_time(value):
+    if not isinstance(value, str) or len(value) != 27:
+        raise ValueError("malformed")
+    parsed = datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)
+    if parsed.strftime("%Y-%m-%dT%H:%M:%S.%fZ") != value:
+        raise ValueError("malformed")
+    return parsed
+
+
+def poll_now():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
 def timestamp(value):
@@ -1566,6 +1583,144 @@ class Channel:
         head, blobs = read_snapshot_blobs(self.path)
         return Snapshot(head, blobs)
 
+    def _record_poll(self, handle, session, command):
+        """Best-effort process heartbeat; never writes to Git or receipts."""
+        warning = {"code": "heartbeat_not_recorded", "reason": "unavailable"}
+        try:
+            pattern(handle, HANDLE, "handle")
+            require(command in {"inbox", "ack", "wait", "send", "state"},
+                    "invalid heartbeat command", code="invalid_heartbeat_command")
+            initial = self.snapshot()
+            identity = initial.identity(handle, session)
+            sample = poll_now()
+            require(not self.runtime.is_symlink(), "runtime symlink refused",
+                    code="runtime_symlink_refused")
+            self.runtime.mkdir(mode=0o700, exist_ok=True)
+            poll_root = self.runtime / "poll"
+            if poll_root.is_symlink():
+                return dict(warning, reason="target_symlink")
+            try:
+                poll_root.mkdir(mode=0o700)
+            except FileExistsError:
+                pass
+            dirfd = os.open(poll_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                with self.lock():
+                    current = self.snapshot().identity(handle, session)
+                    name = handle + ".json"
+                    old = None
+                    try:
+                        st = os.stat(name, dir_fd=dirfd, follow_symlinks=False)
+                        if stat.S_ISLNK(st.st_mode):
+                            return dict(warning, reason="target_symlink")
+                        if not stat.S_ISREG(st.st_mode):
+                            return dict(warning, reason="target_not_regular")
+                        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=dirfd)
+                        try:
+                            data = os.read(fd, 1025)
+                        finally:
+                            os.close(fd)
+                        if len(data) <= 1024:
+                            try:
+                                value = parse(data, 1024)
+                                if (set(value) == {"v", "handle", "generation", "last_poll_utc", "command", "tool_version"}
+                                    and type(value["v"]) is int and value["v"] == 1
+                                    and value["handle"] == handle
+                                    and type(value["generation"]) is int and value["generation"] >= 1
+                                    and value["command"] in {"inbox", "ack", "wait", "send", "state"}
+                                    and isinstance(value["tool_version"], str)
+                                    and SEMVER.fullmatch(value["tool_version"])
+                                    and value["tool_version"] == VERSION):
+                                    old = (value, poll_time(value["last_poll_utc"]))
+                            except (ProtocolError, ValueError, UnicodeError, TypeError, KeyError):
+                                pass
+                    except FileNotFoundError:
+                        pass
+                    except OSError as exc:
+                        if exc.errno == errno.ELOOP:
+                            return dict(warning, reason="target_symlink")
+                    if old and old[0]["generation"] == current["generation"] and old[1] > poll_time(sample):
+                        return None
+                    record = {"v": 1, "handle": handle, "generation": current["generation"],
+                              "last_poll_utc": sample, "command": command, "tool_version": VERSION}
+                    temp = ".poll-" + secrets.token_hex(12)
+                    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                                 0o600, dir_fd=dirfd)
+                    try:
+                        with os.fdopen(fd, "wb") as stream:
+                            stream.write(canonical(record))
+                            stream.flush()
+                            os.fsync(stream.fileno())
+                        os.replace(temp, name, src_dir_fd=dirfd, dst_dir_fd=dirfd)
+                        os.fsync(dirfd)
+                    finally:
+                        try:
+                            os.unlink(temp, dir_fd=dirfd)
+                        except FileNotFoundError:
+                            pass
+            finally:
+                os.close(dirfd)
+            return None
+        except Exception as exc:
+            reason = "unavailable"
+            if isinstance(exc, (ProtocolError, PermissionError)):
+                reason = "permission_denied" if isinstance(exc, PermissionError) else "identity_invalid"
+            return dict(warning, reason=reason)
+
+    def _poll_status(self, record, stale_after, as_of):
+        unknown = {"last_poll_utc": None, "age_seconds": None, "command": None,
+                   "running_version": None, "status": "unknown", "reason": "malformed"}
+        try:
+            poll_root = self.runtime / "poll"
+            if poll_root.is_symlink():
+                return dict(unknown, reason="symlink")
+            dirfd = os.open(poll_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                name = record["handle"] + ".json"
+                st = os.stat(name, dir_fd=dirfd, follow_symlinks=False)
+                if stat.S_ISLNK(st.st_mode):
+                    return dict(unknown, reason="symlink")
+                if not stat.S_ISREG(st.st_mode):
+                    return unknown
+                if st.st_size > 1024:
+                    return dict(unknown, reason="oversized")
+                fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=dirfd)
+                try:
+                    raw = os.read(fd, 1025)
+                finally:
+                    os.close(fd)
+            finally:
+                os.close(dirfd)
+            if len(raw) > 1024:
+                return dict(unknown, reason="oversized")
+            value = parse(raw, 1024)
+            if (set(value) != {"v", "handle", "generation", "last_poll_utc", "command", "tool_version"}
+                or type(value["v"]) is not int or value["v"] != 1
+                or value["handle"] != record["handle"]
+                or type(value["generation"]) is not int or value["generation"] < 1
+                or value["command"] not in {"inbox", "ack", "wait", "send", "state"}
+                or not isinstance(value["tool_version"], str) or not SEMVER.fullmatch(value["tool_version"])):
+                return unknown
+            if value["generation"] != record["generation"]:
+                return dict(unknown, reason="generation_mismatch")
+            stamp = poll_time(value["last_poll_utc"])
+            age = (as_of - stamp).total_seconds()
+            if age < -5:
+                return dict(unknown, reason="future_timestamp")
+            age = max(0, age)
+            return {"last_poll_utc": value["last_poll_utc"], "age_seconds": age,
+                    "command": value["command"], "running_version": value["tool_version"],
+                    "status": "active" if age <= stale_after else "stale", "reason": None}
+        except FileNotFoundError:
+            return {"last_poll_utc": None, "age_seconds": None, "command": None,
+                    "running_version": None, "status": "never", "reason": None}
+        except PermissionError:
+            return dict(unknown, reason="unreadable")
+        except OSError as exc:
+            return dict(unknown, reason="symlink" if exc.errno in {40, 20} else "unreadable")
+        except (ProtocolError, ValueError, UnicodeError, TypeError, KeyError):
+            return unknown
+
     def join(self, handle, platform, session, takeover=False):
         pattern(handle, HANDLE, "handle")
         pattern(platform, HANDLE, "platform")
@@ -1634,8 +1789,12 @@ class Channel:
                         "head": state.head, "warnings": warnings}
             head = self.publish(state.head, {f"messages/{message['id']}.json": data},
                                 f"{message['id']} {act}: {message['summary']}", handle)
-            return {"message": message, "head": head, "duplicate": False,
-                    "warnings": warnings}
+            result = {"message": message, "head": head, "duplicate": False,
+                      "warnings": warnings}
+        poll_warning = self._record_poll(handle, session, "send")
+        if poll_warning:
+            result["warnings"].append(poll_warning)
+        return result
 
     def put_artifact(self, handle, session, data):
         require(len(data) <= MAX_ARTIFACT, "artifact exceeds 1 MiB", code="artifact_exceeds_1_mib")
@@ -1671,7 +1830,7 @@ class Channel:
             record = {"v": 2, "generation": current["generation"], "read": 0, "seen": 0}
         return path, record
 
-    def inbox(self, handle, session, limit=10):
+    def inbox(self, handle, session, limit=10, _heartbeat=True):
         integer(limit, "limit", 1, 100)
         with self.lock():
             state = self.snapshot()
@@ -1679,8 +1838,13 @@ class Channel:
             messages, through = self._page(state, handle, receipt["read"], limit)
             receipt["seen"] = max(receipt["seen"], through)
             atomic_json(path, receipt)
-            return {"head": state.head, "read_through": receipt["read"], "through": through,
-                    "messages": messages, "more": through < len(state.messages)}
+            result = {"head": state.head, "read_through": receipt["read"], "through": through,
+                      "messages": messages, "more": through < len(state.messages)}
+        if _heartbeat:
+            warning = self._record_poll(handle, session, "inbox")
+            if warning:
+                result["warnings"] = [warning]
+        return result
 
     @staticmethod
     def _page(state, handle, after, limit):
@@ -1695,7 +1859,7 @@ class Channel:
             through = message["seq"]
         return messages, through
 
-    def notifications(self, handle, session, new_since, limit=10):
+    def notifications(self, handle, session, new_since, limit=10, _heartbeat=True):
         """Caller-owned alert cursor; never authorize or advance a receipt."""
         integer(new_since, "notification sequence")
         integer(limit, "limit", 1, 100)
@@ -1706,9 +1870,14 @@ class Channel:
             after = max(receipt["read"], new_since)
             messages, through = self._page(state, handle, after, limit)
             messages = [state.message_view(message) for message in messages]
-            return {"head": state.head, "mode": "notifications", "read_through": receipt["read"],
-                    "notification_through": through, "messages": messages,
-                    "more": through < len(state.messages)}
+            result = {"head": state.head, "mode": "notifications", "read_through": receipt["read"],
+                      "notification_through": through, "messages": messages,
+                      "more": through < len(state.messages)}
+        if _heartbeat:
+            warning = self._record_poll(handle, session, "wait")
+            if warning:
+                result["warnings"] = [warning]
+        return result
 
     def ack(self, handle, session, through):
         integer(through, "receipt sequence")
@@ -1721,16 +1890,24 @@ class Channel:
                     details={"read_through": receipt["read"], "scanned_through": receipt["seen"]})
             receipt["read"] = through
             atomic_json(path, receipt)
-            return {"read_through": through, "head": state.head}
+            result = {"read_through": through, "head": state.head}
+        warning = self._record_poll(handle, session, "ack")
+        if warning:
+            result["warnings"] = [warning]
+        return result
 
     def wait(self, handle, session, timeout=30, limit=10, new_since=None):
         require(type(timeout) in (int, float) and 0 <= timeout <= 60, "timeout must be 0–60 seconds", code="timeout_must_be_0_60_seconds")
         deadline = time.monotonic() + timeout
         while True:
-            result = (self.inbox(handle, session, limit) if new_since is None else
-                      self.notifications(handle, session, new_since, limit))
+            result = (self.inbox(handle, session, limit, _heartbeat=False) if new_since is None else
+                      self.notifications(handle, session, new_since, limit, _heartbeat=False))
             if result["messages"] or time.monotonic() >= deadline:
-                return dict(result, timed_out=not bool(result["messages"]))
+                result = dict(result, timed_out=not bool(result["messages"]))
+                warning = self._record_poll(handle, session, "wait")
+                if warning:
+                    result["warnings"] = [warning]
+                return result
             time.sleep(min(0.5, max(0, deadline - time.monotonic())))
 
 
@@ -2366,6 +2543,7 @@ def parser():
     p = sub.add_parser("state")
     p.add_argument("--as", dest="actor")
     p.add_argument("--session")
+    p.add_argument("--stale-after", type=int, default=300)
     sub.add_parser("validate")
     sub.add_parser("release-status", help="inspect only already-fetched local release refs; never contacts the network")
     p = sub.add_parser("upgrade-plan", help="print a read-only plan from verified local release metadata")
@@ -2430,7 +2608,20 @@ def main(argv=None):
         else:
             state = channel.snapshot()
             if cmd == "state":
+                integer(args.stale_after, "stale-after", 1, 86400)
+                heartbeat_warning = None
+                if args.actor is not None or args.session is not None:
+                    require(args.actor is not None and args.session is not None,
+                            "state identity requires both actor and session",
+                            code="state_identity_incomplete", field="session",
+                            hint="Pass both --as and --session, or neither.")
+                    heartbeat_warning = channel._record_poll(args.actor, args.session, "state")
                 value = state.state(actor=args.actor, session=args.session)
+                as_of = datetime.now(timezone.utc)
+                value["liveness"] = {record["handle"]: channel._poll_status(record, args.stale_after, as_of)
+                                     for record in state.current.values()}
+                if heartbeat_warning:
+                    value["warnings"] = [heartbeat_warning]
             elif cmd == "validate":
                 value = {"valid": True, "head": state.head, "messages": len(state.messages),
                          "sessions": len(state.sessions), "artifacts": len(state.artifacts)}

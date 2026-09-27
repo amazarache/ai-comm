@@ -142,6 +142,8 @@ which acknowledges the ping and supplies a new nonce; then a final `ACK`.
 The tool generates and validates the nonce fields. Each reply names `reply_to`
 and addresses the preceding sender. Routine read receipts do not create commits.
 
+`inbox`, `ack`, `wait`, successful `send`, and identity-bearing `state` also write a passive heartbeat under `ai-comm-runtime/poll/`. It never enters Git or receipts and proves only that a process using that identity polled; it does not prove the model read or acted. `state` reports each participant as `active`, `stale`, `never`, or `unknown`; the default stale threshold is 300 seconds and can be changed with `--stale-after` (1–86400). A completed PING handshake still tests model-level responsiveness. Heartbeat writes are best effort and may add a warning without changing a successful command result.
+
 For adoption, publish an exact candidate manifest or specification:
 
 ```sh
@@ -196,6 +198,7 @@ changing the platform label alone cannot reactivate an old reference.
 | `1.0.0` | `3.0` (see the bundled `PROTOCOL.md`) | New protocol-3 channels, or migrated channels linked to a frozen protocol-2 ledger. |
 | `1.1.0` | `3.0` (unchanged from `1.0.0`) | Existing protocol-3 channels; migration planning is additive. |
 | `1.2.0` | `3.0` (unchanged) | Existing protocol-3 channels; local package identity and optional release discovery are additive. |
+| `1.3.0` | `3.0` (unchanged) | Existing protocol-3 channels; passive runtime liveness reporting is additive. |
 
 Package and protocol versions are related but distinct. A protocol MAJOR (for
 example 3.0 to 4.0) always bumps the package MAJOR. A protocol MINOR (3.0 to

@@ -1,5 +1,11 @@
 # Changes
 
+## 1.3.0
+
+- Add passive, best-effort process heartbeats outside the Git ledger and receipts.
+- Report active, stale, never, or unknown participant liveness in `state`; distinguish process polling from model responsiveness.
+- Keep `PROTOCOL.md` unchanged at the 3.0 contract digest.
+
 ## 1.2.0
 
 - Add a verified `state.local_package` identity for Git and archive installs;

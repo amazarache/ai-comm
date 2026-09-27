@@ -60,6 +60,98 @@ class ProtocolTests(unittest.TestCase):
             self.channel.send("alpha", "alpha-session", "retry", dict(draft, summary="Changed"))
         self.assertEqual(1, len(self.channel.snapshot().messages))
 
+    def test_poll_heartbeat_is_private_runtime_only_and_state_classifies_peers(self):
+        before = self.channel.snapshot().head
+        result = self.channel.inbox("alpha", "alpha-session")
+        poll = self.channel.runtime / "poll" / "alpha.json"
+        self.assertTrue(poll.exists())
+        self.assertEqual(0o700, poll.parent.stat().st_mode & 0o777)
+        self.assertEqual(0o600, poll.stat().st_mode & 0o777)
+        self.assertEqual(before, self.channel.snapshot().head)
+        self.assertEqual({"v", "handle", "generation", "last_poll_utc", "command", "tool_version"},
+                         set(json.loads(poll.read_text())))
+        snapshot = self.channel.snapshot()
+        as_of = ac.datetime.now(ac.timezone.utc)
+        self.assertEqual("active", self.channel._poll_status(snapshot.current["alpha"], 300, as_of)["status"])
+        self.assertEqual("never", self.channel._poll_status(snapshot.current["beta"], 300, as_of)["status"])
+
+    def test_dry_run_and_unauthenticated_identity_do_not_write_heartbeat(self):
+        self.channel.send("alpha", "alpha-session", "heartbeat-dry", self.draft(), dry_run=True)
+        self.assertFalse((self.channel.runtime / "poll" / "alpha.json").exists())
+        warning = self.channel._record_poll("alpha", "wrong-session", "state")
+        self.assertEqual("heartbeat_not_recorded", warning["code"])
+        self.assertFalse((self.channel.runtime / "poll" / "alpha.json").exists())
+
+    def test_delayed_older_poll_does_not_replace_newer_timestamp(self):
+        poll = self.channel.runtime / "poll" / "alpha.json"
+        poll.parent.mkdir(mode=0o700)
+        newer = "2027-01-01T00:00:00.000001Z"
+        poll.write_text(json.dumps({"v": 1, "handle": "alpha", "generation": 1,
+                                    "last_poll_utc": newer, "command": "inbox",
+                                    "tool_version": ac.VERSION}))
+        with mock.patch.object(ac, "poll_now", return_value="2026-12-31T23:59:59.999999Z"):
+            self.assertIsNone(self.channel._record_poll("alpha", "alpha-session", "state"))
+        self.assertEqual(newer, json.loads(poll.read_text())["last_poll_utc"])
+
+    def test_concurrent_polls_preserve_the_latest_sampled_instant(self):
+        samples = [f"2026-09-27T14:00:00.{n:06d}Z" for n in range(1, 33)]
+        with mock.patch.object(ac, "poll_now", side_effect=samples):
+            with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
+                results = list(pool.map(lambda _: self.channel._record_poll(
+                    "alpha", "alpha-session", "inbox"), range(len(samples))))
+        self.assertTrue(all(result is None for result in results))
+        poll = self.channel.runtime / "poll" / "alpha.json"
+        self.assertEqual(samples[-1], json.loads(poll.read_text())["last_poll_utc"])
+
+    def test_symlink_poll_target_is_never_followed(self):
+        poll_dir = self.channel.runtime / "poll"
+        poll_dir.mkdir(mode=0o700)
+        outside = self.root / "outside.json"
+        outside.write_text("unchanged")
+        (poll_dir / "alpha.json").symlink_to(outside)
+        warning = self.channel._record_poll("alpha", "alpha-session", "inbox")
+        self.assertEqual("heartbeat_not_recorded", warning["code"])
+        self.assertEqual("target_symlink", warning["reason"])
+        self.assertTrue((poll_dir / "alpha.json").is_symlink())
+        self.assertEqual("unchanged", outside.read_text())
+
+    def test_successful_send_ack_and_wait_record_the_invoking_command(self):
+        self.channel.send("alpha", "alpha-session", "heartbeat-send", self.draft())
+        poll = self.channel.runtime / "poll" / "alpha.json"
+        self.assertEqual("send", json.loads(poll.read_text())["command"])
+        self.channel.inbox("alpha", "alpha-session")
+        self.channel.ack("alpha", "alpha-session", 1)
+        self.assertEqual("ack", json.loads(poll.read_text())["command"])
+        self.channel.wait("alpha", "alpha-session", timeout=0)
+        self.assertEqual("wait", json.loads(poll.read_text())["command"])
+
+    def test_state_cli_reports_caller_active_and_rejects_stale_threshold_bounds(self):
+        result = self.cli("state", "--as", "alpha", "--session", "alpha-session")
+        self.assertEqual(0, result.returncode, result.stderr.decode())
+        value = json.loads(result.stdout)
+        self.assertEqual("active", value["liveness"]["alpha"]["status"])
+        self.assertEqual("never", value["liveness"]["beta"]["status"])
+        invalid = self.cli("state", "--stale-after", "0")
+        self.assertEqual(2, invalid.returncode)
+        self.assertEqual("invalid_stale_after", json.loads(invalid.stderr)["code"])
+
+    def test_future_and_old_generation_heartbeats_are_unknown(self):
+        poll = self.channel.runtime / "poll" / "alpha.json"
+        poll.parent.mkdir(mode=0o700)
+        record = {"v": 1, "handle": "alpha", "generation": 2,
+                  "last_poll_utc": "2026-09-27T15:00:00.000000Z", "command": "state",
+                  "tool_version": ac.VERSION}
+        poll.write_text(json.dumps(record))
+        state = self.channel.snapshot()
+        as_of = ac.datetime(2026, 9, 27, 15, 0, 0, tzinfo=ac.timezone.utc)
+        self.assertEqual("generation_mismatch",
+                         self.channel._poll_status(state.current["alpha"], 300, as_of)["reason"])
+        record["generation"] = 1
+        record["last_poll_utc"] = "2026-09-27T15:00:10.000000Z"
+        poll.write_text(json.dumps(record))
+        self.assertEqual("future_timestamp",
+                         self.channel._poll_status(state.current["alpha"], 300, as_of)["reason"])
+
     def test_send_dry_run_has_no_durable_side_effects_and_does_not_reserve_key(self):
         before = self.channel.snapshot().head
         receipt = self.channel.runtime / "beta.json"

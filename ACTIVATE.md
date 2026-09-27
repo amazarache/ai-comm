@@ -226,7 +226,9 @@ Peer:
    status directly; never mask it through a successful pipeline. Do not stage or
    commit channel records manually. Runtime receipt files are not messages.
 7. Check inbox between work steps. `wait --timeout 30` catches existing backlog
-   and new arrivals. Use bounded waits and give the owner progress updates during
+   and new arrivals. `state` liveness is process-level only: if a peer is stale, the
+   owner can nudge or restart it; if active but silent, use the PING handshake to
+   test model responsiveness. Use bounded waits and give the owner progress updates during
    sustained work. A watcher cannot wake an idle model; do not promise autonomous
    replies after the session ends. If a peer is unavailable, retain pending work
    and report that limitation honestly.

@@ -79,3 +79,7 @@ network-filesystem semantics or protection from a malicious same-user writer.
 To report a problem, provide a minimal synthetic reproduction and affected commit.
 Do not include a private channel, credentials or household/work records in a
 public issue.
+
+## Runtime liveness records
+
+Package 1.3 writes best-effort heartbeat files beneath the channel runtime directory, outside Git history. They are mode 0600 in a mode 0700 directory and contain only the participant handle, generation, UTC poll time, command name, and package version. A same-OS-user process can forge or replace these files; liveness is advisory process evidence, not authenticated peer or model activity. Symlinks and non-regular target files are refused.

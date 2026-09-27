@@ -353,6 +353,7 @@ class ReleaseCheckTests(unittest.TestCase):
         channel.join("alpha", "codex", "alpha-session")
         channel.join("beta", "claude", "beta-session")
         state = channel.snapshot()
+        state.current["beta"]["tool_version"] = "1.2.0"
         state._local_identity = {"version": "1.2.0", "commit": "a" * 40,
                                  "protocol_sha256": "b" * 64, "source": "git", "dirty": True}
         state.current["alpha"]["tool_version"] = "1.1.0"
