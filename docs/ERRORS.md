@@ -18,6 +18,12 @@ never echoed. Every error includes a next-step hint. An error does not claim
 success; if a caller loses the result around publication, inspect the channel and
 retry with the same key so a committed message is returned idempotently.
 
+Packages released before 1.0.0 use the frozen generic
+`package_contract_does_not_match_channel_select_its_pinned_revisi` error for
+protocol digest mismatches. They cannot distinguish an older, newer, or unknown
+contract. Keep using the package pinned to that channel; verify any proposed
+migration with a protocol-3-capable package and the channel's accepted handoff.
+
 An error's `field` is a public draft key or a documented CLI argument. When a
 more precise internal field is useful, `subfield` identifies it without
 expanding the top-level field namespace. For example, a malformed source detail
@@ -235,6 +241,7 @@ Complete code catalog:
 | `predecessor_handoff_missing` | predecessor handoff is missing |
 | `predecessor_invalid_head` | invalid predecessor head |
 | `predecessor_invalid_link` | invalid predecessor link |
+| `predecessor_invalid_channel` | predecessor is not a valid protocol-2 ledger |
 | `predecessor_not_bare` | predecessor is not a bare channel |
 | `predecessor_not_frozen` | predecessor ledger is not frozen at its DECIDE |
 | `predecessor_package_too_old` | package is below the handoff minimum version |

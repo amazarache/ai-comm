@@ -274,6 +274,7 @@ ERROR_CODES = frozenset([
     'predecessor_handoff_missing',
     'predecessor_invalid_head',
     'predecessor_invalid_link',
+    'predecessor_invalid_channel',
     'predecessor_not_bare',
     'predecessor_not_frozen',
     'predecessor_package_too_old',
@@ -764,6 +765,16 @@ def validate_handoff(record, *, target_protocol_digest=None):
 
 
 def validate_predecessor_record(predecessor, artifacts, protocol_digest, task, reviewers):
+    try:
+        _validate_predecessor_record(predecessor, artifacts, protocol_digest, task, reviewers)
+    except ProtocolError as exc:
+        if exc.details.get("code", "").startswith("predecessor_"):
+            raise
+        raise ProtocolError("linked predecessor record is invalid",
+                            code="predecessor_invalid_link", field="channel") from exc
+
+
+def _validate_predecessor_record(predecessor, artifacts, protocol_digest, task, reviewers):
     required = {"channel_head", "protocol_sha256", "handoff_artifact", "decide_message"}
     require(isinstance(predecessor, dict) and set(predecessor) == required,
             "invalid predecessor link", code="predecessor_invalid_link", field="channel")
@@ -779,7 +790,11 @@ def validate_predecessor_record(predecessor, artifacts, protocol_digest, task, r
     handoff = parse(raw, MAX_ARTIFACT)
     require(canonical(handoff) == raw, "predecessor handoff is not canonical",
             code="predecessor_handoff_invalid", field="artifact")
-    validate_handoff(handoff, target_protocol_digest=protocol_digest)
+    try:
+        validate_handoff(handoff, target_protocol_digest=protocol_digest)
+    except ProtocolError as exc:
+        raise ProtocolError("linked predecessor handoff is invalid",
+                            code="predecessor_handoff_invalid", field="artifact") from exc
     require(handoff["from_protocol_sha256"] == predecessor["protocol_sha256"],
             "predecessor protocol differs from handoff", code="predecessor_protocol_mismatch",
             field="channel")
@@ -849,7 +864,9 @@ def _release_status(repo):
                            "archive); release status needs a Git checkout of a tagged release; "
                            "no advice given",
                 "authenticity": "not verified (no attestation)"}
-    partial = work_git(repo, "config", "--get", "extensions.partialClone", ok=(0, 1)).strip()
+    partial = work_git(repo, "config", "--get-regexp",
+                       r"^(extensions\.partialclone|remote\..*\.promisor)$",
+                       ok=(0, 1)).strip()
     if partial:
         version_output = subprocess.run(["git", "--version"], stdout=subprocess.PIPE,
                                         stderr=subprocess.PIPE, env=git_env(), timeout=10).stdout
@@ -1045,7 +1062,6 @@ class Channel:
                 "channel must be a dedicated bare Git repository", code="channel_must_be_a_dedicated_bare_git_repository")
         self.runtime = self.path / "ai-comm-runtime"
         require(not self.runtime.is_symlink(), "runtime symlink refused", code="runtime_symlink_refused")
-        self.runtime.mkdir(mode=0o700, exist_ok=True)
 
     @classmethod
     def init(cls, path, task, reviewers, require_confidence=(), require_sources=(),
@@ -1073,6 +1089,7 @@ class Channel:
                               env=git_env(), timeout=30)
         require(proc.returncode == 0, "channel initialization failed", code="channel_initialization_failed")
         channel = cls(target)
+        channel.runtime.mkdir(mode=0o700, exist_ok=True)
         policy = {"require_confidence": list(require_confidence),
                   "require_sources": list(require_sources),
                   "protocol_version": PROTOCOL_VERSION}
@@ -1085,12 +1102,18 @@ class Channel:
                   "task": task, "reviewers": reviewers, "policy": policy,
                   "protocol_sha256": protocol_digest})
             changes[f"artifacts/{handoff}"] = predecessor_info["handoff_bytes"]
-        with channel.lock():
-            head = channel.publish(None, changes, "initialize channel", "system")
+        # A new owner-only bare repository has no concurrent writers yet.
+        head = channel.publish(None, changes, "initialize channel", "system")
         return {"channel": str(channel.path), "head": head, "v": 2}
 
     @contextlib.contextmanager
     def lock(self):
+        # Validate the immutable contract before creating runtime state. The
+        # caller re-reads under the lock before acting, so this preflight only
+        # prevents a rejected mismatch from leaving a runtime directory behind.
+        self.snapshot()
+        require(not self.runtime.is_symlink(), "runtime symlink refused", code="runtime_symlink_refused")
+        self.runtime.mkdir(mode=0o700, exist_ok=True)
         fd = os.open(self.runtime / "lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
         try:
             deadline = time.monotonic() + 10
@@ -1772,16 +1795,34 @@ class Snapshot:
 
 def validate_predecessor(path, digest, task, reviewers, target_protocol_digest):
     raw_path = Path(path).expanduser().absolute()
-    require(not raw_path.is_symlink(), "predecessor path is a symlink",
-            code="predecessor_symlink_refused", field="channel")
+    cursor = Path(raw_path.anchor)
+    for component in raw_path.parts[1:]:
+        cursor = cursor / component
+        require(not cursor.is_symlink(), "predecessor path contains a symlink",
+                code="predecessor_symlink_refused", field="channel")
     require(raw_path.is_dir(), "predecessor must be an existing bare channel",
             code="predecessor_not_bare", field="channel")
     repo = raw_path.resolve()
-    require(git(repo, "rev-parse", "--is-bare-repository").strip() == b"true",
+    try:
+        bare = git(repo, "rev-parse", "--is-bare-repository").strip()
+    except ProtocolError as exc:
+        raise ProtocolError("predecessor is not a valid bare channel",
+                            code="predecessor_not_bare", field="channel") from exc
+    require(bare == b"true",
             "predecessor must be a bare channel", code="predecessor_not_bare", field="channel")
-    pattern(digest, HEX, "artifact digest")
-    head, blobs = read_snapshot_blobs(repo)
-    old = Snapshot(head, blobs, allow_legacy=True)
+    require(isinstance(digest, str) and HEX.fullmatch(digest),
+            "invalid predecessor handoff digest",
+            code="predecessor_handoff_invalid", field="artifact")
+    try:
+        head, blobs = read_snapshot_blobs(repo)
+    except ProtocolError as exc:
+        raise ProtocolError("predecessor ledger is malformed",
+                            code="predecessor_invalid_channel", field="channel") from exc
+    try:
+        old = Snapshot(head, blobs, allow_legacy=True)
+    except ProtocolError as exc:
+        raise ProtocolError("predecessor is not a valid protocol-2 ledger",
+                            code="predecessor_invalid_channel", field="channel") from exc
     handoff_bytes = old.artifacts.get(digest)
     require(handoff_bytes is not None, "handoff artifact is missing from predecessor",
             code="predecessor_handoff_missing", field="artifact")
@@ -1792,7 +1833,11 @@ def validate_predecessor(path, digest, task, reviewers, target_protocol_digest):
                             field="artifact") from exc
     require(canonical(handoff) == handoff_bytes, "predecessor handoff is not canonical",
             code="predecessor_handoff_invalid", field="artifact")
-    validate_handoff(handoff, target_protocol_digest=target_protocol_digest)
+    try:
+        validate_handoff(handoff, target_protocol_digest=target_protocol_digest)
+    except ProtocolError as exc:
+        raise ProtocolError("predecessor handoff is invalid",
+                            code="predecessor_handoff_invalid", field="artifact") from exc
     require(semver(handoff["to_package_version"]) <= semver(VERSION),
             "package is older than handoff requirement", code="predecessor_package_too_old",
             field="channel")
@@ -1810,10 +1855,10 @@ def validate_predecessor(path, digest, task, reviewers, target_protocol_digest):
             field="artifact")
     decisions = [message for message in old.messages
                  if message["act"] == "DECIDE" and message.get("artifact") == digest]
-    require(len(decisions) == 1, "predecessor must have one decision for the handoff",
+    require(bool(decisions), "predecessor has no decision for the handoff",
             code="predecessor_decision_invalid", field="channel")
-    decision = decisions[0]
-    require(old.messages and old.messages[-1]["id"] == decision["id"],
+    decision = decisions[-1]
+    require(old.messages[-1]["id"] == decision["id"],
             "handoff DECIDE must be the final ledger message",
             code="predecessor_not_frozen", field="channel")
     parent = git(repo, "rev-parse", "--verify", f"{head}^", ok=(0, 128)).decode().strip()

@@ -82,7 +82,12 @@ release archive has no Git metadata; `release-status` then reports
 an existing channel in place. Under the old package, a reviewer proposes the
 canonical `ai-comm-handoff` artifact in the old channel; every configured
 reviewer ACCEPTs that exact artifact, then a reviewer DECIDEs it. The DECIDE
-must be the final ledger message. Only non-reviewers may be marked
+must be the final ledger message. If another message follows it, repeat the
+proposal, acceptance and decision on the same artifact before migrating. Older
+packages (before 1.0.0) show the frozen generic
+`package_contract_does_not_match_channel_select_its_pinned_revisi` error for
+every digest mismatch; that error cannot tell whether the channel is older or
+newer. Only non-reviewers may be marked
 `stays_behind`. After the owner authorizes the migration, initialize the new
 channel with the same task and reviewer set using
 `init --predecessor <old-channel> --handoff <artifact-sha256>`. The new tool

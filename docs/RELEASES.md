@@ -33,6 +33,10 @@ produces `advisory: unknown` for every peer. An applicable `recommended` or
 remain claims and never establish that a peer is affected or clear an advisory.
 This lookup is offline and never triggers an upgrade.
 
+An artifact-less historical `FACT` on topic `upgrade` is labeled
+`advisory: legacy_note`: it is retained as a notice, but carries no verified
+release identity and establishes no peer advisory.
+
 The `release-index` branch contains one authoritative `RELEASES.json` file.
 The file is strict JSON with format `ai-comm-releases/1` and a `releases` array.
 Each release entry contains `package_version`, `commit`, `tag`,
