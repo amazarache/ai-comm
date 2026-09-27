@@ -1,12 +1,16 @@
 import json
+import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import ai_comm as package_module
 from scripts import check_for_release as checker
+checker.ac = package_module
 
 
 class FakeRunner:
@@ -77,6 +81,105 @@ class ReleaseCheckTests(unittest.TestCase):
         value.calls_root = self.repo
         return value
 
+    def _copy_real_package(self, target):
+        shutil.copytree(Path(checker.__file__).resolve().parents[1], target,
+                        ignore=shutil.ignore_patterns(".git", "__pycache__", ".venv"))
+
+    def _git(self, *args, cwd=None, env=None):
+        return subprocess.run(["git", *map(str, args)], cwd=cwd, env=env,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              timeout=30, check=True)
+
+    def test_real_helper_reports_package_unavailable_as_json(self):
+        for broken in (False, True):
+            with self.subTest(broken=broken):
+                package = Path(self.temp.name) / ("broken" if broken else "missing")
+                (package / "scripts").mkdir(parents=True)
+                helper = Path(checker.__file__)
+                shutil.copy2(helper, package / "scripts" / helper.name)
+                if broken:
+                    (package / "ai_comm.py").write_text("this is not valid python !\n")
+                proc = subprocess.run([sys.executable, str(package / "scripts" / helper.name)],
+                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+                self.assertEqual(2, proc.returncode)
+                self.assertEqual(b"", proc.stderr)
+                lines = proc.stdout.decode().splitlines()
+                self.assertEqual(1, len(lines))
+                value = json.loads(lines[0])
+                self.assertEqual(("error", "package_unavailable", "package_unavailable"),
+                                 (value["result"], value["status"], value["fetch_error"]))
+
+    def test_real_helper_lock_file_is_ignored_and_does_not_dirty_package(self):
+        package = Path(self.temp.name) / "real-lock-package"
+        self._copy_real_package(package)
+        env = package_module.git_env({"GIT_AUTHOR_NAME": "test", "GIT_AUTHOR_EMAIL": "test@example.invalid",
+                                      "GIT_COMMITTER_NAME": "test", "GIT_COMMITTER_EMAIL": "test@example.invalid"})
+        self._git("init", "--initial-branch=main", cwd=package, env=env)
+        self._git("add", "-A", cwd=package, env=env)
+        self._git("commit", "-m", "fixture", cwd=package, env=env)
+        lock = package / ".release-check.lock"
+        proc = subprocess.run([shutil.which("flock"), "-n", str(lock), sys.executable,
+                               str(package / "scripts" / "check_for_release.py")],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30, env=env)
+        self.assertEqual(2, proc.returncode)
+        self.assertEqual(1, len(proc.stdout.decode().splitlines()))
+        self.assertTrue(lock.exists())
+        self.assertEqual(b"", self._git("status", "--porcelain", cwd=package, env=env).stdout)
+        self.assertEqual("git", package_module.package_identity(package)["source"])
+        self.assertFalse(package_module.package_identity(package)["dirty"])
+        self.assertFalse((package / "__pycache__").exists())
+
+    def test_real_helper_fetch_ignores_configured_refmaps(self):
+        package = Path(self.temp.name) / "real-fetch-package"
+        self._copy_real_package(package)
+        seed = Path(self.temp.name) / "seed"
+        bare = Path(self.temp.name) / "remote.git"
+        seed.mkdir()
+        self._git("init", "--initial-branch=main", cwd=seed)
+        (seed / "RELEASES.json").write_text("{}\n")
+        self._git("add", "RELEASES.json", cwd=seed)
+        env_git = package_module.git_env({"GIT_AUTHOR_NAME": "test", "GIT_AUTHOR_EMAIL": "test@example.invalid",
+                                          "GIT_COMMITTER_NAME": "test", "GIT_COMMITTER_EMAIL": "test@example.invalid"})
+        self._git("commit", "-m", "index seed", cwd=seed, env=env_git)
+        self._git("branch", "release-index", cwd=seed)
+        self._git("tag", "v9.9.9", cwd=seed)
+        self._git("clone", "--bare", str(seed), str(bare))
+        env = package_module.git_env({"GIT_AUTHOR_NAME": "test", "GIT_AUTHOR_EMAIL": "test@example.invalid",
+                                      "GIT_COMMITTER_NAME": "test", "GIT_COMMITTER_EMAIL": "test@example.invalid"})
+        self._git("init", "--initial-branch=main", cwd=package, env=env)
+        self._git("add", "-A", cwd=package, env=env)
+        self._git("commit", "-m", "fixture", cwd=package, env=env)
+        self._git("remote", "add", "origin", "https://fixture.example/ai-comm.git", cwd=package, env=env)
+        self._git("config", "--add", "remote.origin.fetch", "+refs/tags/*:refs/remotes/leak/*", cwd=package, env=env)
+
+        real_git = shutil.which("git")
+        bin_dir = Path(self.temp.name) / "bin"
+        bin_dir.mkdir()
+        wrapper = bin_dir / "git"
+        wrapper.write_text("#!/usr/bin/env python3\nimport os, sys\n"
+                           f"real = {real_git!r}\n"
+                           "args = sys.argv[1:]\n"
+                           f"bare = {str(bare)!r}\n"
+                           "if 'fetch' in args and 'origin' in args:\n"
+                           "    args[args.index('origin')] = bare\n"
+                           "os.execv(real, [real, *args])\n")
+        wrapper.chmod(0o755)
+        run_env = os.environ.copy()
+        run_env.update(env)
+        run_env["PATH"] = str(bin_dir) + os.pathsep + run_env.get("PATH", "")
+        proc = subprocess.run([sys.executable, str(package / "scripts" / "check_for_release.py"),
+                               "--fetch-permitted", "--expected-origin", "https://fixture.example/ai-comm.git"],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60, env=run_env)
+        self.assertEqual(2, proc.returncode)
+        value = json.loads(proc.stdout.decode().splitlines()[0])
+        self.assertTrue(value["fetched"])
+        refs = self._git("for-each-ref", "--format=%(refname)", cwd=package, env=env).stdout.decode().splitlines()
+        self.assertIn("refs/remotes/origin/release-index", refs)
+        self.assertIn("refs/tags/v9.9.9", refs)
+        self.assertFalse(any(ref.startswith("refs/remotes/leak/") for ref in refs), refs)
+        self.assertTrue((package / ".git" / "FETCH_HEAD").exists())
+        self.assertFalse((package / "__pycache__").exists())
+
     def test_no_fetch_without_permission_and_reports_up_to_date(self):
         fake = self.runner()
         result, code = fake.run(repo=self.repo, fetch_permitted=False)
@@ -94,7 +197,7 @@ class ReleaseCheckTests(unittest.TestCase):
         self.assertEqual((10, "update_available", "review update"),
                          (code, result["result"], result["owner_notice"]))
         fetch = next((args for args, _ in fake.calls if "fetch" in args), None)
-        self.assertEqual(["git", "-C", str(self.repo), "fetch", "--no-tags",
+        self.assertEqual(["git", "-C", str(self.repo), "fetch", "--refmap=", "--no-tags",
                           "--no-recurse-submodules", "origin", *checker.REFSPECS], fetch)
         fetch_env = next(kwargs["env"] for args, kwargs in fake.calls if "fetch" in args)
         self.assertEqual("1", fetch_env["GIT_NO_LAZY_FETCH"])

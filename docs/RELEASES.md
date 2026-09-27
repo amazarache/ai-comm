@@ -32,6 +32,18 @@ rewritten when a package pin advances. `state` also reports `local_package` for
 the running package. To compare the local version with this session's join-time
 value, pass both `--as HANDLE --session REF`; the resulting `version_note` only
 compares that exact current session. No peer's live package version is inferred.
+`local_package` reports `version`, `commit`, `protocol_sha256`, `source`, and
+`dirty` for a Git checkout, or `version`, `commit: null`, `manifest_sha256`,
+`protocol_sha256`, and `source: "archive"` for an extracted archive. An
+untrusted or unreadable package reports `source: "unknown"` and a stable
+`reason`: `archive_version_invalid`, `archive_manifest_invalid`,
+`archive_protocol_invalid`, `archive_manifest_entry_invalid`,
+`archive_manifest_path_invalid`, `archive_manifest_symlink`,
+`archive_manifest_mismatch`, `archive_manifest_incomplete`,
+`archive_protocol_mismatch`, `archive_identity_unavailable`, or
+`local_identity_unavailable`. These indicate malformed metadata, unsafe or
+missing manifest paths, a content/digest mismatch, or unavailable local files;
+they do not assert maliciousness.
 The state advisory annotation uses only this locally verified index. An
 unavailable or inconsistent index produces `advisory: unknown` for every peer.
 An applicable `recommended` or `required` index entry can mark a peer as
@@ -77,8 +89,11 @@ CLI remains offline. Without `--fetch-permitted`, the helper reads only the
 already-fetched local refs. With that flag, it first compares `origin` to the
 package's manifest-bound `RELEASE_ORIGIN` constant, or to an explicit owner
 `--expected-origin` override. Only HTTPS URLs without credentials, query
-parameters or fragments are accepted. Comparison ignores only a trailing slash
-and `.git`. A mismatch or missing origin is rejected before any fetch.
+parameters or fragments are accepted. HTTPS is intentionally the only accepted
+scheme: it keeps the fetch source narrow and auditable; SSH, file and local
+origins may be considered later as an explicit opt-in. Comparison ignores only
+a trailing slash and `.git`. A mismatch or missing origin is rejected before
+any fetch.
 
 The permitted fetch is exactly the `release-index` branch and `v*` tags, with
 implicit tag following and submodule recursion disabled. `GIT_NO_LAZY_FETCH=1`
@@ -98,7 +113,22 @@ are package versions (`latest` is null unless the index is valid);
 `none`, `optional`, `recommended` or `required`;
 `advisory_applies_to_pinned` indicates whether a recommended or required notice
 matches the pinned version; and `owner_notice` contains the upgrade-plan notice
-when a newer verified release exists.
+when a newer verified release exists. A newer release may carry a `recommended`
+or `required` advisory that does not apply to the current pin; that remains
+`update_available` with exit `10` and `advisory_applies_to_pinned: false`. Do
+not infer applicability from the `advisory` value alone.
+
+`fetch_error` is null on success and otherwise one of these stable codes:
+`invalid_arguments`, `package_unavailable`, `package_identity_invalid`,
+`package_manifest_mismatch`, `package_origin_unavailable`, `not_git_checkout`,
+`invalid_origin`, `credential_bearing_origin`, `origin_missing`,
+`origin_mismatch`, `fetch_failed`, `index_missing`, `index_invalid`,
+`index_inconsistent`, `release_status_failed`,
+`release_status_invalid_json`, `release_status_invalid_shape`,
+`release_status_invalid_version`, `upgrade_plan_failed`,
+`upgrade_plan_invalid_json`, `upgrade_plan_invalid_shape`, and
+`operation_failed`. The codes identify a failed validation or subprocess stage;
+output never includes the raw subprocess error.
 
 Exit status is `0` for up to date, `10` for an update available, `11` when a
 recommended or required advisory applies to the pinned version, and `2` for an

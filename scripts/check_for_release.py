@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -11,9 +12,9 @@ import subprocess
 import sys
 from urllib.parse import urlsplit
 
+sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
-import ai_comm as ac
+ac = None
 
 REFSPECS = (
     "refs/heads/release-index:refs/remotes/origin/release-index",
@@ -35,6 +36,25 @@ class CheckError(Exception):
 class JsonArgumentParser(argparse.ArgumentParser):
     def error(self, message):
         raise CheckError("invalid_arguments")
+
+
+def _load_package(repo):
+    """Load the package only inside run_check's JSON-producing error boundary."""
+    global ac
+    if ac is not None:
+        return ac
+    source = Path(repo) / "ai_comm.py"
+    try:
+        spec = importlib.util.spec_from_file_location("ai_comm_release_package", source)
+        if spec is None or spec.loader is None:
+            raise ImportError("package module unavailable")
+        module = importlib.util.module_from_spec(spec)
+        sys.dont_write_bytecode = True
+        spec.loader.exec_module(module)
+        ac = module
+        return ac
+    except Exception as exc:
+        raise CheckError("package_unavailable", "package_unavailable") from exc
 
 
 def _normalize_origin(value):
@@ -157,6 +177,7 @@ def run_check(*, repo=ROOT, fetch_permitted=False, expected_origin=None,
     pinned = None
     latest = None
     try:
+        _load_package(repo)
         if fetch_permitted:
             try:
                 identity = ac.package_identity(repo)
@@ -178,7 +199,7 @@ def run_check(*, repo=ROOT, fetch_permitted=False, expected_origin=None,
                 raise CheckError("invalid_origin") from exc
             if _normalize_origin(actual) != expected:
                 raise CheckError("origin_mismatch")
-            fetch_args = ["git", "-C", str(repo), "fetch", "--no-tags",
+            fetch_args = ["git", "-C", str(repo), "fetch", "--refmap=", "--no-tags",
                           "--no-recurse-submodules", "origin", *REFSPECS]
             fetched = True
             proc = _run(fetch_args, runner=runner)

@@ -11,6 +11,10 @@
   It never installs, checks out or re-pins; the CLI remains offline.
 - Document owner-triggered checks, revocable scheduled permission and an
   optional UTC cron example.
+- Keep scheduled lock files out of package dirtiness, emit JSON when helper
+  loading fails, constrain fetch ref updates, and prevent bytecode writes.
+- Document release-check error codes, local-package reason codes, and the
+  distinction between advisory level and applicability to the pinned version.
 - Clarify package/protocol versioning, including protocol MINOR migration and
   package MAJOR rules.
 - Keep `PROTOCOL.md` unchanged at the 3.0 contract digest.
