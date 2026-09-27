@@ -24,13 +24,13 @@
     },
     {
       "path": "ACTIVATE.md",
-      "bytes": 12553,
-      "sha256": "3a20df4e5ae439095cbde9dc7e61d9f54bac9a77e9dbf822c6c35a2c052a75f9"
+      "bytes": 12990,
+      "sha256": "dddf441cb0dda1c02d689f0f573999be0085048d5c7e9e12870ffd85181118f5"
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 4275,
-      "sha256": "5b66ba55771a80957c5dee9d1976d77121b5dd1e76e9beec285c5d48d3f68473"
+      "bytes": 5011,
+      "sha256": "8372c5b044851b99504d0e15993f2b877a09c9bb498ef50f6aa829c27ed0c5a6"
     },
     {
       "path": "PROTOCOL.md",
@@ -39,8 +39,8 @@
     },
     {
       "path": "README.md",
-      "bytes": 13540,
-      "sha256": "909816994b5e50ae04fd7d219f5c33dd47d9a383f88b2af49930507abc755a73"
+      "bytes": 14352,
+      "sha256": "41e704710d86d97b962adc0b7435b57cc4bbeeeecfadef1e5e7992a2a0b90256"
     },
     {
       "path": "SECURITY.md",
@@ -49,13 +49,13 @@
     },
     {
       "path": "ai_comm.py",
-      "bytes": 116448,
-      "sha256": "4db23b1efcee741e8b2481483a0902fd096de1682527f8a98c6b0eed10cb8c14"
+      "bytes": 133841,
+      "sha256": "0d5c5ab2e920e36f65ae31945f2e90919f56c95c66833e3e68be03035f4536e1"
     },
     {
       "path": "docs/ERRORS.md",
-      "bytes": 20034,
-      "sha256": "1716c5d6c950c9fd7974fb1f09626ddce22c735567ccaf9ec6e6c8ad2463b1aa"
+      "bytes": 24700,
+      "sha256": "d41fed20c634be50e5d2be18ecd78325109fb51ae32ac83091acfb0ddb9df3e3"
     },
     {
       "path": "docs/EXPERIMENT.md",
@@ -69,8 +69,8 @@
     },
     {
       "path": "docs/RELEASES.md",
-      "bytes": 4913,
-      "sha256": "447b07c2a39268b94a842541baa17a180b4263f3e1ca9136961d7828b4b567d5"
+      "bytes": 6033,
+      "sha256": "241755af0db076d46f2629201aee3b1a551df967993efe8539fc36ae07ef7764"
     },
     {
       "path": "examples/ask.json",
@@ -109,8 +109,13 @@
     },
     {
       "path": "tests/test_protocol.py",
-      "bytes": 73868,
-      "sha256": "4468335511fd4fe21ae2794e442613140cd795e7371fe9b2fa6a23ce2b1a33a2"
+      "bytes": 74032,
+      "sha256": "76ef5fdf670a983b8a074284e28175537e3300f8192a350e2bdee81233a3f70d"
+    },
+    {
+      "path": "tests/test_upgrade_plan.py",
+      "bytes": 17304,
+      "sha256": "fbb0ed1aedfcef55b967c4802af38465478f5e5d90185f1fe6f885f90234229a"
     }
   ]
 }

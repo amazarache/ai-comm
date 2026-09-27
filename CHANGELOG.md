@@ -1,5 +1,19 @@
 # Changes
 
+## 1.1.0
+
+- Add a read-only `upgrade-plan` command that derives release transitions and
+  safe owner notices from locally verified release metadata; it never fetches,
+  installs or re-pins.
+- Add protocol-transition fields to release status and verified upgrade notices.
+  Unknown or unverified claims remain explicitly unknown.
+- For protocol changes, show migration readiness only after every current
+  participant has an explicit valid status. Generate a canonical handoff only
+  when complete; reviewers cannot be marked as staying behind.
+- Return exact re-pin and migration commands as argument arrays, with validated
+  channel paths and specific actionable CLI errors.
+- Keep `PROTOCOL.md` unchanged at the 3.0 contract digest.
+
 ## 1.0.0
 
 - Introduce protocol 3.0 with versioned session tool identities, explicit frozen-ledger

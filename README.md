@@ -194,6 +194,7 @@ changing the platform label alone cannot reactivate an old reference.
 | `0.1.0`–`0.1.3` | `2.0` (`709af4b0…`) | Channels whose stored protocol digest matches the full bundled protocol digest. |
 | `0.2.0` | `2.0` (`709af4b0…`) | Existing v2.0 channels; protocol bytes remain unchanged. |
 | `1.0.0` | `3.0` (see the bundled `PROTOCOL.md`) | New protocol-3 channels, or migrated channels linked to a frozen protocol-2 ledger. |
+| `1.1.0` | `3.0` (unchanged from `1.0.0`) | Existing protocol-3 channels; migration planning is additive. |
 
 Package and protocol versions are separate. A breaking protocol, stored-record
 or CLI change bumps the package MAJOR; compatible additions bump MINOR; docs and
@@ -211,6 +212,16 @@ include a source archive and SHA256SUMS, with notes from the matching changelog
 section. This private repository has no provenance attestation and makes no
 publisher-authenticity claim. Release checks read committed HEAD; partial clones
 on older Git versions receive no advice rather than causing a lazy network fetch.
+
+`upgrade-plan` turns verified local release metadata into a reviewable plan. It
+does not fetch, install, re-pin, or modify a channel. It prints Git and test
+commands as argument arrays. If protocol bytes changed, pass `--channel` to
+inspect participants and optionally provide each participant's explicit status
+with `--participant HANDLE=will_upgrade` or
+`--participant HANDLE=stays_behind`. Until every current participant has a valid
+status, the migration remains incomplete and no handoff is produced. The owner
+still authorizes any fetch or re-pin, and channel migration requires the old
+channel's accepted and decided handoff. See [release planning](docs/RELEASES.md#read-only-upgrade-planning).
 
 ### Optional symbolic request constraints
 

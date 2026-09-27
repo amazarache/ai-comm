@@ -19,7 +19,7 @@ import time
 import unicodedata
 from datetime import datetime, timezone
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 PROTOCOL_VERSION = "3.0"
 PREVIOUS_PROTOCOLS = (("2.0", "709af4b00ffcabeeca1b175d7d7d6db5103df829dabba1e529eef26dce23a000", "0.2.0"),)
 ACTS = {"PING", "ACK", "PONG", "ASK", "FACT", "CORRECT", "PROPOSE",
@@ -30,8 +30,8 @@ DRAFT_KEYS = {"act", "to", "topic", "summary", "body", "reply_to", "refs",
               "sources", "questions", "artifact", "confidence"}
 CLI_ERROR_FIELDS = {"actor", "ack", "after", "channel", "draft", "dry_run", "file",
                     "id", "input", "key", "kind", "limit", "new_since", "offset", "out",
-                    "platform", "require_confidence", "require_sources", "reviewers",
-                    "session", "since", "takeover", "task", "through", "timeout"}
+                    "participant", "platform", "require_confidence", "require_sources", "reviewers",
+                    "session", "since", "takeover", "target", "task", "through", "timeout"}
 PUBLIC_ERROR_FIELDS = DRAFT_KEYS | CLI_ERROR_FIELDS
 INTERNAL_FIELD_MAP = {
     "recipient": ("to", "recipient"), "handle": ("actor", None),
@@ -104,6 +104,11 @@ class ProtocolError(Exception):
         elif isinstance(got, str) and got in safe_values:
             self.details["got"] = got
         if isinstance(details, dict):
+            status = details.get("status")
+            if isinstance(status, str) and status in {
+                    "index_missing", "index_invalid", "index_inconsistent",
+                    "not_git_checkout", "ok"}:
+                self.details["status"] = status
             for name in ("read_through", "scanned_through"):
                 value = details.get(name)
                 if name in details and type(value) is int and 0 <= value <= 99999999:
@@ -248,6 +253,7 @@ ERROR_CODES = frozenset([
     'invalid_timestamp',
     'invalid_tool_version',
     'invalid_topic',
+    'invalid_upgrade_target',
     'invalid_utf_8_json',
     'json_exceeds_size_limit',
     'json_must_be_an_object',
@@ -339,7 +345,21 @@ ERROR_CODES = frozenset([
     'unregistered_recipients',
     'unsupported_message_version',
     'unsupported_or_malformed_channel',
+    'upgrade_channel_invalid',
+    'upgrade_channel_not_bare',
+    'upgrade_channel_symlink',
+    'upgrade_participant_requires_channel',
+    'upgrade_participant_duplicate',
+    'upgrade_participant_malformed',
+    'upgrade_participant_missing',
+    'upgrade_participant_not_required',
+    'upgrade_participant_status_invalid',
+    'upgrade_participant_unknown',
+    'upgrade_plan_unavailable',
     'upgrade_requires_release_record',
+    'upgrade_reviewer_stays_behind',
+    'upgrade_target_not_newer',
+    'upgrade_target_unverified',
     'upgrade_summary_incomplete',
 ])
 
@@ -354,6 +374,8 @@ FIELD_HINTS = {
     "questions": "Use a valid open or close question operation with a unique id.",
     "ack": "Acknowledge only a scanned inbox boundary between the prior receipt and seen cursor.",
     "session": "Use the registered, current session reference for this handle.",
+    "participant": "Give each current channel participant exactly one HANDLE=will_upgrade or HANDLE=stays_behind value.",
+    "target": "Choose a newer package version present in the locally verified release index.",
     "channel": "Use the explicit, initialized bare channel repository with its pinned protocol.",
     "input": "Check the documented input shape and limits; no message was published.",
     "summary": "Provide a nonempty summary of at most 300 characters.",
@@ -898,6 +920,28 @@ def release_status(directory=None):
                 "authenticity": "not verified (no attestation)"}
 
 
+def _protocol_transition_fields(protocol_digest, local_protocol_digest):
+    """Describe compatibility only when both digests are available and verified."""
+    if (not isinstance(protocol_digest, str) or not HEX.fullmatch(protocol_digest) or
+            not isinstance(local_protocol_digest, str) or not HEX.fullmatch(local_protocol_digest)):
+        return {"protocol_changed": None, "channel_action": "unknown"}
+    changed = protocol_digest != local_protocol_digest
+    return {"protocol_changed": changed,
+            "channel_action": "new_channel_required" if changed else "unchanged"}
+
+
+def _annotate_release_entries(items, verified_releases, local_protocol_digest):
+    verified = {item.get("package_version"): item for item in verified_releases
+                if isinstance(item, dict) and isinstance(item.get("package_version"), str)}
+    result = []
+    for item in items:
+        known = verified.get(item.get("package_version")) if isinstance(item, dict) else None
+        fields = _protocol_transition_fields(
+            known.get("protocol_sha256") if known else None, local_protocol_digest)
+        result.append(dict(item, **fields))
+    return result
+
+
 def _release_status(repo):
     if not package_is_checkout(repo):
         identity = package_identity(repo)
@@ -992,6 +1036,15 @@ def _release_status(repo):
                 "message": "release index contains no releases; no advice given",
                 "authenticity": "not verified (no attestation)"}
     latest = max(entries, key=lambda entry: semver(entry["package_version"]))
+    verified_releases = [{"package_version": entry["package_version"],
+                          "manifest_sha256": entry["manifest_sha256"],
+                          "protocol_sha256": entry["protocol_sha256"],
+                          "commit": entry["commit"], "tag": entry["tag"],
+                          "advisory": entry["advisory"],
+                          "summary": entry["summary"], "reason": entry["reason"],
+                          **({"affects": entry["affects"]} if "affects" in entry else {}),
+                          **({"fixed_in": entry["fixed_in"]} if "fixed_in" in entry else {})}
+                         for entry in entries]
     advice = [{"package_version": entry["package_version"], "advisory": entry["advisory"],
                "summary": entry["summary"], "reason": entry["reason"]}
               for entry in entries
@@ -1009,16 +1062,253 @@ def _release_status(repo):
                                       "fixed_in": entry.get("fixed_in")})
     return {"status": "ok", "pinned_version": identity["version"],
             "latest_version": latest["package_version"], "head": identity["commit"],
-            "advice": advice, "active_advisories": active_advisories,
-            "verified_releases": [{"package_version": entry["package_version"],
-                                   "manifest_sha256": entry["manifest_sha256"],
-                                   "protocol_sha256": entry["protocol_sha256"],
-                                   "commit": entry["commit"], "advisory": entry["advisory"],
-                                   "summary": entry["summary"], "reason": entry["reason"],
-                                   **({"affects": entry["affects"]} if "affects" in entry else {}),
-                                   **({"fixed_in": entry["fixed_in"]} if "fixed_in" in entry else {})}
-                                  for entry in entries],
+            "advice": _annotate_release_entries(advice, verified_releases,
+                                                identity["protocol_sha256"]),
+            "active_advisories": _annotate_release_entries(
+                active_advisories, verified_releases, identity["protocol_sha256"]),
+            "verified_releases": verified_releases,
             "authenticity": "not verified (no attestation)"}
+
+
+def _upgrade_error(message, code, field, hint, details=None):
+    raise ProtocolError(message, code=code, field=field, hint=hint, details=details)
+
+
+def _upgrade_channel_path(value):
+    require(isinstance(value, str) and value, "invalid upgrade channel path",
+            code="upgrade_channel_invalid", field="channel",
+            hint="Pass an initialized protocol-compatible channel path.")
+    raw = Path(value).expanduser()
+    if not raw.is_absolute():
+        raw = Path.cwd() / raw
+    # Refuse parent traversal instead of normalizing it across a possible symlink.
+    if ".." in raw.parts:
+        _upgrade_error("upgrade channel path is invalid", "upgrade_channel_invalid", "channel",
+                       "Pass a normalized path without parent traversal.")
+    cursor = Path(raw.anchor)
+    for part in raw.parts[1:]:
+        if part in {"", "."}:
+            continue
+        cursor = cursor / part
+        if cursor.is_symlink():
+            _upgrade_error("upgrade channel path contains a symlink", "upgrade_channel_symlink",
+                           "channel", "Use a path whose components are not symlinks.")
+    return raw
+
+
+def _parse_upgrade_participants(values, participants, reviewers):
+    supplied = {}
+    require(len(values) <= 32, "too many upgrade participant statuses",
+            code="upgrade_participant_malformed", field="participant",
+            hint="Pass at most one status for each current participant.")
+    current = set(participants)
+    for value in values:
+        if (not isinstance(value, str) or len(value) > 80 or "=" not in value):
+            _upgrade_error("upgrade participant status is malformed",
+                           "upgrade_participant_malformed", "participant",
+                           "Use HANDLE=will_upgrade or HANDLE=stays_behind.")
+        handle, status = value.split("=", 1)
+        if HANDLE.fullmatch(handle) is None:
+            _upgrade_error("upgrade participant status is malformed",
+                           "upgrade_participant_malformed", "participant",
+                           "Use a current lowercase handle and a documented status.")
+        if not status:
+            _upgrade_error("upgrade participant status is missing",
+                           "upgrade_participant_malformed", "participant",
+                           "Use HANDLE=will_upgrade or HANDLE=stays_behind.")
+        if handle in supplied:
+            _upgrade_error("duplicate upgrade participant status",
+                           "upgrade_participant_duplicate", "participant",
+                           "Give each current participant exactly one status.")
+        if handle not in current:
+            _upgrade_error("unknown upgrade participant",
+                           "upgrade_participant_unknown", "participant",
+                           "Use only handles listed by the selected channel.")
+        if status not in {"will_upgrade", "stays_behind"}:
+            _upgrade_error("invalid upgrade participant status",
+                           "upgrade_participant_status_invalid", "participant",
+                           "Use will_upgrade or stays_behind.")
+        if handle in reviewers and status == "stays_behind":
+            _upgrade_error("reviewers cannot stay behind in a channel migration",
+                           "upgrade_reviewer_stays_behind", "participant",
+                           "Every configured reviewer must be marked will_upgrade.")
+        supplied[handle] = status
+    return supplied
+
+
+def upgrade_plan(target_version=None, channel_path=None, participant_values=(), directory=None):
+    """Return a read-only plan from already verified local release metadata."""
+    repo = Path(directory or Path(__file__).resolve().parent).resolve()
+    status = release_status(repo)
+    if status.get("status") != "ok":
+        _upgrade_error("verified release information is unavailable",
+                       "upgrade_plan_unavailable", "target",
+                       "Check the local release-index checkout and retry when release-status is ok.",
+                       {"status": status.get("status")})
+    identity = package_identity(repo)
+    pinned = semver(identity["version"], "package_version")
+    releases = status.get("verified_releases", [])
+    by_version = {entry["package_version"]: entry for entry in releases}
+    if target_version is None:
+        newer = [entry for entry in releases
+                 if semver(entry["package_version"]) > pinned]
+        if not newer:
+            _upgrade_error("no newer verified release is available", "upgrade_target_not_newer",
+                           "target", "Choose a newer version after fetching an authorized release index.")
+        target = max(newer, key=lambda entry: semver(entry["package_version"]))
+        target_version = target["package_version"]
+    else:
+        try:
+            target_tuple = semver(target_version, "target")
+        except ProtocolError:
+            _upgrade_error("invalid upgrade target version", "invalid_upgrade_target", "target",
+                           "Use a three-part package version such as 1.2.3 without leading zeroes.")
+        target = by_version.get(target_version)
+        if target is None:
+            _upgrade_error("upgrade target is not locally verified", "upgrade_target_unverified",
+                           "target", "Choose a version listed in verified_releases.")
+        if target_tuple <= pinned:
+            _upgrade_error("upgrade target is not newer than the pinned package",
+                           "upgrade_target_not_newer", "target",
+                           "Choose a package version newer than the pinned version.")
+
+    transition = _protocol_transition_fields(target.get("protocol_sha256"),
+                                             identity.get("protocol_sha256"))
+    active = status.get("active_advisories", [])
+    severity = {"none": 0, "optional": 1, "recommended": 2, "required": 3}
+    selected = max(active, key=lambda entry: (
+        severity.get(entry.get("advisory"), 0),
+        semver(entry["package_version"])), default=None)
+    if selected:
+        applicable = {"advisory": selected["advisory"], "reason": selected["reason"]}
+        fixed_in = selected.get("fixed_in")
+        applicable["fixed_in"] = fixed_in
+    else:
+        applicable = {"advisory": "none", "reason": "No applicable advisory.", "fixed_in": None}
+        fixed_in = None
+    owner_fixed = fixed_in or "none"
+    protocol_line = ("unchanged, so this channel keeps working" if transition["protocol_changed"] is False
+                     else "changed, so a new channel is needed" if transition["protocol_changed"] is True
+                     else "unknown; channel compatibility has not been verified")
+    owner_notice = (
+        f"ai-comm release notice. Pinned: {identity['version']} at {identity['commit']}. "
+        f"Available: {target['package_version']}. Advisory: {applicable['advisory']}, "
+        f"which applies to this version: {applicable['reason']}; fixed in {owner_fixed}. "
+        f"Protocol: {protocol_line}. Steps: fetch tag {target['tag']}, verify it is annotated "
+        f"and its message names manifest {target['manifest_sha256']}, check out the tag, run "
+        f"scripts/check_tag.py, scripts/check_release_manifest.py and the test suite. "
+        "Authenticity: not verified (no attestation). Apply? yes/no")
+    repin_steps = [
+        ["git", "-C", str(repo), "fetch", "origin",
+         f"refs/tags/{target['tag']}:refs/tags/{target['tag']}"] ,
+        ["git", "-C", str(repo), "checkout", "--detach", target["tag"]],
+        ["python3", str(repo / "scripts" / "check_tag.py"), target["tag"]],
+        ["python3", str(repo / "scripts" / "check_release_manifest.py")],
+        ["python3", "-m", "unittest", "discover", "-s", str(repo / "tests")],
+    ]
+    result = {
+        "from": identity["version"], "to": target["package_version"],
+        "commit": target["commit"], "tag": target["tag"],
+        "manifest_sha256": target["manifest_sha256"],
+        "protocol_sha256": target["protocol_sha256"],
+        **transition,
+        "applicable_advisory": applicable,
+        "fixed_in": fixed_in,
+        "authenticity": "not verified (no attestation)",
+        "repin_steps": repin_steps,
+        "owner_notice": owner_notice,
+    }
+    if channel_path is None:
+        require(not participant_values, "participant statuses require --channel",
+                code="upgrade_participant_requires_channel", field="participant",
+                hint="Supply --channel with --participant, or omit participant statuses.")
+        return result
+
+    safe_path = _upgrade_channel_path(channel_path)
+    if not safe_path.is_dir():
+        _upgrade_error("upgrade channel path is not an initialized channel",
+                       "upgrade_channel_invalid", "channel",
+                       "Pass an existing initialized bare channel repository.")
+    bare = work_git(safe_path, "rev-parse", "--is-bare-repository", ok=(0, 128)).strip()
+    if bare != b"true":
+        _upgrade_error("upgrade channel path is not a bare repository",
+                       "upgrade_channel_not_bare", "channel",
+                       "Pass the initialized bare channel repository.")
+    try:
+        channel = Channel(safe_path)
+        channel_state = channel.snapshot()
+    except ProtocolError as exc:
+        code = exc.details.get("code")
+        if code == "channel_must_be_a_dedicated_bare_git_repository":
+            _upgrade_error("upgrade channel path is not a bare repository",
+                           "upgrade_channel_not_bare", "channel",
+                           "Pass the initialized bare channel repository.")
+        if code == "channel_symlink_refused":
+            _upgrade_error("upgrade channel path contains a symlink", "upgrade_channel_symlink",
+                           "channel", "Use a path whose components are not symlinks.")
+        _upgrade_error("upgrade channel path is not a compatible ai-comm channel",
+                       "upgrade_channel_invalid", "channel",
+                       "Pass a valid channel using this package's protocol.")
+
+    if transition["channel_action"] == "new_channel_required":
+        config = channel_state.config
+        current_handles = sorted(channel_state.current)
+        reviewers = list(config["reviewers"])
+        supplied = _parse_upgrade_participants(participant_values, current_handles, reviewers)
+        hint = str(channel.path.with_name(channel.path.name + "-upgraded"))
+        handoff_fields = {
+            "kind": "ai-comm-handoff",
+            "from_protocol_sha256": config["protocol_sha256"],
+            "to_protocol_sha256": target["protocol_sha256"],
+            "to_package_version": target["package_version"],
+            "task": config["task"],
+            "reviewers": reviewers,
+            "new_channel_hint": hint,
+            "reason": "The target release uses a different verified protocol digest.",
+        }
+        outstanding = [handle for handle in current_handles if handle not in supplied]
+        if outstanding:
+            migration = {"complete": False, "handoff_fields": handoff_fields,
+                         "participants_outstanding": outstanding,
+                         "choices": ["will_upgrade", "stays_behind (non-reviewers only)"]}
+        else:
+            participants = [{
+                "handle": handle,
+                "status": supplied[handle],
+                "reason": ("Marked will_upgrade in this plan." if supplied[handle] == "will_upgrade"
+                           else "Marked stays_behind in this plan."),
+            } for handle in current_handles]
+            handoff = dict(handoff_fields, participants=participants)
+            try:
+                validate_handoff(handoff, target_protocol_digest=target["protocol_sha256"])
+            except ProtocolError as exc:
+                if exc.details.get("code") == "handoff_reviewer_cannot_stay_behind":
+                    _upgrade_error("reviewers cannot stay behind in a channel migration",
+                                   "upgrade_reviewer_stays_behind", "participant",
+                                   "Every configured reviewer must be marked will_upgrade.")
+                raise
+            handoff_digest = sha(canonical(handoff))
+            new_channel = hint
+            migration = {
+                "complete": True,
+                "handoff": handoff,
+                "handoff_sha256": handoff_digest,
+                "steps": [
+                    ["PROPOSE", handoff_digest, "in the predecessor channel"],
+                    ["each configured reviewer ACCEPT", handoff_digest],
+                    ["configured reviewer DECIDE", "the accepted proposal"],
+                    ["owner-authorized re-pin", target["tag"]],
+                    ["python3", str(Path(__file__).resolve()), "--channel", new_channel,
+                     "init", "--task", config["task"], "--reviewers", *reviewers,
+                     "--predecessor", str(channel.path), "--handoff", handoff_digest],
+                ],
+            }
+        result["migration"] = migration
+    elif participant_values:
+        _upgrade_error("participant statuses are only used for protocol migration",
+                       "upgrade_participant_not_required", "participant",
+                       "Omit --participant when the target protocol is unchanged.")
+    return result
 
 
 def sync_directory(path):
@@ -1519,25 +1809,29 @@ class Snapshot:
             return None
         if "artifact" not in message:
             return {"status": "legacy_note", "advisory": "legacy_note",
-                    "reason": "historical upgrade note has no release record; no advisory inferred"}
+                    "reason": "historical upgrade note has no release record; no advisory inferred",
+                    **_protocol_transition_fields(None, None)}
         try:
             return self._release_notice(message)
         except Exception:
             return {"status": "unverified", "advisory": "malformed",
-                    "reason": "release notice is invalid; no advisory can be cleared"}
+                    "reason": "release notice is invalid; no advisory can be cleared",
+                    **_protocol_transition_fields(None, None)}
 
     def _release_notice(self, message):
         data = self.artifacts.get(message.get("artifact"))
         if data is None:
             return {"status": "unverified", "advisory": "malformed",
-                    "reason": "release record artifact is unavailable"}
+                    "reason": "release record artifact is unavailable",
+                    **_protocol_transition_fields(None, None)}
         try:
             record = parse(data, MAX_ARTIFACT)
             require(canonical(record) == data, "release record must be canonical JSON", code="release_record_must_be_canonical_json")
             validate_release_record(record)
         except (ProtocolError, UnicodeError, ValueError):
             return {"status": "unverified", "advisory": "malformed",
-                    "reason": "release record is invalid; no advisory can be cleared"}
+                    "reason": "release record is invalid; no advisory can be cleared",
+                    **_protocol_transition_fields(None, None)}
         version = semver(record["package_version"])
         local_version = semver(self._local_identity["version"])
         known = self._verified_releases.get(record["package_version"])
@@ -1574,11 +1868,19 @@ class Snapshot:
         if status == "inconsistent":
             advisory = "suppressed_inconsistent"
             applies = False
+        trusted_release = (self._release_index_status.get("status") == "ok" and known and
+                           record["commit"] == known.get("commit") and
+                           record["manifest_sha256"] == known.get("manifest_sha256") and
+                           record["protocol_sha256"] == known.get("protocol_sha256"))
+        transition = _protocol_transition_fields(
+            known.get("protocol_sha256") if trusted_release else None,
+            self._local_identity.get("protocol_sha256"))
         return {"status": status, "package_version": record["package_version"],
                 "advisory": advisory, "advisory_applies": applies,
                 "summary": message["summary"], "reason": record["reason"],
                 "different_pin": version != local_version and status in
-                {"update_available", "older_release_announced"}}
+                {"update_available", "older_release_announced"},
+                **transition}
 
     def message_view(self, message):
         notice = self.release_notice(message)
@@ -1976,6 +2278,12 @@ def parser():
     sub.add_parser("state")
     sub.add_parser("validate")
     sub.add_parser("release-status", help="inspect only already-fetched local release refs; never contacts the network")
+    p = sub.add_parser("upgrade-plan", help="print a read-only plan from verified local release metadata")
+    p.add_argument("--to", dest="target", help="verified newer package version; defaults to latest")
+    p.add_argument("--channel", dest="channel", default=argparse.SUPPRESS,
+                   help="optional current channel for a protocol migration plan")
+    p.add_argument("--participant", action="append", default=[], metavar="HANDLE=STATUS",
+                   help="explicit channel participant status (repeat for each handle)")
     p = sub.add_parser("show")
     p.add_argument("id")
     p = sub.add_parser("show-artifact")
@@ -1996,7 +2304,7 @@ def parser():
 def main(argv=None):
     try:
         args = parser().parse_args(argv)
-        if args.command != "release-status":
+        if args.command not in {"release-status", "upgrade-plan"}:
             require(args.channel is not None, "--channel is required for this command",
                     code="channel_required", field="channel",
                     hint="Pass --channel PATH before the command.")
@@ -2007,6 +2315,9 @@ def main(argv=None):
             return 0
         if args.command == "release-status":
             emit(release_status())
+            return 0
+        if args.command == "upgrade-plan":
+            emit(upgrade_plan(args.target, args.channel, args.participant))
             return 0
         channel = Channel(args.channel)
         cmd = args.command

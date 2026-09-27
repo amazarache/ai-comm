@@ -35,7 +35,7 @@ For the frozen mismatch code used by packages before 1.0.0,
 your pinned package implements a different contract from the channel. Do not
 edit anything; ask the owner about the upgrade in ACTIVATE.md section 6.
 
-CLI argument error fields: `actor`, `ack`, `after`, `channel`, `draft`, `dry_run`, `file`, `id`, `input`, `key`, `kind`, `limit`, `new_since`, `offset`, `out`, `platform`, `require_confidence`, `require_sources`, `reviewers`, `session`, `since`, `takeover`, `task`, `through`, `timeout`.
+CLI argument error fields: `ack`, `actor`, `after`, `channel`, `draft`, `dry_run`, `file`, `id`, `input`, `key`, `kind`, `limit`, `new_since`, `offset`, `out`, `participant`, `platform`, `require_confidence`, `require_sources`, `reviewers`, `session`, `since`, `takeover`, `target`, `task`, `through`, `timeout`.
 
 Complete code catalog:
 
@@ -55,6 +55,9 @@ Complete code catalog:
 | `at_least_two_distinct_reviewers_required` | at least two distinct reviewers required |
 | `bounded_advisory_requires_fixed_in` | bounded advisory requires fixed in |
 | `channel_busy_retry_with_the_same_key` | channel busy retry with the same key |
+| `channel_contract_newer_than_package` | channel contract newer than package |
+| `channel_contract_older_than_package` | channel contract older than package |
+| `channel_contract_unknown` | channel contract unknown |
 | `channel_does_not_exist_initialize_it_explicitly` | channel does not exist initialize it explicitly |
 | `channel_history_modified_or_removed_a_durable_record` | channel history modified or removed a durable record |
 | `channel_initialization_failed` | channel initialization failed |
@@ -90,6 +93,7 @@ Complete code catalog:
 | `fixed_in_requires_affects` | fixed in requires affects |
 | `git_operation_failed_no_success_is_implied` | git operation failed no success is implied |
 | `handle_already_active_explicit_takeover_required` | handle already active explicit takeover required |
+| `handoff_reviewer_cannot_stay_behind` | handoff reviewer cannot stay behind |
 | `index_inconsistent` | index inconsistent |
 | `index_invalid` | index invalid |
 | `init_refuses_an_existing_path` | init refuses an existing path |
@@ -121,6 +125,10 @@ Complete code catalog:
 | `invalid_git_object_response` | invalid git object response |
 | `invalid_git_size_response` | invalid git size response |
 | `invalid_handle` | invalid handle |
+| `invalid_handoff_artifact` | invalid handoff artifact |
+| `invalid_handoff_kind` | invalid handoff kind |
+| `invalid_handoff_participants` | invalid handoff participants |
+| `invalid_handoff_reviewers` | invalid handoff reviewers |
 | `invalid_historical_session` | invalid historical session |
 | `invalid_limit` | invalid limit |
 | `invalid_manifest_sha256` | invalid manifest sha256 |
@@ -168,7 +176,9 @@ Complete code catalog:
 | `invalid_summary_length` | invalid summary length |
 | `invalid_task_length` | invalid task length |
 | `invalid_timestamp` | invalid timestamp |
+| `invalid_tool_version` | invalid tool version |
 | `invalid_topic` | invalid topic |
+| `invalid_upgrade_target` | invalid upgrade target |
 | `invalid_utf_8_json` | invalid utf 8 json |
 | `json_exceeds_size_limit` | json exceeds size limit |
 | `json_must_be_an_object` | json must be an object |
@@ -189,6 +199,36 @@ Complete code catalog:
 | `package_version_missing` | package version missing |
 | `partial_clone_release_check_unsupported` | partial clone release check unsupported |
 | `pong_nonce_must_be_fresh` | pong nonce must be fresh |
+| `predecessor_acceptance_missing` | predecessor acceptance missing |
+| `predecessor_arguments_must_be_paired` | predecessor arguments must be paired |
+| `predecessor_decision_commit_invalid` | predecessor decision commit invalid |
+| `predecessor_decision_has_no_parent` | predecessor decision has no parent |
+| `predecessor_decision_invalid` | predecessor decision invalid |
+| `predecessor_decision_not_final` | predecessor decision not final |
+| `predecessor_decision_reviewer_invalid` | predecessor decision reviewer invalid |
+| `predecessor_handoff_digest_invalid` | predecessor handoff digest invalid |
+| `predecessor_handoff_invalid` | predecessor handoff invalid |
+| `predecessor_handoff_invalid_kind` | predecessor handoff invalid kind |
+| `predecessor_handoff_missing` | predecessor handoff missing |
+| `predecessor_handoff_participants_invalid` | predecessor handoff participants invalid |
+| `predecessor_handoff_protocol_digest_invalid` | predecessor handoff protocol digest invalid |
+| `predecessor_handoff_reviewers_invalid` | predecessor handoff reviewers invalid |
+| `predecessor_handoff_tampered` | predecessor handoff tampered |
+| `predecessor_head_not_decision` | predecessor head not decision |
+| `predecessor_head_unreadable` | predecessor head unreadable |
+| `predecessor_invalid_channel` | predecessor invalid channel |
+| `predecessor_invalid_head` | predecessor invalid head |
+| `predecessor_invalid_link` | predecessor invalid link |
+| `predecessor_not_bare` | predecessor not bare |
+| `predecessor_not_found` | predecessor not found |
+| `predecessor_package_too_old` | predecessor package too old |
+| `predecessor_participants_mismatch` | predecessor participants mismatch |
+| `predecessor_policy_mismatch` | predecessor policy mismatch |
+| `predecessor_reviewer_cannot_stay_behind` | predecessor reviewer cannot stay behind |
+| `predecessor_source_protocol_mismatch` | predecessor source protocol mismatch |
+| `predecessor_source_required` | predecessor source required |
+| `predecessor_symlink_refused` | predecessor symlink refused |
+| `predecessor_target_protocol_mismatch` | predecessor target protocol mismatch |
 | `proposal_already_decided_propose_a_new_revision` | proposal already decided propose a new revision |
 | `question_id_already_used` | question id already used |
 | `question_is_not_open` | question is not open |
@@ -214,6 +254,7 @@ Complete code catalog:
 | `this_act_requires_a_reply_target` | this act requires a reply target |
 | `this_act_requires_an_artifact` | this act requires an artifact |
 | `timeout_must_be_0_60_seconds` | timeout must be 0 60 seconds |
+| `tool_version_changed_requires_fresh_session` | tool version changed requires fresh session |
 | `truncated_git_object` | truncated git object |
 | `truncated_git_object_response` | truncated git object response |
 | `unbounded_advisory_fixed_in` | unbounded advisory fixed in |
@@ -229,8 +270,22 @@ Complete code catalog:
 | `unregistered_recipients` | unregistered recipients |
 | `unsupported_message_version` | unsupported message version |
 | `unsupported_or_malformed_channel` | unsupported or malformed channel |
+| `upgrade_channel_invalid` | path is not a compatible initialized channel |
+| `upgrade_channel_not_bare` | channel path is not a bare Git repository |
+| `upgrade_channel_symlink` | channel path contains a symlink |
+| `upgrade_participant_duplicate` | participant status was supplied more than once |
+| `upgrade_participant_malformed` | participant status must be HANDLE=STATUS |
+| `upgrade_participant_missing` | a required participant status is missing |
+| `upgrade_participant_not_required` | statuses were supplied for a non-migration target |
+| `upgrade_participant_requires_channel` | participant statuses require --channel |
+| `upgrade_participant_status_invalid` | participant status must be will_upgrade or stays_behind |
+| `upgrade_participant_unknown` | participant handle is not in the channel |
+| `upgrade_plan_unavailable` | verified local release metadata is unavailable |
 | `upgrade_requires_release_record` | upgrade requires release record |
+| `upgrade_reviewer_stays_behind` | configured reviewers must migrate with the channel |
 | `upgrade_summary_incomplete` | upgrade summary incomplete |
+| `upgrade_target_not_newer` | target is not newer than the pinned package |
+| `upgrade_target_unverified` | target is absent from verified local releases |
 
 | `channel_contract_newer_than_package` | channel declares a newer protocol version |
 | `channel_contract_older_than_package` | channel contract is older than this package |
@@ -290,6 +345,12 @@ Common repair codes:
 | `index_invalid` | `index` | Correct the release index; no update advice is emitted. |
 | `index_inconsistent` | `index` | Reconcile the index with the local annotated tag; no update advice is emitted. |
 | `channel_required` | `channel` | Pass the explicit channel path for channel operations. |
+| `upgrade_plan_unavailable` | `target` | Refresh only with the owner's release-check permission, then retry when release-status is `ok`. |
+| `upgrade_target_unverified` | `target` | Choose a version listed in `verified_releases`. |
+| `upgrade_target_not_newer` | `target` | Choose a newer verified package version. |
+| `upgrade_participant_requires_channel` | `participant` | Supply `--channel` when listing participant statuses. |
+| `upgrade_participant_status_invalid` | `participant` | Use `will_upgrade` or `stays_behind`. |
+| `upgrade_reviewer_stays_behind` | `participant` | Mark every configured reviewer `will_upgrade`. |
 
 Every call site assigns a stable code independently from its error wording.
 `ERROR_CODES` in `ai_comm.py` is the complete public set. Additions require an

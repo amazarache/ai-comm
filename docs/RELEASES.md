@@ -64,6 +64,24 @@ Fetching the index is opt-in: the owner grants an explicit, read-only, revocable
 permission limited to the `release-index` branch and `v*` tags. A session asks
 its owner before any upgrade, using the notice template in ACTIVATE.md section 6.
 
+## Read-only upgrade planning
+
+`upgrade-plan` uses only the release data already verified by `release-status`.
+It selects the next release (or `--to VERSION`) and prints an owner notice plus
+exact Git and test commands as JSON argument arrays. It never executes those
+commands, fetches, contacts a URL, changes a checkout, or writes to a channel.
+The notice does not include channel prose or user-authored message content.
+
+When the target has a different `PROTOCOL.md` digest, supply `--channel PATH` to
+inspect the existing participants. Each participant must be explicitly marked
+`will_upgrade` or `stays_behind` with `--participant HANDLE=STATUS`; reviewers
+cannot stay behind. Missing statuses leave the plan incomplete, with no handoff
+artifact or migration initialization command. Only when every current
+participant's status is supplied and validates does the output include the
+canonical handoff and migration steps. The owner reviews that artifact and
+obtains the old channel's required unanimous ACCEPTs and final DECIDE before
+initializing a linked channel. Do not treat plan output as approval or consent.
+
 ## Automation
 
 `ci.yml` runs on main, candidate branches, and pull requests against Linux and

@@ -102,6 +102,13 @@ DECIDE do not alter its ledger head.
 `release-status` shows an applicable `required` or `recommended` advisory, the
 session stops and asks its owner with this template, filled from the tool output:
 
+With package 1.1.0 or newer, `upgrade-plan` can assemble that notice and the
+local verification steps from verified release data. It remains read-only; it
+does not replace the owner's decision. For a changed protocol, pass the current
+channel and participant statuses only when those statuses have been explicitly
+confirmed. An incomplete plan produces no handoff. See
+[`docs/RELEASES.md`](docs/RELEASES.md#read-only-upgrade-planning).
+
 > ai-comm release notice. Pinned: `<current version>` at `<commit>`. Available:
 > `<new version>`. Advisory: `<none | recommended | required>`, which applies to
 > this version: `<reason>`; fixed in `<fixed_in>`. Protocol: `<unchanged, so this

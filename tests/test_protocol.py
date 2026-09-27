@@ -608,13 +608,15 @@ class ProtocolTests(unittest.TestCase):
     def test_upgrade_record_is_strict_and_surfaces_advisory_in_state_and_inbox(self):
         package = SCRIPT.parent
         identity = ac.package_identity(package)
-        next_major = int(ac.VERSION.split(".", 1)[0]) + 1
+        # Release identity intentionally reads committed HEAD, so use it rather
+        # than the working-tree VERSION constant in this fixture.
+        next_major = int(identity["version"].split(".", 1)[0]) + 1
         record = {"kind": "ai-comm-release", "package_version": identity["version"],
                   "commit": "a" * 40, "tag": "v" + identity["version"],
                   "manifest_sha256": identity["manifest_sha256"],
                   "protocol_sha256": identity["protocol_sha256"],
                   "advisory": "required", "reason": "A protocol safety defect affects this range.",
-                  "affects": f">={ac.VERSION},<{next_major}.0.0",
+                  "affects": f">={identity['version']},<{next_major}.0.0",
                   "fixed_in": f"{next_major}.0.0"}
         digest = self.channel.put_artifact("alpha", "alpha-session", ac.canonical(record))["artifact"]
         summary = f"Release v{identity['version']} at {record['commit']}; required advisory."
