@@ -86,10 +86,10 @@ must be the final ledger message. If another message follows it, repeat the
 proposal, acceptance and decision on the same artifact before migrating. Older
 packages (before 1.0.0) show the frozen generic
 `package_contract_does_not_match_channel_select_its_pinned_revisi` error for
-every digest mismatch; that error cannot tell whether the channel is older or
-newer. Its repair is: your pinned package implements a different contract from
-the channel. Do not edit anything; ask the owner about the upgrade in section 6.
-Only non-reviewers may be marked
+every digest mismatch and cannot tell older from newer. Your pinned package
+implements a different contract from the channel. Do not edit the channel or the
+pin to force it open. Ask the owner: either use the package pinned for that
+channel, or approve an upgrade as in section 6. Only non-reviewers may be marked
 `stays_behind`. After the owner authorizes the migration, initialize the new
 channel with the same task and reviewer set using
 `init --predecessor <old-channel> --handoff <artifact-sha256>`. The new tool

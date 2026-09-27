@@ -24,8 +24,8 @@
     },
     {
       "path": "ACTIVATE.md",
-      "bytes": 12510,
-      "sha256": "8cc3674a32d3f595b2fdeb411eb4a1a3b7854a6d31d5b0ae49c27d1adb1dd3e6"
+      "bytes": 12553,
+      "sha256": "3a20df4e5ae439095cbde9dc7e61d9f54bac9a77e9dbf822c6c35a2c052a75f9"
     },
     {
       "path": "CHANGELOG.md",
@@ -54,8 +54,8 @@
     },
     {
       "path": "docs/ERRORS.md",
-      "bytes": 19973,
-      "sha256": "1a841ffbfb7d21ed6aabd35d61944bc8e8ac9b8c7df6b1752d0e70c1c664294f"
+      "bytes": 20034,
+      "sha256": "1716c5d6c950c9fd7974fb1f09626ddce22c735567ccaf9ec6e6c8ad2463b1aa"
     },
     {
       "path": "docs/EXPERIMENT.md",

@@ -20,9 +20,10 @@ retry with the same key so a committed message is returned idempotently.
 
 Packages released before 1.0.0 use the frozen generic
 `package_contract_does_not_match_channel_select_its_pinned_revisi` error for
-protocol digest mismatches. They cannot distinguish an older, newer, or unknown
-contract. Keep using the package pinned to that channel; verify any proposed
-migration with a protocol-3-capable package and the channel's accepted handoff.
+protocol digest mismatches and cannot tell older from newer. Your pinned package
+implements a different contract from the channel. Do not edit the channel or the
+pin to force it open. Ask the owner: either use the package pinned for that
+channel, or approve an upgrade as in ACTIVATE.md section 6.
 
 An error's `field` is a public draft key or a documented CLI argument. When a
 more precise internal field is useful, `subfield` identifies it without
