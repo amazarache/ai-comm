@@ -1,5 +1,20 @@
 # Changes
 
+## 1.2.0
+
+- Add a verified `state.local_package` identity for Git and archive installs;
+  label participant `tool_version` as join-time and compare it only when the
+  caller supplies its own handle and session.
+- Add an optional `check_for_release.py` helper. It verifies the HTTPS origin
+  before network access, fetches only the release-index branch and version tags
+  when explicitly permitted, and reports stable JSON plus scheduler exit codes.
+  It never installs, checks out or re-pins; the CLI remains offline.
+- Document owner-triggered checks, revocable scheduled permission and an
+  optional UTC cron example.
+- Clarify package/protocol versioning, including protocol MINOR migration and
+  package MAJOR rules.
+- Keep `PROTOCOL.md` unchanged at the 3.0 contract digest.
+
 ## 1.1.0
 
 - Add a read-only `upgrade-plan` command that derives release transitions and

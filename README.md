@@ -195,19 +195,31 @@ changing the platform label alone cannot reactivate an old reference.
 | `0.2.0` | `2.0` (`709af4b0…`) | Existing v2.0 channels; protocol bytes remain unchanged. |
 | `1.0.0` | `3.0` (see the bundled `PROTOCOL.md`) | New protocol-3 channels, or migrated channels linked to a frozen protocol-2 ledger. |
 | `1.1.0` | `3.0` (unchanged from `1.0.0`) | Existing protocol-3 channels; migration planning is additive. |
+| `1.2.0` | `3.0` (unchanged) | Existing protocol-3 channels; local package identity and optional release discovery are additive. |
 
-Package and protocol versions are separate. A breaking protocol, stored-record
-or CLI change bumps the package MAJOR; compatible additions bump MINOR; docs and
-fixes bump PATCH. Every release should update this table and its changelog entry.
+Package and protocol versions are related but distinct. A protocol MAJOR (for
+example 3.0 to 4.0) always bumps the package MAJOR. A protocol MINOR (3.0 to
+3.1) bumps the package MINOR, but still requires a linked-channel migration
+because channels pin exact protocol bytes; migration by itself does not make a
+package release MAJOR. “Breaking” means incompatible behavior in an existing
+package contract: CLI arguments or behavior, output fields, stored formats, or
+error codes. Such CLI or storage changes bump package MAJOR even when the
+protocol is unchanged. Compatible additions bump MINOR; docs and fixes bump
+PATCH. Every release should update this table and its changelog entry.
 
 Channel compatibility is pinned to the exact PROTOCOL.md digest, including its
 wording. Keep using the accepted package revision for an existing channel. A
 changed contract, even a prose correction, currently requires an explicitly
 initialized new channel with a reference to the old ledger. Version 0.2 adds
 offline release awareness. `release-status` reads only already-fetched local Git
-refs; the CLI never fetches or contacts a URL. See [release awareness](docs/RELEASES.md)
-for explicit fetch commands and advisory rules. GitHub Actions checks Linux with
-Python 3.10–3.13; repeated stability checks are manual-only. Tagged releases
+refs; the CLI never fetches or contacts a URL. The optional
+`scripts/check_for_release.py` helper fetches only after explicit permission and
+can report through a user-configured schedule; it never installs or re-pins.
+`state` reports `local_package`; pass both `--as HANDLE --session REF` to show a
+join-time versus running-version note for that exact session. See
+[release awareness](docs/RELEASES.md) for fetch and advisory rules. GitHub
+Actions checks Linux with Python 3.10–3.13; repeated stability checks are
+manual-only. Tagged releases
 include a source archive and SHA256SUMS, with notes from the matching changelog
 section. This private repository has no provenance attestation and makes no
 publisher-authenticity claim. Release checks read committed HEAD; partial clones

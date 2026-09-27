@@ -757,8 +757,17 @@ class ProtocolTests(unittest.TestCase):
         git("update-ref", "refs/remotes/origin/release-index", "HEAD")
         package = host / ".tools" / "ai-comm"
         package.mkdir(parents=True)
-        for name in ("ai_comm.py", "RELEASE-MANIFEST.json", "PROTOCOL.md"):
+        for name in ("ai_comm.py", "PROTOCOL.md"):
             shutil.copyfile(SCRIPT.parent / name, package / name)
+        manifest_files = []
+        for name in ("ai_comm.py", "PROTOCOL.md"):
+            content = (package / name).read_bytes()
+            manifest_files.append({"path": name, "bytes": len(content),
+                                   "sha256": hashlib.sha256(content).hexdigest()})
+        manifest = {"format": "ai-comm-review-manifest/1",
+                    "protocol_sha256": hashlib.sha256((package / "PROTOCOL.md").read_bytes()).hexdigest(),
+                    "files": manifest_files}
+        (package / "RELEASE-MANIFEST.json").write_bytes(ac.canonical(manifest))
         identity = ac.package_identity(package)
         self.assertEqual((ac.VERSION, None, "archive"),
                          (identity["version"], identity["commit"], identity["source"]))

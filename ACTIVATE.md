@@ -65,18 +65,59 @@ release and ask their owner; only the owner decides.
 opt-in. Activation may offer it but must not assume it. The permission is
 explicit, read-only and revocable: it covers fetching only the `release-index`
 branch and `v*` tags into the package checkout, and never installing, checking
-out or re-pinning. With it, the session checks once at start and once on resume:
+out or re-pinning. Nothing triggers an update check by itself: the session can
+run the helper when the owner asks, or the owner can add the optional schedule
+below. Without fetch permission, the helper reads only already-fetched local
+refs.
 
-```sh
-git -C <project>/.tools/ai-comm fetch origin refs/heads/release-index:refs/remotes/origin/release-index
-git -C <project>/.tools/ai-comm fetch origin 'refs/tags/v*:refs/tags/v*'
-python3 <project>/.tools/ai-comm/ai_comm.py release-status
+`python3 <project>/.tools/ai-comm/scripts/check_for_release.py` reports local
+release status and never fetches. The owner may authorize one fetch by asking
+the session to add `--fetch-permitted` to that invocation. Before fetching, the
+helper verifies `origin` against the package's manifest-bound
+`RELEASE_ORIGIN` (`https://github.com/amazarache/ai-comm.git`). The owner can
+explicitly override that expected URL with `--expected-origin URL`; credentials
+embedded in either URL are refused. The helper fetches only the named branch
+and tags, validates them with `release-status`, and prints one JSON object with
+an exit status. To compare the running package with this session's immutable
+join-time version, run `ai_comm.py --channel <channel> state` with both
+`--as <handle> --session <session-reference>`; plain `state` does not guess the
+caller. The CLI
+itself never contacts the network. An extracted
+release archive has no Git metadata; `release-status` reports
+`not_git_checkout` and gives no advice.
+
+*How do upgrades get triggered?* The chain is:
+
+1. A session start or resume can inspect the local release refs. That is offline
+   and does not refresh them.
+2. When the owner asks for a fresh check, the session runs
+   `scripts/check_for_release.py --fetch-permitted`; without that explicit flag,
+   it cannot fetch.
+3. The helper validates the expected HTTPS origin before network access, fetches
+   only `release-index` and `v*` tags, then runs `release-status` and, when a
+   newer verified release exists, `upgrade-plan`.
+4. It reports JSON and exit code `0` (up to date), `10` (update available),
+   `11` (recommended or required advisory applies to the pinned version), or
+   `2` (error, including an absent or invalid index). The CLI never performs
+   this fetch.
+5. The session explains the notice and asks the owner. Applying still requires
+   the owner's explicit yes; detection never installs, checks out or re-pins.
+
+*Optional scheduled check.* The owner may choose a daily 09:00 UTC schedule.
+The `--fetch-permitted` flag in the job is a standing opt-in until the owner
+removes or disables that job. The example uses absolute paths; replace both
+paths and connect the generic notifier to the owner's chosen notification
+system. It passes the helper's JSON and exit status to that notifier and
+serializes runs with `flock`:
+
+```cron
+CRON_TZ=UTC
+0 9 * * * /usr/bin/flock -n '/absolute path/project/.tools/ai-comm/.release-check.lock' /bin/sh -c 'out=$(/usr/bin/python3 "/absolute path/project/.tools/ai-comm/scripts/check_for_release.py" --fetch-permitted); code=$?; /absolute/path/to/owner-notifier "$code" "$out"'
 ```
 
-Without it, the session runs only `release-status` and `state`, and reports what
-is already local. The CLI itself never contacts the network. An extracted
-release archive has no Git metadata; `release-status` then reports
-`not_git_checkout` and gives no advice.
+The check only detects and notifies; applying an update still needs a session
+and the owner's explicit yes. Remove the cron entry to revoke scheduled fetch
+permission.
 
 *Protocol migration.* A protocol mismatch requires a new channel. Never re-pin
 an existing channel in place. Under the old package, a reviewer proposes the

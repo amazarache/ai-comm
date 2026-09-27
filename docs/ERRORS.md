@@ -247,6 +247,7 @@ Complete code catalog:
 | `source_evidence_required_by_channel_policy` | source evidence required by channel policy |
 | `source_id_is_immutable` | source id is immutable |
 | `state_budget_too_small` | state budget too small |
+| `state_identity_incomplete` | state identity incomplete |
 | `stored_artifact_must_be_utf_8_text` | stored artifact must be utf 8 text |
 | `stored_draft_exceeds_limit` | stored draft exceeds limit |
 | `stored_object_exceeds_limit` | stored object exceeds limit |

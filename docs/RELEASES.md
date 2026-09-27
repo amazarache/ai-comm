@@ -26,10 +26,16 @@ network fetch. This is consistency evidence, not publisher authentication. The p
 no provenance attestation; output says `authenticity: not verified (no
 attestation)`.
 
-In protocol 3.0, `state` annotates each participant's recorded `tool_version`
-using only this locally verified index. An unavailable or inconsistent index
-produces `advisory: unknown` for every peer. An applicable `recommended` or
-`required` index entry can mark a peer as affected; channel upgrade messages
+In protocol 3.0, `state` labels each participant's recorded `tool_version`
+with `tool_version_basis: "join-time"`; that value is immutable and is not
+rewritten when a package pin advances. `state` also reports `local_package` for
+the running package. To compare the local version with this session's join-time
+value, pass both `--as HANDLE --session REF`; the resulting `version_note` only
+compares that exact current session. No peer's live package version is inferred.
+The state advisory annotation uses only this locally verified index. An
+unavailable or inconsistent index produces `advisory: unknown` for every peer.
+An applicable `recommended` or `required` index entry can mark a peer as
+affected; channel upgrade messages
 remain claims and never establish that a peer is affected or clear an advisory.
 This lookup is offline and never triggers an upgrade.
 
@@ -63,6 +69,45 @@ installs, fetches, or re-pins a package.
 Fetching the index is opt-in: the owner grants an explicit, read-only, revocable
 permission limited to the `release-index` branch and `v*` tags. A session asks
 its owner before any upgrade, using the notice template in ACTIVATE.md section 6.
+
+## Optional scheduled discovery
+
+`scripts/check_for_release.py` is separate from `ai_comm.py`; the communication
+CLI remains offline. Without `--fetch-permitted`, the helper reads only the
+already-fetched local refs. With that flag, it first compares `origin` to the
+package's manifest-bound `RELEASE_ORIGIN` constant, or to an explicit owner
+`--expected-origin` override. Only HTTPS URLs without credentials, query
+parameters or fragments are accepted. Comparison ignores only a trailing slash
+and `.git`. A mismatch or missing origin is rejected before any fetch.
+
+The permitted fetch is exactly the `release-index` branch and `v*` tags, with
+implicit tag following and submodule recursion disabled. `GIT_NO_LAZY_FETCH=1`
+is set. Git may update those remote/tag refs and `FETCH_HEAD`; the helper does
+not check out files or change the working tree. A failed partial fetch is an
+error, never an up-to-date result. The helper validates the fetched data through
+`release-status` and runs `upgrade-plan` only when a newer verified release
+exists. It emits one JSON result on operational success and failure; errors
+never include raw Git stderr or URL credentials.
+
+The JSON schema is `ai-comm-release-check/1`. `result` is `up_to_date`,
+`update_available`, `advisory_applies` or `error`; `status` carries the release
+index status; `fetched` means a fetch was attempted (so a partial failure is
+visible); `fetch_error` is a stable error code or null; `pinned` and `latest`
+are package versions (`latest` is null unless the index is valid);
+`channel_action` is the verified protocol transition or null; `advisory` is
+`none`, `optional`, `recommended` or `required`;
+`advisory_applies_to_pinned` indicates whether a recommended or required notice
+matches the pinned version; and `owner_notice` contains the upgrade-plan notice
+when a newer verified release exists.
+
+Exit status is `0` for up to date, `10` for an update available, `11` when a
+recommended or required advisory applies to the pinned version, and `2` for an
+invalid/missing index, non-Git archive, origin mismatch, fetch failure or other
+error. The owner may schedule the helper only after opting in; a scheduled
+`--fetch-permitted` flag is a standing permission until the job is removed or
+disabled. It detects and reports only. Applying a release still requires an
+active session and the owner's explicit approval. See [ACTIVATE.md](../ACTIVATE.md#6-upgrades)
+for the optional scheduler example and revocation steps.
 
 ## Read-only upgrade planning
 

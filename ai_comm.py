@@ -9,7 +9,7 @@ import hashlib
 import html
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import secrets
 import subprocess
@@ -19,7 +19,8 @@ import time
 import unicodedata
 from datetime import datetime, timezone
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
+RELEASE_ORIGIN = "https://github.com/amazarache/ai-comm.git"
 PROTOCOL_VERSION = "3.0"
 PREVIOUS_PROTOCOLS = (("2.0", "709af4b00ffcabeeca1b175d7d7d6db5103df829dabba1e529eef26dce23a000", "0.2.0"),)
 ACTS = {"PING", "ACK", "PONG", "ASK", "FACT", "CORRECT", "PROPOSE",
@@ -322,6 +323,7 @@ ERROR_CODES = frozenset([
     'source_evidence_required_by_channel_policy',
     'source_id_is_immutable',
     'state_budget_too_small',
+    'state_identity_incomplete',
     'stored_artifact_must_be_utf_8_text',
     'stored_draft_exceeds_limit',
     'stored_object_exceeds_limit',
@@ -875,22 +877,77 @@ def package_is_checkout(repo):
     # Only the package's own checkout counts; never let Git search parent directories.
     if not (repo / ".git").exists():
         return False
-    top = work_git(repo, "rev-parse", "--show-toplevel", ok=(0, 128)).removesuffix(b"\n").decode()
+    try:
+        top = work_git(repo, "rev-parse", "--show-toplevel").removesuffix(b"\n").decode()
+    except ProtocolError:
+        return False
     return bool(top) and Path(top).resolve() == repo
+
+
+def _archive_package_identity(repo):
+    """Identify an extracted package only when its installed manifest verifies."""
+    try:
+        version_src = (repo / "ai_comm.py").read_text(encoding="utf-8")
+        match = re.search(r'^VERSION = "([0-9]+\.[0-9]+\.[0-9]+)"$', version_src, re.MULTILINE)
+        require(match is not None, "invalid archive identity", code="archive_version_invalid")
+        version = match.group(1)
+        semver(version, "package_version")
+        manifest_raw = (repo / "RELEASE-MANIFEST.json").read_bytes()
+        manifest = parse(manifest_raw, MAX_ARTIFACT)
+        require(isinstance(manifest, dict) and
+                manifest.get("format") == "ai-comm-review-manifest/1" and
+                isinstance(manifest.get("files"), list),
+                "invalid archive identity", code="archive_manifest_invalid")
+        require(isinstance(manifest.get("protocol_sha256"), str) and
+                HEX.fullmatch(manifest["protocol_sha256"]),
+                "invalid archive identity", code="archive_protocol_invalid")
+        seen = set()
+        for entry in manifest["files"]:
+            require(isinstance(entry, dict) and set(entry) == {"path", "bytes", "sha256"},
+                    "invalid archive identity", code="archive_manifest_entry_invalid")
+            name = entry["path"]
+            require(isinstance(name, str) and name and "\\" not in name and "\x00" not in name,
+                    "invalid archive identity", code="archive_manifest_path_invalid")
+            relative = PurePosixPath(name)
+            require(not relative.is_absolute() and name == relative.as_posix() and
+                    all(part not in {"", ".", ".."} for part in relative.parts) and
+                    name != "RELEASE-MANIFEST.json" and name not in seen,
+                    "invalid archive identity", code="archive_manifest_path_invalid")
+            seen.add(name)
+            target = repo.joinpath(*relative.parts)
+            cursor = repo
+            for part in relative.parts:
+                cursor = cursor / part
+                require(not cursor.is_symlink(), "invalid archive identity",
+                        code="archive_manifest_symlink")
+            content = target.read_bytes()
+            require(target.is_file() and type(entry["bytes"]) is int and
+                    entry["bytes"] == len(content) and isinstance(entry["sha256"], str) and
+                    HEX.fullmatch(entry["sha256"]) and sha(content) == entry["sha256"],
+                    "invalid archive identity", code="archive_manifest_mismatch")
+        require("ai_comm.py" in seen and "PROTOCOL.md" in seen,
+                "invalid archive identity", code="archive_manifest_incomplete")
+        protocol = (repo / "PROTOCOL.md").read_bytes()
+        require(sha(protocol) == manifest["protocol_sha256"],
+                "invalid archive identity", code="archive_protocol_mismatch")
+        return {"version": version, "commit": None, "source": "archive",
+                "manifest_sha256": sha(manifest_raw),
+                "protocol_sha256": sha(protocol)}
+    except ProtocolError as exc:
+        return {"version": None, "commit": None, "source": "unknown",
+                "manifest_sha256": None, "protocol_sha256": None,
+                "reason": exc.details["code"]}
+    except (OSError, UnicodeError, ValueError, TypeError, KeyError, RecursionError):
+        return {"version": None, "commit": None, "source": "unknown",
+                "manifest_sha256": None, "protocol_sha256": None,
+                "reason": "archive_identity_unavailable"}
 
 
 def package_identity(directory=None):
     repo = Path(directory or Path(__file__).resolve().parent).resolve()
     if not package_is_checkout(repo):
-        # Extracted release archive: identify the installed files; there is no commit.
-        version_src = (repo / "ai_comm.py").read_text(encoding="utf-8")
-        match = re.search(r'^VERSION = "([0-9]+\.[0-9]+\.[0-9]+)"$', version_src, re.MULTILINE)
-        require(match is not None, "package version missing", code="package_version_missing",
-                field="channel", hint="Use a package with a valid VERSION constant.")
-        semver(match.group(1), "package_version")
-        return {"version": match.group(1), "commit": None, "source": "archive",
-                "manifest_sha256": sha((repo / "RELEASE-MANIFEST.json").read_bytes()),
-                "protocol_sha256": sha((repo / "PROTOCOL.md").read_bytes())}
+        # Extracted release archive: validate installed files; there is no commit.
+        return _archive_package_identity(repo)
     version_src = work_git(repo, "show", "HEAD:ai_comm.py").decode("utf-8")
     match = re.search(r'^VERSION = "([0-9]+\.[0-9]+\.[0-9]+)"$', version_src, re.MULTILINE)
     require(match is not None, "package version missing from HEAD", code="package_version_missing",
@@ -900,8 +957,9 @@ def package_identity(directory=None):
     manifest = work_git(repo, "show", "HEAD:RELEASE-MANIFEST.json")
     protocol = work_git(repo, "show", "HEAD:PROTOCOL.md")
     head = work_git(repo, "rev-parse", "HEAD").decode().strip()
-    return {"version": version, "commit": head, "source": "git", "manifest_sha256": sha(manifest),
-            "protocol_sha256": sha(protocol)}
+    dirty = bool(work_git(repo, "status", "--porcelain=v1", "--untracked-files=normal"))
+    return {"version": version, "commit": head, "source": "git", "dirty": dirty,
+            "manifest_sha256": sha(manifest), "protocol_sha256": sha(protocol)}
 
 
 def release_status(directory=None):
@@ -912,9 +970,9 @@ def release_status(directory=None):
         # Release metadata is advisory only and must never affect channel operations.
         try:
             identity = package_identity(repo)
-            version, head = identity["version"], identity["commit"]
+            version, head = identity.get("version"), identity.get("commit")
         except Exception:
-            version, head = VERSION, None
+            version, head = None, None
         return {"status": "index_invalid", "pinned_version": version, "head": head,
                 "advice": [], "message": "release index could not be safely validated; no advice given",
                 "authenticity": "not verified (no attestation)"}
@@ -945,7 +1003,7 @@ def _annotate_release_entries(items, verified_releases, local_protocol_digest):
 def _release_status(repo):
     if not package_is_checkout(repo):
         identity = package_identity(repo)
-        return {"status": "not_git_checkout", "pinned_version": identity["version"],
+        return {"status": "not_git_checkout", "pinned_version": identity.get("version"),
                 "head": None, "advice": [],
                 "message": "package is not a Git checkout (for example an extracted release "
                            "archive); release status needs a Git checkout of a tagged release; "
@@ -1768,8 +1826,9 @@ class Snapshot:
         try:
             self._local_identity = package_identity(Path(__file__).resolve().parent)
         except Exception:
-            self._local_identity = {"version": VERSION, "manifest_sha256": None,
-                                    "protocol_sha256": None}
+            self._local_identity = {"version": None, "commit": None, "source": "unknown",
+                                    "manifest_sha256": None, "protocol_sha256": None,
+                                    "reason": "local_identity_unavailable"}
         try:
             status = release_status(Path(__file__).resolve().parent)
             self._release_index_status = status
@@ -2073,9 +2132,17 @@ class Snapshot:
         self.by_id[message["id"]] = message
         self.retries[retry] = message
 
-    def state(self, budget=8192):
+    def state(self, budget=8192, actor=None, session=None):
+        local = {key: self._local_identity.get(key) for key in
+                 ("version", "commit", "protocol_sha256", "source")}
+        if self._local_identity.get("source") == "git":
+            local["dirty"] = bool(self._local_identity.get("dirty"))
+        if self._local_identity.get("source") == "unknown":
+            local["reason"] = self._local_identity.get("reason", "local_identity_unavailable")
         result = {"v": 2, "head": self.head, "task": self.config["task"],
-                  "participants": [dict(record, advisory=self.peer_advisory(record))
+                  "local_package": local,
+                  "participants": [dict(record, tool_version_basis="join-time",
+                                        advisory=self.peer_advisory(record))
                                   for record in self.current.values()],
                   "open_questions": [{"id": q["id"], "opened_by": q["opened_by"]}
                                      for q in self.questions.values() if q["state"] == "open"],
@@ -2088,6 +2155,14 @@ class Snapshot:
                   "omitted": {"participants": 0, "open_questions": 0, "decisions": 0,
                               "recent": 0, "release_notices": 0},
                   "inspect": "registry sessions|questions|sources; log --after N; show ID"}
+        if actor is not None or session is not None:
+            require(actor is not None and session is not None,
+                    "state identity requires both actor and session", code="state_identity_incomplete",
+                    field="session", hint="Pass both --as and --session, or neither.")
+            own = self.identity(actor, session)
+            running = local.get("version")
+            if isinstance(running, str) and own["tool_version"] != running:
+                result["version_note"] = {"joined_with": own["tool_version"], "running": running}
         while len(canonical(result)) > budget:
             notices = result["release_notices"]
             disposable = [i for i, notice in enumerate(notices)
@@ -2288,7 +2363,9 @@ def parser():
             p.add_argument("--through", type=int, required=True)
         elif command == "artifact":
             p.add_argument("--file", required=True)
-    sub.add_parser("state")
+    p = sub.add_parser("state")
+    p.add_argument("--as", dest="actor")
+    p.add_argument("--session")
     sub.add_parser("validate")
     sub.add_parser("release-status", help="inspect only already-fetched local release refs; never contacts the network")
     p = sub.add_parser("upgrade-plan", help="print a read-only plan from verified local release metadata")
@@ -2353,7 +2430,7 @@ def main(argv=None):
         else:
             state = channel.snapshot()
             if cmd == "state":
-                value = state.state()
+                value = state.state(actor=args.actor, session=args.session)
             elif cmd == "validate":
                 value = {"valid": True, "head": state.head, "messages": len(state.messages),
                          "sessions": len(state.sessions), "artifacts": len(state.artifacts)}
