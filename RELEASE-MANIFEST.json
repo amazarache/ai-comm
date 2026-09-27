@@ -24,8 +24,8 @@
     },
     {
       "path": "ACTIVATE.md",
-      "bytes": 12990,
-      "sha256": "dddf441cb0dda1c02d689f0f573999be0085048d5c7e9e12870ffd85181118f5"
+      "bytes": 13030,
+      "sha256": "fb51d597fb56faf88cf7e0838a136c43a83fb874df142b01e85218fa776149c3"
     },
     {
       "path": "CHANGELOG.md",
@@ -49,13 +49,13 @@
     },
     {
       "path": "ai_comm.py",
-      "bytes": 133841,
-      "sha256": "0d5c5ab2e920e36f65ae31945f2e90919f56c95c66833e3e68be03035f4536e1"
+      "bytes": 134940,
+      "sha256": "e57c71f0356b8145b4ebb421dc7760ceaed4a524f2bb7873574ee1b71d15835e"
     },
     {
       "path": "docs/ERRORS.md",
-      "bytes": 24700,
-      "sha256": "d41fed20c634be50e5d2be18ecd78325109fb51ae32ac83091acfb0ddb9df3e3"
+      "bytes": 24857,
+      "sha256": "4553bd22d3635145ed59a08ff2bdd4ee30cee5f27e3f886f8f843336a7a44a4e"
     },
     {
       "path": "docs/EXPERIMENT.md",
@@ -69,8 +69,8 @@
     },
     {
       "path": "docs/RELEASES.md",
-      "bytes": 6033,
-      "sha256": "241755af0db076d46f2629201aee3b1a551df967993efe8539fc36ae07ef7764"
+      "bytes": 6863,
+      "sha256": "0ccd43a25e32787c3cdf0fca397aa884b64c3d598116ac269a5eeaa1f6f3fb52"
     },
     {
       "path": "examples/ask.json",
@@ -84,8 +84,8 @@
     },
     {
       "path": "scripts/check_release_manifest.py",
-      "bytes": 4250,
-      "sha256": "6d2622b546d72024779123a6d5f9f04602df5cc3d77a88b29c83dbee06cd15ec"
+      "bytes": 4287,
+      "sha256": "b56a2d8b8c336111d29bc3c817831d2b74eb0462731a137f73a54cbf527dffc9"
     },
     {
       "path": "scripts/check_tag.py",
@@ -109,13 +109,13 @@
     },
     {
       "path": "tests/test_protocol.py",
-      "bytes": 74032,
-      "sha256": "76ef5fdf670a983b8a074284e28175537e3300f8192a350e2bdee81233a3f70d"
+      "bytes": 75987,
+      "sha256": "6993e3918cd5f0d28023e1ffc58dd5f347e8f87b2b3fa3024e24e83daffaa94a"
     },
     {
       "path": "tests/test_upgrade_plan.py",
-      "bytes": 17304,
-      "sha256": "fbb0ed1aedfcef55b967c4802af38465478f5e5d90185f1fe6f885f90234229a"
+      "bytes": 20596,
+      "sha256": "f6437a39dccb91aa42598c164008ac1dcdb00a6da4201c9980691f68c80cdc74"
     }
   ]
 }

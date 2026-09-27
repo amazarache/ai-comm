@@ -875,7 +875,7 @@ def package_is_checkout(repo):
     # Only the package's own checkout counts; never let Git search parent directories.
     if not (repo / ".git").exists():
         return False
-    top = work_git(repo, "rev-parse", "--show-toplevel", ok=(0, 128)).decode().strip()
+    top = work_git(repo, "rev-parse", "--show-toplevel", ok=(0, 128)).removesuffix(b"\n").decode()
     return bool(top) and Path(top).resolve() == repo
 
 
@@ -1078,7 +1078,7 @@ def _upgrade_channel_path(value):
     require(isinstance(value, str) and value, "invalid upgrade channel path",
             code="upgrade_channel_invalid", field="channel",
             hint="Pass an initialized protocol-compatible channel path.")
-    raw = Path(value).expanduser()
+    raw = Path(value)
     if not raw.is_absolute():
         raw = Path.cwd() / raw
     # Refuse parent traversal instead of normalizing it across a possible symlink.
@@ -1120,6 +1120,10 @@ def _parse_upgrade_participants(values, participants, reviewers):
             _upgrade_error("duplicate upgrade participant status",
                            "upgrade_participant_duplicate", "participant",
                            "Give each current participant exactly one status.")
+        if handle not in current and handle in reviewers:
+            _upgrade_error("required reviewer has not joined the predecessor channel",
+                           "upgrade_participant_missing", "participant",
+                           "Have the configured reviewer join the old channel, then regenerate the plan.")
         if handle not in current:
             _upgrade_error("unknown upgrade participant",
                            "upgrade_participant_unknown", "participant",
@@ -1196,7 +1200,8 @@ def upgrade_plan(target_version=None, channel_path=None, participant_values=(), 
         f"which applies to this version: {applicable['reason']}; fixed in {owner_fixed}. "
         f"Protocol: {protocol_line}. Steps: fetch tag {target['tag']}, verify it is annotated "
         f"and its message names manifest {target['manifest_sha256']}, check out the tag, run "
-        f"scripts/check_tag.py, scripts/check_release_manifest.py and the test suite. "
+        f"python3 scripts/check_tag.py {target['tag']}, scripts/check_release_manifest.py and "
+        f"the test suite, update the project's activation note, announce on the channel. "
         "Authenticity: not verified (no attestation). Apply? yes/no")
     repin_steps = [
         ["git", "-C", str(repo), "fetch", "origin",
@@ -1225,7 +1230,8 @@ def upgrade_plan(target_version=None, channel_path=None, participant_values=(), 
         return result
 
     safe_path = _upgrade_channel_path(channel_path)
-    if not safe_path.is_dir():
+    if not safe_path.is_dir() or not ((safe_path / "HEAD").is_file() or
+                                      (safe_path / ".git").exists()):
         _upgrade_error("upgrade channel path is not an initialized channel",
                        "upgrade_channel_invalid", "channel",
                        "Pass an existing initialized bare channel repository.")
@@ -1254,6 +1260,7 @@ def upgrade_plan(target_version=None, channel_path=None, participant_values=(), 
         config = channel_state.config
         current_handles = sorted(channel_state.current)
         reviewers = list(config["reviewers"])
+        participants_unjoined = sorted(set(reviewers) - set(current_handles))
         supplied = _parse_upgrade_participants(participant_values, current_handles, reviewers)
         hint = str(channel.path.with_name(channel.path.name + "-upgraded"))
         handoff_fields = {
@@ -1266,10 +1273,13 @@ def upgrade_plan(target_version=None, channel_path=None, participant_values=(), 
             "new_channel_hint": hint,
             "reason": "The target release uses a different verified protocol digest.",
         }
-        outstanding = [handle for handle in current_handles if handle not in supplied]
+        required_handles = sorted(set(current_handles) | set(participants_unjoined))
+        outstanding = [handle for handle in required_handles if handle not in supplied]
         if outstanding:
             migration = {"complete": False, "handoff_fields": handoff_fields,
                          "participants_outstanding": outstanding,
+                         "participants_unjoined": participants_unjoined,
+                         "reviewer_join_required": bool(participants_unjoined),
                          "choices": ["will_upgrade", "stays_behind (non-reviewers only)"]}
         else:
             participants = [{
@@ -1291,16 +1301,19 @@ def upgrade_plan(target_version=None, channel_path=None, participant_values=(), 
             new_channel = hint
             migration = {
                 "complete": True,
+                "participants_unjoined": [],
+                "reviewer_join_required": False,
                 "handoff": handoff,
                 "handoff_sha256": handoff_digest,
                 "steps": [
-                    ["PROPOSE", handoff_digest, "in the predecessor channel"],
-                    ["each configured reviewer ACCEPT", handoff_digest],
-                    ["configured reviewer DECIDE", "the accepted proposal"],
-                    ["owner-authorized re-pin", target["tag"]],
-                    ["python3", str(Path(__file__).resolve()), "--channel", new_channel,
-                     "init", "--task", config["task"], "--reviewers", *reviewers,
-                     "--predecessor", str(channel.path), "--handoff", handoff_digest],
+                    {"kind": "manual", "text": f"PROPOSE artifact {handoff_digest} in the predecessor channel."},
+                    {"kind": "manual", "text": f"Each configured reviewer ACCEPTs artifact {handoff_digest}."},
+                    {"kind": "manual", "text": "A configured reviewer DECIDEs the accepted proposal."},
+                    {"kind": "manual", "text": f"After owner authorization, re-pin to {target['tag']}."},
+                    {"kind": "command", "argv": ["python3", str(Path(__file__).resolve()),
+                     "--channel", new_channel, "init", "--task", config["task"],
+                     "--reviewers", *reviewers, "--predecessor", str(channel.path),
+                     "--handoff", handoff_digest]},
                 ],
             }
         result["migration"] = migration
@@ -1387,7 +1400,7 @@ def read_snapshot_blobs(repo):
 
 class Channel:
     def __init__(self, path):
-        raw = Path(path).expanduser().absolute()
+        raw = Path(path).absolute()
         require(not raw.is_symlink(), "channel symlink refused", code="channel_symlink_refused")
         self.path = raw.resolve()
         require(self.path.is_dir(), "channel does not exist; initialize it explicitly", code="channel_does_not_exist_initialize_it_explicitly")
@@ -1413,7 +1426,7 @@ class Channel:
         predecessor_info = (validate_predecessor(predecessor, handoff, task, reviewers,
                                                  protocol_digest)
                             if predecessor is not None else None)
-        target = Path(path).expanduser().absolute()
+        target = Path(path).absolute()
         require(not target.exists() and not target.is_symlink(),
                 "init refuses an existing path", code="init_refuses_an_existing_path")
         target.mkdir(mode=0o700, parents=False)
@@ -2139,7 +2152,7 @@ class Snapshot:
 
 
 def validate_predecessor(path, digest, task, reviewers, target_protocol_digest):
-    raw_path = Path(path).expanduser().absolute()
+    raw_path = Path(path).absolute()
     cursor = Path(raw_path.anchor)
     for component in raw_path.parts[1:]:
         cursor = cursor / component

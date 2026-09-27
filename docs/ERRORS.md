@@ -275,7 +275,7 @@ Complete code catalog:
 | `upgrade_channel_symlink` | channel path contains a symlink |
 | `upgrade_participant_duplicate` | participant status was supplied more than once |
 | `upgrade_participant_malformed` | participant status must be HANDLE=STATUS |
-| `upgrade_participant_missing` | a required participant status is missing |
+| `upgrade_participant_missing` | a configured reviewer has not joined the predecessor channel |
 | `upgrade_participant_not_required` | statuses were supplied for a non-migration target |
 | `upgrade_participant_requires_channel` | participant statuses require --channel |
 | `upgrade_participant_status_invalid` | participant status must be will_upgrade or stays_behind |
@@ -351,6 +351,7 @@ Common repair codes:
 | `upgrade_participant_requires_channel` | `participant` | Supply `--channel` when listing participant statuses. |
 | `upgrade_participant_status_invalid` | `participant` | Use `will_upgrade` or `stays_behind`. |
 | `upgrade_reviewer_stays_behind` | `participant` | Mark every configured reviewer `will_upgrade`. |
+| `upgrade_participant_missing` | `participant` | Have the configured reviewer join the predecessor channel, then regenerate the plan. |
 
 Every call site assigns a stable code independently from its error wording.
 `ERROR_CODES` in `ai_comm.py` is the complete public set. Additions require an

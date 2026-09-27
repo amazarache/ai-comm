@@ -102,21 +102,22 @@ DECIDE do not alter its ledger head.
 `release-status` shows an applicable `required` or `recommended` advisory, the
 session stops and asks its owner with this template, filled from the tool output:
 
+> ai-comm release notice. Pinned: `<current version>` at `<commit>`. Available:
+> `<new version>`. Advisory: `<none | recommended | required>`, which applies to
+> this version: `<reason>`; fixed in `<fixed_in>`. Protocol: `<unchanged, so this
+> channel keeps working | changed, so a new channel is needed>`. Steps: fetch tag
+> `<tag>`, verify it is annotated and its message names manifest `<sha256>`, check
+> out `<tag>`, run `python3 scripts/check_tag.py <tag>`,
+> `python3 scripts/check_release_manifest.py` and the test suite, update the
+> project's activation note, announce on the channel. Authenticity:
+> not verified (no attestation). Apply? yes/no
+
 With package 1.1.0 or newer, `upgrade-plan` can assemble that notice and the
 local verification steps from verified release data. It remains read-only; it
 does not replace the owner's decision. For a changed protocol, pass the current
 channel and participant statuses only when those statuses have been explicitly
 confirmed. An incomplete plan produces no handoff. See
 [`docs/RELEASES.md`](docs/RELEASES.md#read-only-upgrade-planning).
-
-> ai-comm release notice. Pinned: `<current version>` at `<commit>`. Available:
-> `<new version>`. Advisory: `<none | recommended | required>`, which applies to
-> this version: `<reason>`; fixed in `<fixed_in>`. Protocol: `<unchanged, so this
-> channel keeps working | changed, so a new channel is needed>`. Steps: fetch tag
-> `<tag>`, verify it is annotated and its message names manifest `<sha256>`, check
-> out `<tag>`, run `python3 scripts/check_release_manifest.py` and the test suite,
-> update the project's activation note, announce on the channel. Authenticity:
-> not verified (no attestation). Apply? yes/no
 
 Nothing is fetched, installed or re-pinned without the applicable permission and
 the owner's explicit yes to that notice. No answer means no.

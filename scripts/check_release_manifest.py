@@ -66,7 +66,8 @@ def main():
     if (ROOT / ".git").exists():
         top = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--show-toplevel"],
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30).stdout
-        checkout = bool(top.strip()) and Path(top.decode().strip()).resolve() == ROOT.resolve()
+        top_path = top.removesuffix(b"\n").decode()
+        checkout = bool(top_path) and Path(top_path).resolve() == ROOT.resolve()
     if checkout:
         try:
             tracked = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-z"], check=True,

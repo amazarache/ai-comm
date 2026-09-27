@@ -144,10 +144,13 @@ class UpgradePlanTests(unittest.TestCase):
         self.assertEqual("1.1.0", plan["fixed_in"])
         self.assertNotIn("USER_NOTICE_SECRET", plan["owner_notice"])
         self.assertIn("changed, so a new channel is needed", plan["owner_notice"])
+        self.assertIn("python3 scripts/check_tag.py v1.1.0", plan["owner_notice"])
+        self.assertIn("update the project's activation note, announce on the channel", plan["owner_notice"])
         self.assertTrue(all(isinstance(step, list) and all(isinstance(arg, str) for arg in step)
                             for step in plan["repin_steps"]))
         self.assertIn(str(self.repo), plan["repin_steps"][0])
         self.assertEqual(["alpha", "beta", "guest"], plan["migration"]["participants_outstanding"])
+        self.assertEqual([], plan["migration"]["participants_unjoined"])
         self.assertFalse(plan["migration"]["complete"])
         self.assertNotIn("participants", plan["migration"].get("handoff", {}))
         partial = ac.upgrade_plan(directory=self.repo, channel_path=str(self.channel_path),
@@ -164,13 +167,19 @@ class UpgradePlanTests(unittest.TestCase):
                                                    "guest=stays_behind"])
         migration = plan["migration"]
         self.assertTrue(migration["complete"])
+        self.assertFalse(migration["reviewer_join_required"])
         self.assertEqual(ac.sha(ac.canonical(migration["handoff"])), migration["handoff_sha256"])
         self.assertEqual(["alpha", "beta", "guest"],
                          [p["handle"] for p in migration["handoff"]["participants"]])
         ac.validate_handoff(migration["handoff"], target_protocol_digest=plan["protocol_sha256"])
-        self.assertTrue(all(isinstance(step, list) and all(isinstance(arg, str) for arg in step)
+        self.assertTrue(all(step["kind"] in {"manual", "command"} for step in migration["steps"]))
+        self.assertTrue(all((step["kind"] == "manual" and isinstance(step.get("text"), str)) or
+                            (step["kind"] == "command" and isinstance(step.get("argv"), list) and
+                             all(isinstance(arg, str) for arg in step["argv"]))
                             for step in migration["steps"]))
-        init_args = migration["steps"][-1]
+        self.assertEqual(["manual"] * 4 + ["command"],
+                         [step["kind"] for step in migration["steps"]])
+        init_args = migration["steps"][-1]["argv"]
         self.assertIn(str(self.channel_path), init_args)
         self.assertIn('$(literal)', str(self.channel_path))
         self.assertIn('`quoted`', str(self.channel_path))
@@ -187,6 +196,38 @@ class UpgradePlanTests(unittest.TestCase):
                 ac.upgrade_plan(directory=self.repo, channel_path=str(self.channel_path),
                                participant_values=values)
             self.assertEqual(expected, caught.exception.details["code"])
+
+    def test_unjoined_reviewer_is_visible_and_blocks_handoff_until_joined(self):
+        path = self.root / "unjoined-reviewer"
+        ac.Channel.init(path, "Review a migration", ["alpha", "beta"])
+        channel = ac.Channel(path)
+        channel.join("alpha", "codex", "alpha-only")
+        plan = ac.upgrade_plan(directory=self.repo, channel_path=str(path))
+        migration = plan["migration"]
+        self.assertFalse(migration["complete"])
+        self.assertEqual(["alpha", "beta"], migration["participants_outstanding"])
+        self.assertEqual(["beta"], migration["participants_unjoined"])
+        self.assertTrue(migration["reviewer_join_required"])
+        partial = ac.upgrade_plan(directory=self.repo, channel_path=str(path),
+                                  participant_values=["alpha=will_upgrade"])
+        self.assertEqual(["beta"], partial["migration"]["participants_outstanding"])
+        with self.assertRaises(ac.ProtocolError) as caught:
+            ac.upgrade_plan(directory=self.repo, channel_path=str(path),
+                            participant_values=["alpha=will_upgrade", "beta=will_upgrade"])
+        self.assertEqual("upgrade_participant_missing", caught.exception.details["code"])
+        channel.join("beta", "claude", "beta-session")
+        complete = ac.upgrade_plan(directory=self.repo, channel_path=str(path),
+                                   participant_values=["alpha=will_upgrade", "beta=will_upgrade"])
+        self.assertTrue(complete["migration"]["complete"])
+
+    def test_upgrade_plan_docs_define_fields_and_unknown_is_not_unchanged(self):
+        docs = (Path(ac.__file__).resolve().parent / "docs" / "RELEASES.md").read_text()
+        for field in ("protocol_changed", "channel_action", "participants_outstanding",
+                      "repin_steps", "owner_notice", "migration.complete"):
+            self.assertIn(field, docs)
+        self.assertIn("Unknown is\n  never treated as unchanged", docs)
+        self.assertIn("publisher-provided free text", docs)
+        self.assertIn('"kind":"manual"', docs)
 
     def test_plan_target_validation_and_cli_channel_option_positions(self):
         cases = [("not-a-version", "invalid_upgrade_target"),
@@ -239,7 +280,14 @@ class UpgradePlanTests(unittest.TestCase):
         non_bare.mkdir()
         with self.assertRaises(ac.ProtocolError) as caught:
             ac.upgrade_plan(directory=self.repo, channel_path=str(non_bare))
-        self.assertEqual("upgrade_channel_not_bare", caught.exception.details["code"])
+        self.assertEqual("upgrade_channel_invalid", caught.exception.details["code"])
+        with self.assertRaises(ac.ProtocolError) as caught:
+            ac.upgrade_plan(directory=self.repo, channel_path="~codex-no-such-user/channel")
+        self.assertEqual("upgrade_channel_invalid", caught.exception.details["code"])
+        with self.assertRaises(ac.ProtocolError) as caught:
+            ac.Channel("~codex-no-such-user/channel")
+        self.assertEqual("channel_does_not_exist_initialize_it_explicitly",
+                         caught.exception.details["code"])
 
         parent_link = self.root / "parent-link"
         parent_link.symlink_to(self.root, target_is_directory=True)

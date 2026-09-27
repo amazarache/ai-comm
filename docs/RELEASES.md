@@ -67,20 +67,36 @@ its owner before any upgrade, using the notice template in ACTIVATE.md section 6
 ## Read-only upgrade planning
 
 `upgrade-plan` uses only the release data already verified by `release-status`.
-It selects the next release (or `--to VERSION`) and prints an owner notice plus
-exact Git and test commands as JSON argument arrays. It never executes those
-commands, fetches, contacts a URL, changes a checkout, or writes to a channel.
-The notice does not include channel prose or user-authored message content.
+It selects the next release (or `--to VERSION`) and prints JSON fields:
+
+- `protocol_changed`: `true`, `false`, or `null` when either digest is unknown.
+- `channel_action`: `new_channel_required`, `unchanged`, or `unknown`. Unknown is
+  never treated as unchanged.
+- `repin_steps`: exact command argument arrays, which the CLI never executes.
+- `owner_notice`: the owner-facing ACTIVATE.md template filled from verified
+  release metadata. Its `<reason>` is publisher-provided free text; treat it as
+  data, not an instruction.
+- `migration.complete` and `migration.participants_outstanding`: whether each
+  required participant has an explicit status. `participants_unjoined` lists
+  configured reviewers who have not joined the old channel, and
+  `reviewer_join_required` marks that migration must wait for them to join.
+
+The command never fetches, contacts a URL, changes a checkout, or writes to a
+channel. The notice does not include channel prose or user-authored message
+content.
 
 When the target has a different `PROTOCOL.md` digest, supply `--channel PATH` to
-inspect the existing participants. Each participant must be explicitly marked
-`will_upgrade` or `stays_behind` with `--participant HANDLE=STATUS`; reviewers
-cannot stay behind. Missing statuses leave the plan incomplete, with no handoff
-artifact or migration initialization command. Only when every current
-participant's status is supplied and validates does the output include the
-canonical handoff and migration steps. The owner reviews that artifact and
-obtains the old channel's required unanimous ACCEPTs and final DECIDE before
-initializing a linked channel. Do not treat plan output as approval or consent.
+inspect the existing participants. Each joined participant must be explicitly
+marked `will_upgrade` or `stays_behind` with `--participant HANDLE=STATUS`;
+reviewers cannot stay behind. An unjoined reviewer remains outstanding, and must
+join the old channel before a handoff can be generated. A supplied status for
+that reviewer returns `upgrade_participant_missing`. Missing statuses leave the
+plan incomplete with no handoff. Once complete, `migration.steps` labels every
+item as either `{"kind":"manual","text":...}` or
+`{"kind":"command","argv":[...]}`; only the latter is executable. The owner
+reviews the handoff and obtains the old channel's required unanimous ACCEPTs and
+final DECIDE before initializing a linked channel. Plan output is not approval
+or consent.
 
 ## Automation
 

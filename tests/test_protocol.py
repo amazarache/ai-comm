@@ -776,6 +776,34 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(0, proc.returncode)
         self.assertEqual("not_git_checkout", json.loads(proc.stdout)["status"])
 
+    def test_checkout_detection_preserves_trailing_spaces_in_paths(self):
+        package = self.root / "package "
+        package.mkdir()
+        env = os.environ.copy()
+        env.update(GIT_CONFIG_NOSYSTEM="1", GIT_AUTHOR_NAME="test", GIT_AUTHOR_EMAIL="test@example.invalid",
+                   GIT_COMMITTER_NAME="test", GIT_COMMITTER_EMAIL="test@example.invalid")
+        subprocess.run(["git", "init", "--initial-branch=main", str(package)], check=True,
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, timeout=30)
+        self.assertTrue(ac.package_is_checkout(package))
+
+        (package / "scripts").mkdir()
+        shutil.copyfile(SCRIPT.parent / "scripts" / "check_release_manifest.py",
+                        package / "scripts" / "check_release_manifest.py")
+        (package / "ai_comm.py").write_text('VERSION = "1.1.0"\n', encoding="utf-8")
+        (package / "PROTOCOL.md").write_text("contract\n", encoding="utf-8")
+        paths = ["ai_comm.py", "PROTOCOL.md", "scripts/check_release_manifest.py"]
+        files = [{"path": name, "bytes": len((package / name).read_bytes()),
+                  "sha256": hashlib.sha256((package / name).read_bytes()).hexdigest()}
+                 for name in paths]
+        manifest = {"format": "ai-comm-review-manifest/1", "protocol_sha256":
+                    hashlib.sha256((package / "PROTOCOL.md").read_bytes()).hexdigest(), "files": files}
+        (package / "RELEASE-MANIFEST.json").write_text(json.dumps(manifest, indent=2) + "\n")
+        subprocess.run(["git", "-C", str(package), "add", "."], check=True, env=env, timeout=30)
+        result = subprocess.run([sys.executable, str(package / "scripts" / "check_release_manifest.py")],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, timeout=30)
+        self.assertEqual(0, result.returncode, result.stderr.decode())
+        self.assertIn(b"manifest ok", result.stdout)
+
     def test_concurrent_send_and_same_key_retry(self):
         def launch(index):
             return self.cli("send", "--as", "alpha", "--session", "alpha-session", "--key",
