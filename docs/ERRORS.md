@@ -29,6 +29,11 @@ more precise internal field is useful, `subfield` identifies it without
 expanding the top-level field namespace. For example, a malformed source detail
 uses `field: "sources"` and `subfield: "detail"`.
 
+For the frozen mismatch code used by packages before 1.0.0,
+`package_contract_does_not_match_channel_select_its_pinned_revisi`, the repair is:
+your pinned package implements a different contract from the channel. Do not
+edit anything; ask the owner about the upgrade in ACTIVATE.md section 6.
+
 CLI argument error fields: `actor`, `ack`, `after`, `channel`, `draft`, `dry_run`, `file`, `id`, `input`, `key`, `kind`, `limit`, `new_since`, `offset`, `out`, `platform`, `require_confidence`, `require_sources`, `reviewers`, `session`, `since`, `takeover`, `task`, `through`, `timeout`.
 
 Complete code catalog:
@@ -236,20 +241,35 @@ Complete code catalog:
 | `invalid_handoff_reviewers` | invalid migration reviewer set |
 | `invalid_tool_version` | invalid tool version |
 | `predecessor_arguments_must_be_paired` | predecessor and handoff must be supplied together |
+| `predecessor_acceptance_missing` | a predecessor reviewer acceptance is missing |
 | `predecessor_decision_invalid` | predecessor handoff decision is invalid |
+| `predecessor_decision_commit_invalid` | predecessor DECIDE commit cannot be verified |
+| `predecessor_decision_has_no_parent` | predecessor DECIDE commit has no parent |
+| `predecessor_decision_not_final` | predecessor DECIDE is not the final message |
+| `predecessor_decision_reviewer_invalid` | predecessor DECIDE was sent by a non-reviewer |
+| `predecessor_handoff_digest_invalid` | handoff digest is malformed |
 | `predecessor_handoff_invalid` | predecessor handoff is invalid |
+| `predecessor_handoff_invalid_kind` | predecessor handoff kind is invalid |
 | `predecessor_handoff_missing` | predecessor handoff is missing |
+| `predecessor_handoff_participants_invalid` | predecessor handoff participants are invalid |
+| `predecessor_handoff_protocol_digest_invalid` | predecessor handoff protocol digest is invalid |
+| `predecessor_handoff_reviewers_invalid` | predecessor handoff reviewers are invalid |
+| `predecessor_handoff_tampered` | predecessor handoff digest does not match its contents |
+| `predecessor_head_unreadable` | predecessor HEAD cannot be inspected |
+| `predecessor_head_not_decision` | predecessor HEAD is not the commit that added DECIDE |
 | `predecessor_invalid_head` | invalid predecessor head |
 | `predecessor_invalid_link` | invalid predecessor link |
 | `predecessor_invalid_channel` | predecessor is not a valid protocol-2 ledger |
+| `predecessor_not_found` | predecessor path does not exist |
 | `predecessor_not_bare` | predecessor is not a bare channel |
-| `predecessor_not_frozen` | predecessor ledger is not frozen at its DECIDE |
 | `predecessor_package_too_old` | package is below the handoff minimum version |
 | `predecessor_participants_mismatch` | handoff participants differ from predecessor |
 | `predecessor_policy_mismatch` | predecessor task or reviewer policy mismatch |
-| `predecessor_protocol_mismatch` | predecessor protocol does not match handoff |
+| `predecessor_reviewer_cannot_stay_behind` | configured reviewer cannot stay behind |
+| `predecessor_source_protocol_mismatch` | handoff source digest differs from predecessor |
 | `predecessor_source_required` | first message must cite the predecessor ledger |
 | `predecessor_symlink_refused` | predecessor path is a symlink |
+| `predecessor_target_protocol_mismatch` | handoff target digest differs from this package |
 | `tool_version_changed_requires_fresh_session` | package version changed; use a fresh session reference |
 
 Common repair codes:

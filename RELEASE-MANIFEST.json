@@ -4,8 +4,8 @@
   "files": [
     {
       "path": ".github/workflows/ci.yml",
-      "bytes": 2105,
-      "sha256": "93c5181e9ff1363282e15c414737895ad75c8fad3cea3558d409c7732460be61"
+      "bytes": 2210,
+      "sha256": "0a87e223ccf93342052f1415029175ae5ecd0d125dd0fe5b79c35b95ff4f66b1"
     },
     {
       "path": ".github/workflows/release.yml",
@@ -24,8 +24,8 @@
     },
     {
       "path": "ACTIVATE.md",
-      "bytes": 12357,
-      "sha256": "8ed9f7f8ef3995519437141d6c84419ef4fe84a33981b5ea9a33cf7235c7d4c0"
+      "bytes": 12510,
+      "sha256": "8cc3674a32d3f595b2fdeb411eb4a1a3b7854a6d31d5b0ae49c27d1adb1dd3e6"
     },
     {
       "path": "CHANGELOG.md",
@@ -49,13 +49,13 @@
     },
     {
       "path": "ai_comm.py",
-      "bytes": 114069,
-      "sha256": "2d03efdef6feaf65164f67c08380dd0dc1b7a6de240de474cfac9e672e915ac6"
+      "bytes": 116448,
+      "sha256": "4db23b1efcee741e8b2481483a0902fd096de1682527f8a98c6b0eed10cb8c14"
     },
     {
       "path": "docs/ERRORS.md",
-      "bytes": 18389,
-      "sha256": "30822c9ea7668bb8423ea0e6142bf099c05a343a2b34299f29aa0edd2171711e"
+      "bytes": 19973,
+      "sha256": "1a841ffbfb7d21ed6aabd35d61944bc8e8ac9b8c7df6b1752d0e70c1c664294f"
     },
     {
       "path": "docs/EXPERIMENT.md",
@@ -109,8 +109,8 @@
     },
     {
       "path": "tests/test_protocol.py",
-      "bytes": 65929,
-      "sha256": "7eb5e5d87217c62ed2a56c0bec921f6209322922d4aa9c8c47f3d404dbfcc4eb"
+      "bytes": 73868,
+      "sha256": "4468335511fd4fe21ae2794e442613140cd795e7371fe9b2fa6a23ce2b1a33a2"
     }
   ]
 }

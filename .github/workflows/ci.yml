@@ -44,6 +44,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
@@ -55,6 +57,8 @@ jobs:
           test ! -e "$pkg/.git"
       - name: Verify manifest and run tests without Git metadata
         working-directory: ${{ runner.temp }}/archive-install
+        env:
+          AI_COMM_TEST_REPO: ${{ github.workspace }}
         run: |
           python scripts/check_release_manifest.py
           python -m unittest discover -s tests -v

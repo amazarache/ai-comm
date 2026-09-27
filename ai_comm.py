@@ -269,20 +269,35 @@ ERROR_CODES = frozenset([
     'partial_clone_release_check_unsupported',
     'pong_nonce_must_be_fresh',
     'predecessor_arguments_must_be_paired',
+    'predecessor_acceptance_missing',
     'predecessor_decision_invalid',
+    'predecessor_decision_commit_invalid',
+    'predecessor_decision_has_no_parent',
+    'predecessor_decision_not_final',
+    'predecessor_decision_reviewer_invalid',
+    'predecessor_handoff_digest_invalid',
     'predecessor_handoff_invalid',
+    'predecessor_handoff_invalid_kind',
     'predecessor_handoff_missing',
+    'predecessor_handoff_participants_invalid',
+    'predecessor_handoff_protocol_digest_invalid',
+    'predecessor_handoff_reviewers_invalid',
+    'predecessor_handoff_tampered',
+    'predecessor_head_unreadable',
+    'predecessor_head_not_decision',
     'predecessor_invalid_head',
     'predecessor_invalid_link',
     'predecessor_invalid_channel',
+    'predecessor_not_found',
     'predecessor_not_bare',
-    'predecessor_not_frozen',
     'predecessor_package_too_old',
     'predecessor_participants_mismatch',
     'predecessor_policy_mismatch',
-    'predecessor_protocol_mismatch',
+    'predecessor_reviewer_cannot_stay_behind',
+    'predecessor_source_protocol_mismatch',
     'predecessor_source_required',
     'predecessor_symlink_refused',
+    'predecessor_target_protocol_mismatch',
     'proposal_already_decided_propose_a_new_revision',
     'question_id_already_used',
     'question_is_not_open',
@@ -728,7 +743,8 @@ def validate_handoff(record, *, target_protocol_digest=None):
     pattern(record["to_protocol_sha256"], HEX, "protocol digest")
     if target_protocol_digest is not None:
         require(record["to_protocol_sha256"] == target_protocol_digest,
-                "handoff targets a different protocol", code="predecessor_protocol_mismatch",
+                "handoff targets a different protocol",
+                code="predecessor_target_protocol_mismatch",
                 field="artifact")
     semver(record["to_package_version"], "package_version")
     text_field(record["task"], "task", 2000, True)
@@ -764,6 +780,33 @@ def validate_handoff(record, *, target_protocol_digest=None):
     return record
 
 
+def predecessor_handoff_error(exc):
+    code = exc.details.get("code")
+    mapped = {
+        "invalid_artifact_digest": "predecessor_handoff_digest_invalid",
+        "invalid_handoff_kind": "predecessor_handoff_invalid_kind",
+        "invalid_protocol_digest": "predecessor_handoff_protocol_digest_invalid",
+        "invalid_handoff_reviewers": "predecessor_handoff_reviewers_invalid",
+        "invalid_handoff_participants": "predecessor_handoff_participants_invalid",
+        "invalid_handle": "predecessor_handoff_participants_invalid",
+        "handoff_reviewer_cannot_stay_behind": "predecessor_reviewer_cannot_stay_behind",
+        "predecessor_target_protocol_mismatch": "predecessor_target_protocol_mismatch",
+    }.get(code, "predecessor_handoff_invalid")
+    return ProtocolError("predecessor handoff is invalid", code=mapped,
+                         field="artifact")
+
+
+def predecessor_snapshot_error(exc):
+    code = exc.details.get("code")
+    mapped = {
+        "artifact_hash_mismatch": "predecessor_handoff_tampered",
+        "all_required_reviewers_must_accept_this_exact_proposal": "predecessor_acceptance_missing",
+        "only_configured_reviewers_may_record_agreement": "predecessor_decision_reviewer_invalid",
+    }.get(code, "predecessor_invalid_channel")
+    return ProtocolError("predecessor is not a valid protocol-2 ledger",
+                         code=mapped, field="channel")
+
+
 def validate_predecessor_record(predecessor, artifacts, protocol_digest, task, reviewers):
     try:
         _validate_predecessor_record(predecessor, artifacts, protocol_digest, task, reviewers)
@@ -793,10 +836,10 @@ def _validate_predecessor_record(predecessor, artifacts, protocol_digest, task, 
     try:
         validate_handoff(handoff, target_protocol_digest=protocol_digest)
     except ProtocolError as exc:
-        raise ProtocolError("linked predecessor handoff is invalid",
-                            code="predecessor_handoff_invalid", field="artifact") from exc
+        raise predecessor_handoff_error(exc) from exc
     require(handoff["from_protocol_sha256"] == predecessor["protocol_sha256"],
-            "predecessor protocol differs from handoff", code="predecessor_protocol_mismatch",
+            "predecessor protocol differs from handoff",
+            code="predecessor_source_protocol_mismatch",
             field="channel")
     require(handoff["task"] == task and set(handoff["reviewers"]) == set(reviewers),
             "predecessor task or reviewers differ from handoff",
@@ -865,7 +908,7 @@ def _release_status(repo):
                            "no advice given",
                 "authenticity": "not verified (no attestation)"}
     partial = work_git(repo, "config", "--get-regexp",
-                       r"^(extensions\.partialclone|remote\..*\.promisor)$",
+                       r"^(extensions\.partialclone|remote\..*\.(promisor|partialclonefilter))$",
                        ok=(0, 1)).strip()
     if partial:
         version_output = subprocess.run(["git", "--version"], stdout=subprocess.PIPE,
@@ -1800,6 +1843,8 @@ def validate_predecessor(path, digest, task, reviewers, target_protocol_digest):
         cursor = cursor / component
         require(not cursor.is_symlink(), "predecessor path contains a symlink",
                 code="predecessor_symlink_refused", field="channel")
+    require(raw_path.exists(), "predecessor path does not exist",
+            code="predecessor_not_found", field="channel")
     require(raw_path.is_dir(), "predecessor must be an existing bare channel",
             code="predecessor_not_bare", field="channel")
     repo = raw_path.resolve()
@@ -1812,7 +1857,7 @@ def validate_predecessor(path, digest, task, reviewers, target_protocol_digest):
             "predecessor must be a bare channel", code="predecessor_not_bare", field="channel")
     require(isinstance(digest, str) and HEX.fullmatch(digest),
             "invalid predecessor handoff digest",
-            code="predecessor_handoff_invalid", field="artifact")
+            code="predecessor_handoff_digest_invalid", field="artifact")
     try:
         head, blobs = read_snapshot_blobs(repo)
     except ProtocolError as exc:
@@ -1821,8 +1866,7 @@ def validate_predecessor(path, digest, task, reviewers, target_protocol_digest):
     try:
         old = Snapshot(head, blobs, allow_legacy=True)
     except ProtocolError as exc:
-        raise ProtocolError("predecessor is not a valid protocol-2 ledger",
-                            code="predecessor_invalid_channel", field="channel") from exc
+        raise predecessor_snapshot_error(exc) from exc
     handoff_bytes = old.artifacts.get(digest)
     require(handoff_bytes is not None, "handoff artifact is missing from predecessor",
             code="predecessor_handoff_missing", field="artifact")
@@ -1836,23 +1880,17 @@ def validate_predecessor(path, digest, task, reviewers, target_protocol_digest):
     try:
         validate_handoff(handoff, target_protocol_digest=target_protocol_digest)
     except ProtocolError as exc:
-        raise ProtocolError("predecessor handoff is invalid",
-                            code="predecessor_handoff_invalid", field="artifact") from exc
+        raise predecessor_handoff_error(exc) from exc
     require(semver(handoff["to_package_version"]) <= semver(VERSION),
             "package is older than handoff requirement", code="predecessor_package_too_old",
             field="channel")
     require(handoff["from_protocol_sha256"] == old.config["protocol_sha256"],
             "handoff source digest does not match predecessor",
-            code="predecessor_protocol_mismatch", field="channel")
+            code="predecessor_source_protocol_mismatch", field="channel")
     require(handoff["task"] == task and set(handoff["reviewers"]) == set(old.config["reviewers"]) and
             set(reviewers) == set(old.config["reviewers"]),
             "task or reviewer set differs from handoff",
             code="predecessor_policy_mismatch", field="channel")
-    expected_handles = set(old.current)
-    supplied_handles = {participant["handle"] for participant in handoff["participants"]}
-    require(supplied_handles == expected_handles,
-            "handoff participants differ from predecessor", code="predecessor_participants_mismatch",
-            field="artifact")
     decisions = [message for message in old.messages
                  if message["act"] == "DECIDE" and message.get("artifact") == digest]
     require(bool(decisions), "predecessor has no decision for the handoff",
@@ -1860,14 +1898,27 @@ def validate_predecessor(path, digest, task, reviewers, target_protocol_digest):
     decision = decisions[-1]
     require(old.messages[-1]["id"] == decision["id"],
             "handoff DECIDE must be the final ledger message",
-            code="predecessor_not_frozen", field="channel")
-    parent = git(repo, "rev-parse", "--verify", f"{head}^", ok=(0, 128)).decode().strip()
+            code="predecessor_decision_not_final", field="channel")
+    try:
+        parent = git(repo, "rev-parse", "--verify", f"{head}^", ok=(0, 128)).decode().strip()
+    except ProtocolError as exc:
+        raise ProtocolError("predecessor DECIDE commit cannot be verified",
+                            code="predecessor_decision_commit_invalid", field="channel") from exc
     require(bool(parent), "predecessor decision commit has no parent",
-            code="predecessor_decision_invalid", field="channel")
-    changes = git(repo, "diff-tree", "--no-commit-id", "--name-status", "-r", parent, head).splitlines()
+            code="predecessor_decision_has_no_parent", field="channel")
+    try:
+        changes = git(repo, "diff-tree", "--no-commit-id", "--name-status", "-r", parent, head).splitlines()
+    except ProtocolError as exc:
+        raise ProtocolError("predecessor head cannot be verified",
+                            code="predecessor_head_unreadable", field="channel") from exc
     require(changes == [f"A\tmessages/{decision['id']}.json".encode()],
             "predecessor head must be the commit that added DECIDE",
-            code="predecessor_not_frozen", field="channel")
+            code="predecessor_head_not_decision", field="channel")
+    expected_handles = set(old.current)
+    supplied_handles = {participant["handle"] for participant in handoff["participants"]}
+    require(supplied_handles == expected_handles,
+            "handoff participants differ from predecessor", code="predecessor_participants_mismatch",
+            field="artifact")
     return {"record": {"channel_head": head,
                         "protocol_sha256": old.config["protocol_sha256"],
                         "handoff_artifact": digest,

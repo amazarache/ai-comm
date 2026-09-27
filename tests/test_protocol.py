@@ -212,10 +212,11 @@ class ProtocolTests(unittest.TestCase):
 
     def test_migration_links_a_frozen_protocol_two_ledger_read_only(self):
         root = SCRIPT.parent
-        top = subprocess.run(["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+        history_root = Path(os.environ.get("AI_COMM_TEST_REPO", str(root)))
+        top = subprocess.run(["git", "-C", str(history_root), "rev-parse", "--show-toplevel"],
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
         if top.returncode:
-            self.skipTest("historical release tags are unavailable in release archives")
+            self.skipTest("historical release tags are unavailable in this test environment")
         repo = Path(top.stdout.decode().strip())
         if subprocess.run(["git", "-C", str(repo), "rev-parse", "--verify", "v0.2.0"],
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10).returncode:
@@ -297,9 +298,61 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(previous.snapshot().head,
                          linked.config["policy"]["predecessor"]["channel_head"])
         self.assertIn(digest, linked.artifacts)
+        migrated_head = linked.head
+        migrated_refs = {str(item.relative_to(migrated / "refs")): item.read_bytes()
+                         for item in (migrated / "refs").rglob("*") if item.is_file()}
+        migrated_objects = {str(item.relative_to(migrated / "objects")): item.read_bytes()
+                            for item in (migrated / "objects").rglob("*") if item.is_file()}
+        draft = ac.canonical({"act": "PING", "to": ["beta"], "topic": "compat",
+                              "summary": "Must not publish."})
+        for tag in ("v0.1.0", "v0.1.3", "v0.2.0"):
+            versioned_package = self.root / (tag + "-tool")
+            versioned_package.mkdir()
+            versioned_script = versioned_package / "ai_comm.py"
+            versioned_script.write_bytes(subprocess.run(
+                ["git", "-C", str(repo), "show", f"{tag}:ai_comm.py"],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10,
+                check=True).stdout)
+            (versioned_package / "PROTOCOL.md").write_bytes(subprocess.run(
+                ["git", "-C", str(repo), "show", f"{tag}:PROTOCOL.md"],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10,
+                check=True).stdout)
+            commands = [["state"], ["inbox", "--as", "alpha", "--session", "alpha-session"],
+                        ["wait", "--as", "alpha", "--session", "alpha-session", "--timeout", "0"],
+                        ["render"], ["log"]]
+            if tag == "v0.2.0":
+                commands += [["validate"], ["registry", "sessions"],
+                             ["send", "--as", "alpha", "--session", "alpha-session",
+                              "--key", "old-migrated-dry-run", "--draft", "-", "--dry-run"]]
+            for command in commands:
+                result = subprocess.run([sys.executable, str(versioned_script), "--channel",
+                                         str(migrated), *command],
+                                        input=draft if "--draft" in command else None,
+                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+                self.assertEqual(2, result.returncode, (tag, command, result.stderr))
+                self.assertIn(b"package contract does not match channel", result.stderr)
+                self.assertEqual(migrated_head, old.git(migrated, "rev-parse", "HEAD").decode().strip())
+                self.assertEqual(migrated_refs,
+                                 {str(item.relative_to(migrated / "refs")): item.read_bytes()
+                                  for item in (migrated / "refs").rglob("*") if item.is_file()})
+                self.assertEqual(migrated_objects,
+                                 {str(item.relative_to(migrated / "objects")): item.read_bytes()
+                                  for item in (migrated / "objects").rglob("*") if item.is_file()})
         self.assertEqual(before_refs, tree_bytes(predecessor / "refs"))
         self.assertEqual(before_objects, tree_bytes(predecessor / "objects"))
         self.assertEqual(before_runtime, tree_bytes(previous.runtime))
+        for command in (["state"], ["send", "--as", "alpha", "--session", "alpha-session",
+                                       "--key", "old-migrated-dry-run", "--draft", "-", "--dry-run"]):
+            draft = (ac.canonical({"act": "PING", "to": ["beta"], "topic": "compat",
+                                   "summary": "Must not publish."}) if "--draft" in command else None)
+            result = subprocess.run([sys.executable, str(old_file), "--channel", str(migrated),
+                                     *command], input=draft, stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE, timeout=30)
+            self.assertEqual(2, result.returncode)
+            self.assertIn(b"package contract does not match channel", result.stderr)
+            self.assertEqual(migrated_head, old.git(migrated, "rev-parse", "HEAD").decode().strip())
+            self.assertEqual(migrated_refs, tree_bytes(migrated / "refs"))
+            self.assertEqual(migrated_objects, tree_bytes(migrated / "objects"))
         current = ac.Channel(migrated)
         current.join("alpha", "codex", "new-alpha-session")
         current.join("beta", "claude", "new-beta-session")
@@ -321,7 +374,7 @@ class ProtocolTests(unittest.TestCase):
         with self.assertRaises(ac.ProtocolError) as late:
             ac.Channel.init(refused, "Migrate this exact task", ["alpha", "beta"],
                             predecessor=predecessor, handoff=digest)
-        self.assertEqual("predecessor_not_frozen", late.exception.details["code"])
+        self.assertEqual("predecessor_decision_not_final", late.exception.details["code"])
         self.assertFalse(refused.exists())
         renewed = previous.send("alpha", "alpha-session", "renewed-handoff-proposal",
                                 {"act": "PROPOSE", "to": ["beta"], "topic": "migration",
@@ -341,14 +394,36 @@ class ProtocolTests(unittest.TestCase):
                         predecessor=predecessor, handoff=digest)
         recovered_link = ac.Channel(recovered).snapshot().config["policy"]["predecessor"]
         self.assertEqual(renewed_decision["id"], recovered_link["decide_message"])
+        previous.join("gamma", "codex", "gamma-session")
+        with self.assertRaises(ac.ProtocolError) as join_after_decide:
+            ac.Channel.init(self.root / "join-after-decide", "Migrate this exact task",
+                            ["alpha", "beta"], predecessor=predecessor, handoff=digest)
+        self.assertEqual("predecessor_head_not_decision",
+                         join_after_decide.exception.details["code"])
 
     def test_migration_rejects_bad_predecessor_paths_and_contracts(self):
         target = self.root / "must-not-exist"
+        missing = self.root / "not-created"
+        with self.assertRaises(ac.ProtocolError) as not_found:
+            ac.Channel.init(target, "Review a generic change", ["alpha", "beta"],
+                            predecessor=missing, handoff="a" * 64)
+        self.assertEqual("predecessor_not_found", not_found.exception.details["code"])
+        bare_empty = self.root / "empty-bare"
+        subprocess.run(["git", "init", "--bare", str(bare_empty)], check=True,
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+        with self.assertRaises(ac.ProtocolError) as empty:
+            ac.Channel.init(target, "Review a generic change", ["alpha", "beta"],
+                            predecessor=bare_empty, handoff="a" * 64)
+        self.assertEqual("predecessor_invalid_channel", empty.exception.details["code"])
+        with self.assertRaises(ac.ProtocolError) as bad_digest:
+            ac.Channel.init(target, "Review a generic change", ["alpha", "beta"],
+                            predecessor=self.path, handoff="not-a-digest")
+        self.assertEqual("predecessor_handoff_digest_invalid",
+                         bad_digest.exception.details["code"])
         with self.assertRaises(ac.ProtocolError) as non_bare:
             ac.Channel.init(target, "Review a generic change", ["alpha", "beta"],
                             predecessor=self.root, handoff="a" * 64)
         self.assertEqual("predecessor_not_bare", non_bare.exception.details["code"])
-        self.assertFalse(target.exists())
         link = self.root / "channel-link"
         link.symlink_to(self.path, target_is_directory=True)
         with self.assertRaises(ac.ProtocolError) as symlink:
@@ -368,6 +443,30 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual("predecessor_invalid_channel",
                          wrong_contract.exception.details["code"])
         self.assertFalse(target.exists())
+
+    def test_predecessor_rejections_have_specific_codes(self):
+        snapshot_errors = {
+            "artifact_hash_mismatch": "predecessor_handoff_tampered",
+            "all_required_reviewers_must_accept_this_exact_proposal": "predecessor_acceptance_missing",
+            "only_configured_reviewers_may_record_agreement": "predecessor_decision_reviewer_invalid",
+            "unsupported_or_malformed_channel": "predecessor_invalid_channel",
+        }
+        for original, expected in snapshot_errors.items():
+            with self.subTest(original=original):
+                self.assertEqual(expected, ac.predecessor_snapshot_error(
+                    ac.ProtocolError("redacted", code=original)).details["code"])
+        handoff_errors = {
+            "invalid_artifact_digest": "predecessor_handoff_digest_invalid",
+            "invalid_handoff_kind": "predecessor_handoff_invalid_kind",
+            "invalid_protocol_digest": "predecessor_handoff_protocol_digest_invalid",
+            "invalid_handoff_reviewers": "predecessor_handoff_reviewers_invalid",
+            "invalid_handoff_participants": "predecessor_handoff_participants_invalid",
+            "handoff_reviewer_cannot_stay_behind": "predecessor_reviewer_cannot_stay_behind",
+        }
+        for original, expected in handoff_errors.items():
+            with self.subTest(original=original):
+                self.assertEqual(expected, ac.predecessor_handoff_error(
+                    ac.ProtocolError("redacted", code=original)).details["code"])
 
     def test_error_fields_use_draft_keys_or_documented_cli_arguments(self):
         tree = ast.parse(SCRIPT.read_text(encoding="utf-8"))
@@ -528,6 +627,16 @@ class ProtocolTests(unittest.TestCase):
         self.assertTrue(notice["advisory_applies"])
         inbox = self.channel.inbox("beta", "beta-session")
         self.assertEqual("required", inbox["messages"][0]["release_status"]["advisory"])
+        non_applying = dict(record,
+                            affects=f">={next_major}.0.0,<{next_major + 1}.0.0",
+                            fixed_in=f"{next_major + 1}.0.0")
+        other_digest = self.channel.put_artifact(
+            "alpha", "alpha-session", ac.canonical(non_applying))["artifact"]
+        other_notice = self.channel.snapshot().release_notice({
+            "act": "FACT", "topic": "upgrade", "artifact": other_digest,
+            "summary": f"Release v{identity['version']} at {record['commit']}; required advisory."})
+        self.assertEqual("required", other_notice["advisory"])
+        self.assertFalse(other_notice["advisory_applies"])
 
     def test_offline_release_status_checks_local_index_and_annotated_tag(self):
         repo = self.root / "release-repo"
@@ -615,12 +724,14 @@ class ProtocolTests(unittest.TestCase):
                                         "stdout": b"git version 2.43.0\n"})()
         with mock.patch.object(ac, "package_is_checkout", return_value=True), \
              mock.patch.object(ac, "work_git",
-                               return_value=b"remote.origin.promisor true\n") as inspect_git, \
+                               return_value=(b"remote.origin.promisor true\n"
+                                             b"remote.origin.partialclonefilter blob:none\n")) as inspect_git, \
              mock.patch.object(ac.subprocess, "run", return_value=version):
             result = ac.release_status(self.root)
         self.assertEqual("index_invalid", result["status"])
         self.assertIn("--get-regexp", inspect_git.call_args_list[0].args)
-        self.assertIn("remote\\..*\\.promisor", inspect_git.call_args_list[0].args[-1])
+        self.assertIn("promisor|partialclonefilter",
+                      inspect_git.call_args_list[0].args[-1])
 
     def test_release_archive_install_never_inspects_a_host_repository(self):
         host = self.root / "host-project"
