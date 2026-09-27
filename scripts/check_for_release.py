@@ -153,10 +153,17 @@ def run_check(*, repo=ROOT, fetch_permitted=False, expected_origin=None,
               runner=subprocess.run):
     repo = Path(repo).resolve()
     fetched = False
-    status = "error"
+    status_name = "error"
+    pinned = None
+    latest = None
     try:
         if fetch_permitted:
-            if not ac.package_is_checkout(repo):
+            try:
+                identity = ac.package_identity(repo)
+                pinned = identity.get("version")
+            except Exception as exc:
+                raise CheckError("package_identity_invalid") from exc
+            if identity.get("source") != "git":
                 raise CheckError("not_git_checkout", "not_git_checkout")
             trusted_origin = expected_origin if expected_origin is not None else _manifest_bound_origin(repo)
             expected = _normalize_origin(trusted_origin)
@@ -177,21 +184,22 @@ def run_check(*, repo=ROOT, fetch_permitted=False, expected_origin=None,
             proc = _run(fetch_args, runner=runner)
             if proc.returncode != 0:
                 raise CheckError("fetch_failed")
-        status = _local_status(repo, runner)
-        current_status = status.get("status")
-        pinned = status.get("pinned_version")
+        release_data = _local_status(repo, runner)
+        current_status = release_data.get("status")
+        status_name = current_status
+        pinned = release_data.get("pinned_version")
         if current_status != "ok":
             return (_result(current_status,
                             fetched=fetched, fetch_error=current_status or "release_status_invalid",
                             pinned=pinned), 2)
-        latest = status.get("latest_version")
+        latest = release_data.get("latest_version")
         try:
             ac.semver(pinned, "pinned")
             ac.semver(latest, "latest")
         except ac.ProtocolError as exc:
             raise CheckError("release_status_invalid_version", "index_invalid") from exc
-        advisory = _active_advisory(status)
-        advice = _newer_advice(status)
+        advisory = _active_advisory(release_data)
+        advice = _newer_advice(release_data)
         owner_notice = None
         if advice is not None:
             owner_notice = _run_upgrade_plan(repo, runner)["owner_notice"]
@@ -212,9 +220,12 @@ def run_check(*, repo=ROOT, fetch_permitted=False, expected_origin=None,
         return (_result("ok", result="up_to_date", fetched=fetched, pinned=pinned,
                         latest=latest), 0)
     except CheckError as exc:
-        return (_result(exc.status, fetched=fetched, fetch_error=exc.code), 2)
+        return (_result(exc.status, fetched=fetched, fetch_error=exc.code, pinned=pinned,
+                        latest=latest if status_name == "ok" else None), 2)
     except Exception:
-        return (_result(status, fetched=fetched, fetch_error="operation_failed"), 2)
+        safe_status = status_name if status_name in RELEASE_STATUSES else "error"
+        return (_result(safe_status, fetched=fetched, fetch_error="operation_failed",
+                        pinned=pinned, latest=latest if status_name == "ok" else None), 2)
 
 
 def parser():

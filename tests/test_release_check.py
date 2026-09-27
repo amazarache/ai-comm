@@ -131,6 +131,17 @@ class ReleaseCheckTests(unittest.TestCase):
                          (code, result["status"], result["fetch_error"], result["fetched"]))
         self.assertEqual([], fake.calls)
 
+    def test_errors_after_status_keep_scalar_status_and_verified_versions(self):
+        status = {"status": "ok", "pinned_version": "1.1.0", "latest_version": "1.2.0",
+                  "advice": [{"package_version": "not-a-version", "advisory": "optional"}],
+                  "active_advisories": []}
+        fake = self.runner(status=status)
+        result, code = fake.run(repo=self.repo, fetch_permitted=False)
+        self.assertEqual(2, code)
+        self.assertEqual("ok", result["status"])
+        self.assertEqual("operation_failed", result["fetch_error"])
+        self.assertEqual(("1.1.0", "1.2.0"), (result["pinned"], result["latest"]))
+
     def test_origin_is_checked_before_fetch_and_credential_urls_are_refused(self):
         for remote in ("https://wrong.example/repo.git", "https://user:pass@github.com/amazarache/ai-comm.git"):
             with self.subTest(remote=remote):
