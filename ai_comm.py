@@ -1629,8 +1629,7 @@ class Channel:
                                     and type(value["generation"]) is int and value["generation"] >= 1
                                     and value["command"] in {"inbox", "ack", "wait", "send", "state"}
                                     and isinstance(value["tool_version"], str)
-                                    and SEMVER.fullmatch(value["tool_version"])
-                                    and value["tool_version"] == VERSION):
+                                    and SEMVER.fullmatch(value["tool_version"])):
                                     old = (value, poll_time(value["last_poll_utc"]))
                             except (ProtocolError, ValueError, UnicodeError, TypeError, KeyError):
                                 pass
@@ -1639,8 +1638,13 @@ class Channel:
                     except OSError as exc:
                         if exc.errno == errno.ELOOP:
                             return dict(warning, reason="target_symlink")
-                    if old and old[0]["generation"] == current["generation"] and old[1] > poll_time(sample):
-                        return None
+                    if old and old[0]["generation"] == current["generation"]:
+                        sampled_at = poll_time(sample)
+                        delta = (old[1] - sampled_at).total_seconds()
+                        if delta > 5:
+                            old = None
+                        elif delta > 0:
+                            return None
                     record = {"v": 1, "handle": handle, "generation": current["generation"],
                               "last_poll_utc": sample, "command": command, "tool_version": VERSION}
                     temp = ".poll-" + secrets.token_hex(12)
@@ -1663,8 +1667,16 @@ class Channel:
             return None
         except Exception as exc:
             reason = "unavailable"
-            if isinstance(exc, (ProtocolError, PermissionError)):
-                reason = "permission_denied" if isinstance(exc, PermissionError) else "identity_invalid"
+            if isinstance(exc, PermissionError):
+                reason = "permission_denied"
+            elif isinstance(exc, ProtocolError):
+                code = exc.details.get("code")
+                if code == "runtime_symlink_refused":
+                    reason = "target_symlink"
+                elif code == "channel_busy_retry_with_the_same_key":
+                    reason = "lock_busy"
+                elif code in {"unregistered_or_stale_session", "handle_already_active_explicit_takeover_required"}:
+                    reason = "identity_invalid"
             return dict(warning, reason=reason)
 
     def _poll_status(self, record, stale_after, as_of):
@@ -1717,7 +1729,7 @@ class Channel:
         except PermissionError:
             return dict(unknown, reason="unreadable")
         except OSError as exc:
-            return dict(unknown, reason="symlink" if exc.errno in {40, 20} else "unreadable")
+            return dict(unknown, reason="symlink" if exc.errno == errno.ELOOP else "unreadable")
         except (ProtocolError, ValueError, UnicodeError, TypeError, KeyError):
             return unknown
 
@@ -2543,7 +2555,7 @@ def parser():
     p = sub.add_parser("state")
     p.add_argument("--as", dest="actor")
     p.add_argument("--session")
-    p.add_argument("--stale-after", type=int, default=300)
+    p.add_argument("--stale-after", default="300")
     sub.add_parser("validate")
     sub.add_parser("release-status", help="inspect only already-fetched local release refs; never contacts the network")
     p = sub.add_parser("upgrade-plan", help="print a read-only plan from verified local release metadata")
@@ -2608,7 +2620,12 @@ def main(argv=None):
         else:
             state = channel.snapshot()
             if cmd == "state":
-                integer(args.stale_after, "stale-after", 1, 86400)
+                require(isinstance(args.stale_after, str) and
+                        re.fullmatch(r"[1-9][0-9]*", args.stale_after) is not None,
+                        "invalid stale-after threshold", code="invalid_stale_after",
+                        field="stale_after",
+                        hint="Use ASCII decimal digits for an integer from 1 through 86400.")
+                stale_after = integer(int(args.stale_after), "stale-after", 1, 86400)
                 heartbeat_warning = None
                 if args.actor is not None or args.session is not None:
                     require(args.actor is not None and args.session is not None,
@@ -2618,7 +2635,7 @@ def main(argv=None):
                     heartbeat_warning = channel._record_poll(args.actor, args.session, "state")
                 value = state.state(actor=args.actor, session=args.session)
                 as_of = datetime.now(timezone.utc)
-                value["liveness"] = {record["handle"]: channel._poll_status(record, args.stale_after, as_of)
+                value["liveness"] = {record["handle"]: channel._poll_status(record, stale_after, as_of)
                                      for record in state.current.values()}
                 if heartbeat_warning:
                     value["warnings"] = [heartbeat_warning]

@@ -152,6 +152,57 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual("future_timestamp",
                          self.channel._poll_status(state.current["alpha"], 300, as_of)["reason"])
 
+    def test_heartbeat_warnings_distinguish_busy_lock_and_runtime_symlink(self):
+        busy = ac.ProtocolError("busy", code="channel_busy_retry_with_the_same_key")
+        with mock.patch.object(self.channel, "lock", side_effect=busy):
+            warning = self.channel._record_poll("alpha", "alpha-session", "state")
+        self.assertEqual("lock_busy", warning["reason"])
+        self.channel.runtime.rename(self.root / "runtime-backup")
+        destination = self.root / "runtime-target"
+        destination.mkdir()
+        self.channel.runtime.symlink_to(destination, target_is_directory=True)
+        warning = self.channel._record_poll("alpha", "alpha-session", "state")
+        self.assertEqual("target_symlink", warning["reason"])
+
+    def test_poll_state_maps_non_directory_to_unreadable_and_writer_accepts_other_semver(self):
+        poll_root = self.channel.runtime / "poll"
+        poll_root.write_text("not a directory")
+        record = self.channel.snapshot().current["alpha"]
+        status = self.channel._poll_status(record, 300, ac.datetime.now(ac.timezone.utc))
+        self.assertEqual(("unknown", "unreadable"), (status["status"], status["reason"]))
+
+    def test_writer_preserves_later_valid_heartbeat_from_another_package_version(self):
+        poll = self.channel.runtime / "poll" / "alpha.json"
+        poll.parent.mkdir(mode=0o700)
+        newer = "2027-01-01T00:00:00.000001Z"
+        poll.write_text(json.dumps({"v": 1, "handle": "alpha", "generation": 1,
+                                    "last_poll_utc": newer, "command": "inbox",
+                                    "tool_version": "1.3.1"}))
+        with mock.patch.object(ac, "poll_now", return_value="2026-12-31T23:59:59.999999Z"):
+            self.assertIsNone(self.channel._record_poll("alpha", "alpha-session", "state"))
+        self.assertEqual(newer, json.loads(poll.read_text())["last_poll_utc"])
+
+    def test_future_timestamp_replacement_uses_exact_five_second_skew_boundary(self):
+        poll = self.channel.runtime / "poll" / "alpha.json"
+        poll.parent.mkdir(mode=0o700)
+        sample = "2026-09-27T14:00:00.000000Z"
+        for stored, expected in (("2026-09-27T14:00:05.000000Z", "2026-09-27T14:00:05.000000Z"),
+                                 ("2026-09-27T14:00:05.000001Z", sample)):
+            with self.subTest(stored=stored):
+                poll.write_text(json.dumps({"v": 1, "handle": "alpha", "generation": 1,
+                                            "last_poll_utc": stored, "command": "inbox",
+                                            "tool_version": ac.VERSION}))
+                with mock.patch.object(ac, "poll_now", return_value=sample):
+                    self.assertIsNone(self.channel._record_poll("alpha", "alpha-session", "state"))
+                self.assertEqual(expected, json.loads(poll.read_text())["last_poll_utc"])
+
+    def test_stale_after_requires_ascii_decimal_and_uses_specific_error(self):
+        for value in ("abc", "1.5", "٥", " 5", "+5", "05", "0", "86401"):
+            with self.subTest(value=value):
+                result = self.cli("state", "--stale-after", value)
+                self.assertEqual(2, result.returncode)
+                self.assertEqual("invalid_stale_after", json.loads(result.stderr)["code"])
+
     def test_send_dry_run_has_no_durable_side_effects_and_does_not_reserve_key(self):
         before = self.channel.snapshot().head
         receipt = self.channel.runtime / "beta.json"

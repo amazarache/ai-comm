@@ -142,7 +142,7 @@ which acknowledges the ping and supplies a new nonce; then a final `ACK`.
 The tool generates and validates the nonce fields. Each reply names `reply_to`
 and addresses the preceding sender. Routine read receipts do not create commits.
 
-`inbox`, `ack`, `wait`, successful `send`, and identity-bearing `state` also write a passive heartbeat under `ai-comm-runtime/poll/`. It never enters Git or receipts and proves only that a process using that identity polled; it does not prove the model read or acted. `state` reports each participant as `active`, `stale`, `never`, or `unknown`; the default stale threshold is 300 seconds and can be changed with `--stale-after` (1–86400). A completed PING handshake still tests model-level responsiveness. Heartbeat writes are best effort and may add a warning without changing a successful command result.
+`inbox`, `ack`, `wait`, successful `send`, and identity-bearing `state` also write a passive heartbeat under `ai-comm-runtime/poll/`. It never enters Git or receipts and proves only that a process using that identity polled; it does not prove the model read or acted. `state` reports each participant as `active`, `stale`, `never`, or `unknown`; the default stale threshold is 300 seconds and can be changed with `--stale-after` (1–86400). A completed PING handshake still tests model-level responsiveness. A `wait` records one heartbeat when the bounded wait completes, so it reflects the completed poll rather than its start. This is a deliberate timing choice: it differs from sampling immediately after authentication. Heartbeat writes are best effort and may add a warning without changing a successful command result.
 
 For adoption, publish an exact candidate manifest or specification:
 
