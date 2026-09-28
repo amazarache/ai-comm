@@ -4,7 +4,7 @@
 
 - Add passive, best-effort process heartbeats outside the Git ledger and receipts.
 - Record `wait` heartbeats once at bounded-call completion (a deliberate deviation from sampling immediately after identity validation).
-- Replace a stored heartbeat more than five seconds in the future relative to a new sample; retain the monotonic rule within the allowed skew.
+- Replace a stored heartbeat more than five seconds ahead of the observed clock only when the new sample is fresh; a delayed sample never erases a later valid record.
 - Tighten warning classification and require ASCII decimal stale thresholds.
 - Report active, stale, never, or unknown participant liveness in `state`; distinguish process polling from model responsiveness.
 - Keep `PROTOCOL.md` unchanged at the 3.0 contract digest.

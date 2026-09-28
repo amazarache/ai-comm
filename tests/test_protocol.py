@@ -89,7 +89,9 @@ class ProtocolTests(unittest.TestCase):
         poll.write_text(json.dumps({"v": 1, "handle": "alpha", "generation": 1,
                                     "last_poll_utc": newer, "command": "inbox",
                                     "tool_version": ac.VERSION}))
-        with mock.patch.object(ac, "poll_now", return_value="2026-12-31T23:59:59.999999Z"):
+        sample = "2026-12-31T23:59:59.999999Z"
+        with mock.patch.object(ac, "poll_now", return_value=sample), \
+             mock.patch.object(ac, "poll_observed_now", return_value=ac.poll_time(sample)):
             self.assertIsNone(self.channel._record_poll("alpha", "alpha-session", "state"))
         self.assertEqual(newer, json.loads(poll.read_text())["last_poll_utc"])
 
@@ -178,7 +180,9 @@ class ProtocolTests(unittest.TestCase):
         poll.write_text(json.dumps({"v": 1, "handle": "alpha", "generation": 1,
                                     "last_poll_utc": newer, "command": "inbox",
                                     "tool_version": "1.3.1"}))
-        with mock.patch.object(ac, "poll_now", return_value="2026-12-31T23:59:59.999999Z"):
+        sample = "2026-12-31T23:59:59.999999Z"
+        with mock.patch.object(ac, "poll_now", return_value=sample), \
+             mock.patch.object(ac, "poll_observed_now", return_value=ac.poll_time(sample)):
             self.assertIsNone(self.channel._record_poll("alpha", "alpha-session", "state"))
         self.assertEqual(newer, json.loads(poll.read_text())["last_poll_utc"])
 
@@ -192,12 +196,37 @@ class ProtocolTests(unittest.TestCase):
                 poll.write_text(json.dumps({"v": 1, "handle": "alpha", "generation": 1,
                                             "last_poll_utc": stored, "command": "inbox",
                                             "tool_version": ac.VERSION}))
-                with mock.patch.object(ac, "poll_now", return_value=sample):
+                with mock.patch.object(ac, "poll_now", return_value=sample), \
+                     mock.patch.object(ac, "poll_observed_now", return_value=ac.poll_time(sample)):
                     self.assertIsNone(self.channel._record_poll("alpha", "alpha-session", "state"))
                 self.assertEqual(expected, json.loads(poll.read_text())["last_poll_utc"])
 
+    def test_stale_sample_keeps_far_future_until_next_fresh_poll_repairs_it(self):
+        observed = ac.poll_observed_now()
+        sample_now = observed.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        stale_sample = (observed - ac.timedelta(seconds=10)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        far_future = (observed + ac.timedelta(days=365)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        poll = self.channel.runtime / "poll" / "alpha.json"
+        poll.parent.mkdir(mode=0o700)
+        poll.write_text(json.dumps({"v": 1, "handle": "alpha", "generation": 1,
+                                    "last_poll_utc": far_future, "command": "inbox",
+                                    "tool_version": ac.VERSION}))
+        with mock.patch.object(ac, "poll_now", return_value=stale_sample), \
+             mock.patch.object(ac, "poll_observed_now", return_value=observed):
+            self.channel._record_poll("alpha", "alpha-session", "wait")
+        self.assertEqual(far_future, json.loads(poll.read_text())["last_poll_utc"])
+        snapshot = self.channel.snapshot()
+        self.assertEqual("future_timestamp", self.channel._poll_status(
+            snapshot.current["alpha"], 300, observed)["reason"])
+        with mock.patch.object(ac, "poll_now", return_value=sample_now), \
+             mock.patch.object(ac, "poll_observed_now", return_value=observed):
+            self.channel._record_poll("alpha", "alpha-session", "state")
+        status = self.channel._poll_status(snapshot.current["alpha"], 300, observed)
+        self.assertEqual("active", status["status"])
+        self.assertEqual(sample_now, json.loads(poll.read_text())["last_poll_utc"])
+
     def test_stale_after_requires_ascii_decimal_and_uses_specific_error(self):
-        for value in ("abc", "1.5", "٥", " 5", "+5", "05", "0", "86401"):
+        for value in ("abc", "1.5", "٥", " 5", "+5", "05", "0", "86401", "9" * 5000):
             with self.subTest(value=value):
                 result = self.cli("state", "--stale-after", value)
                 self.assertEqual(2, result.returncode)

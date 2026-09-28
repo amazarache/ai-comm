@@ -19,7 +19,7 @@ import sys
 import tempfile
 import time
 import unicodedata
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 VERSION = "1.3.0"
 RELEASE_ORIGIN = "https://github.com/amazarache/ai-comm.git"
@@ -700,6 +700,10 @@ def poll_time(value):
 
 def poll_now():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def poll_observed_now():
+    return datetime.now(timezone.utc)
 
 
 def timestamp(value):
@@ -1640,11 +1644,12 @@ class Channel:
                             return dict(warning, reason="target_symlink")
                     if old and old[0]["generation"] == current["generation"]:
                         sampled_at = poll_time(sample)
-                        delta = (old[1] - sampled_at).total_seconds()
-                        if delta > 5:
-                            old = None
-                        elif delta > 0:
-                            return None
+                        observed_now = poll_observed_now()
+                        if old[1] > sampled_at:
+                            future = old[1] > observed_now + timedelta(seconds=5)
+                            fresh_sample = sampled_at >= observed_now - timedelta(seconds=5)
+                            if not (future and fresh_sample):
+                                return None
                     record = {"v": 1, "handle": handle, "generation": current["generation"],
                               "last_poll_utc": sample, "command": command, "tool_version": VERSION}
                     temp = ".poll-" + secrets.token_hex(12)
@@ -2620,7 +2625,7 @@ def main(argv=None):
         else:
             state = channel.snapshot()
             if cmd == "state":
-                require(isinstance(args.stale_after, str) and
+                require(isinstance(args.stale_after, str) and len(args.stale_after) <= 5 and
                         re.fullmatch(r"[1-9][0-9]*", args.stale_after) is not None,
                         "invalid stale-after threshold", code="invalid_stale_after",
                         field="stale_after",
