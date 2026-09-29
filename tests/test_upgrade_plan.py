@@ -105,6 +105,18 @@ class UpgradePlanTests(unittest.TestCase):
             self.assertEqual("upgrade_plan_unavailable", caught.exception.details["code"])
             self.assertEqual(result_status, caught.exception.details["status"])
 
+    def test_missing_local_release_tag_requires_gate1_without_advice_or_steps(self):
+        self._git("tag", "-d", "v1.1.0")
+        status = ac.release_status(self.repo)
+        self.assertEqual("index_tags_missing", status["status"])
+        self.assertEqual([], status["advice"])
+        self.assertNotIn("verified_releases", status)
+        with self.assertRaises(ac.ProtocolError) as caught:
+            ac.upgrade_plan(directory=self.repo)
+        self.assertEqual("upgrade_plan_gate1_required", caught.exception.details["code"])
+        self.assertIn("Gate 1", caught.exception.details["hint"])
+        self.assertNotIn("repin_steps", caught.exception.details)
+
     def test_upgrade_notice_fields_require_a_matching_verified_record(self):
         state = self.channel.snapshot()
         entry = ac.release_status(self.repo)["verified_releases"][-1]
@@ -144,11 +156,20 @@ class UpgradePlanTests(unittest.TestCase):
         self.assertEqual("1.1.0", plan["fixed_in"])
         self.assertNotIn("USER_NOTICE_SECRET", plan["owner_notice"])
         self.assertIn("changed, so a new channel is needed", plan["owner_notice"])
+        self.assertIn("use the tag already fetched at Gate 1", plan["owner_notice"])
+        self.assertNotIn("fetch tag", plan["owner_notice"])
         self.assertIn("python3 scripts/check_tag.py v1.1.0", plan["owner_notice"])
         self.assertIn("update the project's activation note, announce on the channel", plan["owner_notice"])
         self.assertTrue(all(isinstance(step, list) and all(isinstance(arg, str) for arg in step)
                             for step in plan["repin_steps"]))
-        self.assertIn(str(self.repo), plan["repin_steps"][0])
+        self.assertEqual(["git", "-C", str(self.repo), "show-ref", "--verify", "--quiet",
+                          "refs/tags/v1.1.0"], plan["repin_steps"][0])
+        self.assertEqual(["git", "-C", str(self.repo), "checkout", "--detach", "v1.1.0"],
+                         plan["repin_steps"][1])
+        network_commands = {"fetch", "pull", "clone", "push", "ls-remote", "remote"}
+        for step in plan["repin_steps"]:
+            if step[0] == "git":
+                self.assertNotIn(step[3], network_commands)
         self.assertEqual(["alpha", "beta", "guest"], plan["migration"]["participants_outstanding"])
         self.assertEqual([], plan["migration"]["participants_unjoined"])
         self.assertFalse(plan["migration"]["complete"])

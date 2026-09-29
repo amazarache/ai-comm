@@ -22,7 +22,7 @@ REFSPECS = (
 )
 SCHEMA = "ai-comm-release-check/1"
 RELEASE_STATUSES = {"ok", "index_missing", "index_invalid", "index_inconsistent",
-                    "not_git_checkout"}
+                    "index_tags_missing", "not_git_checkout"}
 MAX_ORIGIN_LENGTH = 2048
 
 

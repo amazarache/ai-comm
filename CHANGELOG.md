@@ -1,5 +1,15 @@
 # Changes
 
+## 1.4.0
+
+- Add an agent-neutral project skill and document Codex/Claude project-local
+  installation, discovery checks, and a hash-verified copy fallback.
+- Keep the complete upgrade path owner-gated: separate bounded release-ref
+  refresh approval from approval to apply a named version.
+- Require 1.4.0+ offline repin plans to use an already-local verified tag;
+  missing tags now return `index_tags_missing` with no advice and require Gate 1.
+- Keep `PROTOCOL.md` unchanged at the 3.0 contract digest.
+
 ## 1.3.0
 
 - Add passive, best-effort process heartbeats outside the Git ledger and receipts.

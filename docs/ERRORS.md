@@ -283,6 +283,7 @@ Complete code catalog:
 | `upgrade_participant_requires_channel` | participant statuses require --channel |
 | `upgrade_participant_status_invalid` | participant status must be will_upgrade or stays_behind |
 | `upgrade_participant_unknown` | participant handle is not in the channel |
+| `upgrade_plan_gate1_required` | release tag is not available locally; owner-approved refresh is required |
 | `upgrade_plan_unavailable` | verified local release metadata is unavailable |
 | `upgrade_requires_release_record` | upgrade requires release record |
 | `upgrade_reviewer_stays_behind` | configured reviewers must migrate with the channel |
@@ -349,6 +350,7 @@ Common repair codes:
 | `index_inconsistent` | `index` | Reconcile the index with the local annotated tag; no update advice is emitted. |
 | `channel_required` | `channel` | Pass the explicit channel path for channel operations. |
 | `upgrade_plan_unavailable` | `target` | Refresh only with the owner's release-check permission, then retry when release-status is `ok`. |
+| `upgrade_plan_gate1_required` | `target` | Ask the owner to approve Gate 1; fetch bounded release refs, then rerun offline planning. |
 | `upgrade_target_unverified` | `target` | Choose a version listed in `verified_releases`. |
 | `upgrade_target_not_newer` | `target` | Choose a newer verified package version. |
 | `upgrade_participant_requires_channel` | `participant` | Supply `--channel` when listing participant statuses. |

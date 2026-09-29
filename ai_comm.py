@@ -21,7 +21,7 @@ import time
 import unicodedata
 from datetime import datetime, timedelta, timezone
 
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 RELEASE_ORIGIN = "https://github.com/amazarache/ai-comm.git"
 PROTOCOL_VERSION = "3.0"
 PREVIOUS_PROTOCOLS = (("2.0", "709af4b00ffcabeeca1b175d7d7d6db5103df829dabba1e529eef26dce23a000", "0.2.0"),)
@@ -361,6 +361,7 @@ ERROR_CODES = frozenset([
     'upgrade_participant_not_required',
     'upgrade_participant_status_invalid',
     'upgrade_participant_unknown',
+    'upgrade_plan_gate1_required',
     'upgrade_plan_unavailable',
     'upgrade_requires_release_record',
     'upgrade_reviewer_stays_behind',
@@ -1077,10 +1078,15 @@ def _release_status(repo):
                 "head": identity["commit"], "advice": [],
                 "message": "release index schema validation failed; no advice given",
                 "authenticity": "not verified (no attestation)"}
+    missing_tags = []
     try:
         for entry in entries:
             tag = entry["tag"]
             tag_ref = f"refs/tags/{tag}"
+            local_ref = work_git(repo, "show-ref", "--verify", tag_ref, ok=(0, 1, 128)).strip()
+            if not local_ref:
+                missing_tags.append(tag)
+                continue
             tag_type = work_git(repo, "cat-file", "-t", tag_ref).decode().strip()
             require(tag_type == "tag", "release tag is not annotated", code="index_inconsistent",
                     field="tag", hint="Publish an annotated tag for the indexed release.")
@@ -1108,6 +1114,12 @@ def _release_status(repo):
         return {"status": "index_inconsistent",
                 "pinned_version": identity["version"], "head": identity["commit"],
                 "advice": [], "message": "release index validation failed; no advice given",
+                "authenticity": "not verified (no attestation)"}
+    if missing_tags:
+        return {"status": "index_tags_missing",
+                "pinned_version": identity["version"], "head": identity["commit"],
+                "advice": [],
+                "message": "one or more release tags are not present locally; no advice given",
                 "authenticity": "not verified (no attestation)"}
     if not entries:
         return {"status": "index_invalid", "pinned_version": identity["version"],
@@ -1223,6 +1235,10 @@ def upgrade_plan(target_version=None, channel_path=None, participant_values=(), 
     """Return a read-only plan from already verified local release metadata."""
     repo = Path(directory or Path(__file__).resolve().parent).resolve()
     status = release_status(repo)
+    if status.get("status") == "index_tags_missing":
+        _upgrade_error("local release tags are incomplete; Gate 1 is needed",
+                       "upgrade_plan_gate1_required", "target",
+                       "After the owner's separate Gate 1 approval, refresh release refs with the bounded helper, then retry.")
     if status.get("status") != "ok":
         _upgrade_error("verified release information is unavailable",
                        "upgrade_plan_unavailable", "target",
@@ -1277,14 +1293,14 @@ def upgrade_plan(target_version=None, channel_path=None, participant_values=(), 
         f"ai-comm release notice. Pinned: {identity['version']} at {identity['commit']}. "
         f"Available: {target['package_version']}. Advisory: {applicable['advisory']}, "
         f"which applies to this version: {applicable['reason']}; fixed in {owner_fixed}. "
-        f"Protocol: {protocol_line}. Steps: fetch tag {target['tag']}, verify it is annotated "
+        f"Protocol: {protocol_line}. Steps: use the tag already fetched at Gate 1, verify it is annotated "
         f"and its message names manifest {target['manifest_sha256']}, check out the tag, run "
         f"python3 scripts/check_tag.py {target['tag']}, scripts/check_release_manifest.py and "
         f"the test suite, update the project's activation note, announce on the channel. "
         "Authenticity: not verified (no attestation). Apply? yes/no")
     repin_steps = [
-        ["git", "-C", str(repo), "fetch", "origin",
-         f"refs/tags/{target['tag']}:refs/tags/{target['tag']}"] ,
+        ["git", "-C", str(repo), "show-ref", "--verify", "--quiet",
+         f"refs/tags/{target['tag']}"] ,
         ["git", "-C", str(repo), "checkout", "--detach", target["tag"]],
         ["python3", str(repo / "scripts" / "check_tag.py"), target["tag"]],
         ["python3", str(repo / "scripts" / "check_release_manifest.py")],

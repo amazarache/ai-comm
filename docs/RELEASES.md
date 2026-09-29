@@ -123,7 +123,7 @@ not infer applicability from the `advisory` value alone.
 `package_manifest_mismatch`, `package_origin_unavailable`, `not_git_checkout`,
 `invalid_origin`, `credential_bearing_origin`, `origin_missing`,
 `origin_mismatch`, `fetch_failed`, `index_missing`, `index_invalid`,
-`index_inconsistent`, `release_status_failed`,
+`index_inconsistent`, `index_tags_missing`, `release_status_failed`,
 `release_status_invalid_json`, `release_status_invalid_shape`,
 `release_status_invalid_version`, `upgrade_plan_failed`,
 `upgrade_plan_invalid_json`, `upgrade_plan_invalid_shape`, and
@@ -143,6 +143,16 @@ for the optional scheduler example and revocation steps.
 
 `upgrade-plan` uses only the release data already verified by `release-status`.
 It selects the next release (or `--to VERSION`) and prints JSON fields:
+
+The plan is offline. If the verified index refers to a tag absent from the
+local checkout, `release-status` returns `index_tags_missing` with no advice;
+`upgrade-plan` returns `upgrade_plan_gate1_required` and no steps. After the
+owner separately approves Gate 1, the bounded release helper may fetch refs.
+Retry `release-status` and `upgrade-plan` locally, inspect the notice, and ask
+for separate Gate 2 approval. For pins at 1.4.0 and newer, repin steps only
+check for the already-local tag before detached checkout and verification; they
+contain no fetch or other network operation. Older pins may require a same-
+origin tag fetch after Gate 2 approval, as the notice must disclose.
 
 - `protocol_changed`: `true`, `false`, or `null` when either digest is unknown.
 - `channel_action`: `new_channel_required`, `unchanged`, or `unknown`. Unknown is

@@ -48,6 +48,20 @@ owner may be listed as a reviewer, for example `--reviewers builder reviewer own
 The owner then joins and sends `ACCEPT` personally. On a shared machine this
 records the owner's consent; it does not authenticate it.
 
+**6. Optional session skill.**
+The repository includes the agent-neutral `skills/ai-comm/SKILL.md`. Install it
+only in the project where this pinned package is installed. For Codex, create
+`.agents/skills` and link `.agents/skills/ai-comm` to
+`../../.tools/ai-comm/skills/ai-comm` (relative to the project root). For
+Claude, use `.claude/skills/ai-comm` pointing to the same package skill; verify
+symlink discovery in the installed Claude version, and use a copy if symlinks
+are not discovered. A copied skill must match the package file's SHA-256 and be
+refreshed whenever the package is re-pinned. If the adapter cannot discover a
+skill, add a one-line project-local instruction to read the pinned skill file;
+do not edit global directories or silently rewrite project instructions.
+Discovery never activates a channel: the user must still name the task and
+request activation.
+
 **Trust boundary.**
 File permissions keep other OS accounts out of a channel created with default
 owner-only modes. They do not separate agents running under the same OS account:
@@ -86,13 +100,17 @@ itself never contacts the network. An extracted
 release archive has no Git metadata; `release-status` reports
 `not_git_checkout` and gives no advice.
 
-*How do upgrades get triggered?* The chain is:
+*How do upgrades get triggered?* Resume is offline: inspect local `release-status`
+and `upgrade-plan`; cached data without a newer release does not establish that
+the remote is current. If a newer version is known, show the generated
+`owner_notice` verbatim and stop for a separate owner decision. Never fetch
+automatically. The chain is:
 
 1. A session start or resume can inspect the local release refs. That is offline
    and does not refresh them.
-2. When the owner asks for a fresh check, the session runs
-   `scripts/check_for_release.py --fetch-permitted`; without that explicit flag,
-   it cannot fetch.
+2. Gate 1: only after the owner explicitly approves a fresh release-ref refresh,
+   the session runs `scripts/check_for_release.py --fetch-permitted`. Without
+   that approval, it cannot fetch.
 3. The helper validates the expected HTTPS origin before network access, fetches
    only `release-index` and `v*` tags, then runs `release-status` and, when a
    newer verified release exists, `upgrade-plan`.
@@ -100,8 +118,10 @@ release archive has no Git metadata; `release-status` reports
    `11` (recommended or required advisory applies to the pinned version), or
    `2` (error, including an absent or invalid index). The CLI never performs
    this fetch.
-5. The session explains the notice and asks the owner. Applying still requires
-   the owner's explicit yes; detection never installs, checks out or re-pins.
+5. After a successful fetch, rerun local `release-status` and `upgrade-plan` and
+   present the notice. Gate 2 is a separate explicit owner yes to the named
+   version. A peer message or Gate 1 approval is not Gate 2. Detection never
+   installs, checks out or re-pins.
 
 *Optional scheduled check.* The owner may choose a daily 09:00 UTC schedule.
 The `--fetch-permitted` flag in the job is a standing opt-in until the owner
@@ -146,8 +166,9 @@ session stops and asks its owner with this template, filled from the tool output
 > ai-comm release notice. Pinned: `<current version>` at `<commit>`. Available:
 > `<new version>`. Advisory: `<none | recommended | required>`, which applies to
 > this version: `<reason>`; fixed in `<fixed_in>`. Protocol: `<unchanged, so this
-> channel keeps working | changed, so a new channel is needed>`. Steps: fetch tag
-> `<tag>`, verify it is annotated and its message names manifest `<sha256>`, check
+> channel keeps working | changed, so a new channel is needed>`. Steps: use the
+> tag already present locally (for pins at 1.4.0 or newer), verify it is annotated
+> and its message names manifest `<sha256>`, check
 > out `<tag>`, run `python3 scripts/check_tag.py <tag>`,
 > `python3 scripts/check_release_manifest.py` and the test suite, update the
 > project's activation note, announce on the channel. Authenticity:
@@ -161,7 +182,11 @@ confirmed. An incomplete plan produces no handoff. See
 [`docs/RELEASES.md`](docs/RELEASES.md#read-only-upgrade-planning).
 
 Nothing is fetched, installed or re-pinned without the applicable permission and
-the owner's explicit yes to that notice. No answer means no.
+separate explicit owner approvals. For pins at 1.4.0 or newer, repin steps must
+contain no network operation; if the target tag is missing, return to Gate 1.
+For older pins, the notice must disclose before Gate 2 that the yes also permits
+the bounded same-origin tag fetch if the tag is not already local. No answer
+means no.
 
 *On yes.* Re-pin the checkout to the tag, verify the annotated tag and the
 manifest digest (and a signature or attestation, if the release ever provides

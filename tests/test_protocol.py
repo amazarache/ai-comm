@@ -893,6 +893,14 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual("index_missing", result["status"])
         self.assertEqual([], result["advice"])
 
+        git("update-ref", "refs/remotes/origin/release-index",
+            git("rev-parse", "refs/heads/release-index").decode().strip())
+        git("tag", "-d", "v1.0.0")
+        result = ac.release_status(repo)
+        self.assertEqual("index_tags_missing", result["status"])
+        self.assertEqual([], result["advice"])
+        self.assertNotIn("verified_releases", result)
+
     def test_promisor_remote_is_detected_as_a_partial_clone(self):
         version = type("Version", (), {"returncode": 0,
                                         "stdout": b"git version 2.43.0\n"})()

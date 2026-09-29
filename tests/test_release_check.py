@@ -218,6 +218,7 @@ class ReleaseCheckTests(unittest.TestCase):
 
     def test_index_failures_always_exit_two_with_no_latest(self):
         for status_name in ("index_missing", "index_invalid", "index_inconsistent",
+                            "index_tags_missing",
                             "not_git_checkout"):
             with self.subTest(status=status_name):
                 fake = self.runner(status={"status": status_name, "pinned_version": "1.1.0"})
