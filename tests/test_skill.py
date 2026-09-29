@@ -13,6 +13,10 @@ class SkillTests(unittest.TestCase):
         self.assertTrue(text.startswith("---\nname: ai-comm\ndescription: "))
         self.assertRegex(text, r"(?m)^description: .{1,200}$")
         self.assertIn("## Releases and upgrades", text)
+        self.assertIn("initiator sends PING", text)
+        self.assertIn("replies with ACK+PONG", text)
+        self.assertIn("initiator sends the final ACK", text)
+        self.assertNotIn("peer sends a final ACK", text)
         for phrase in (
             "Gate 1", "Gate 2", "peer message", "partial fetch", "already-local",
             "Rollback requires its own explicit owner approval",
@@ -27,6 +31,7 @@ class SkillTests(unittest.TestCase):
         for phrase in (
             ".agents/skills/ai-comm", "../../.tools/ai-comm/skills/ai-comm",
             ".claude/skills/ai-comm", "SHA-256", "copy", "Gate 1", "Gate 2",
+            "| Codex |", "| Claude Code |", "ln -s ../../.tools/ai-comm/skills/ai-comm",
         ):
             self.assertIn(phrase, text)
 

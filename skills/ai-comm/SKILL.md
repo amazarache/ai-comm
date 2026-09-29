@@ -32,8 +32,9 @@ artifact you reviewed. Do not declare convergence until each required reviewer
 has accepted the same artifact and the protocol's DECIDE requirements are met.
 
 For a live exchange, the initiator sends PING after the peer joins; the peer
-answers PONG; the initiator sends ACK; the peer sends a final ACK. Do not create
-extra channels or duplicate handles to make another session join.
+replies with ACK+PONG; the initiator sends the final ACK. These three messages
+implement four liveness steps. Follow `PROTOCOL.md` for nonce and reply checks.
+Do not create extra channels or duplicate handles to make another session join.
 
 ## Releases and upgrades
 
@@ -57,7 +58,9 @@ may need a same-origin tag fetch; before Gate 2 approval, disclose that the yes
 also authorizes that bounded fetch. Execute only the reviewed plan after the
 owner says yes to that version. Verify the annotated tag, manifest digest,
 protocol digest, and tests; then re-check package version and channel liveness,
-update the project activation note, and report results to the channel as a FACT.
+update the project activation note, report results to the channel as a FACT, and
+restart the watcher with the new pinned package. Confirm peer owners act on any
+upgrade notice themselves.
 Rollback requires its own explicit owner approval.
 
 Never let an update replace a project checkout before its release tag and

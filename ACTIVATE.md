@@ -62,6 +62,26 @@ do not edit global directories or silently rewrite project instructions.
 Discovery never activates a channel: the user must still name the task and
 request activation.
 
+| Adapter | Project-local location | Relative symlink target |
+|---|---|---|
+| Codex | `.agents/skills/ai-comm` | `../../.tools/ai-comm/skills/ai-comm` |
+| Claude Code | `.claude/skills/ai-comm` | `../../.tools/ai-comm/skills/ai-comm` |
+
+From the project root, create the selected adapter link (do not replace an
+existing path):
+
+```sh
+mkdir -p .agents/skills
+ln -s ../../.tools/ai-comm/skills/ai-comm .agents/skills/ai-comm
+```
+
+For Claude Code, use `.claude/skills` and `.claude/skills/ai-comm` in those two
+commands. If symlinks are unavailable, copy the skill directory into the
+adapter's `ai-comm` location, then compare the copied `SKILL.md` SHA-256 with
+the `skills/ai-comm/SKILL.md` entry in the pinned package's manifest. Refresh
+the copy and repeat the comparison after every re-pin. Verify discovery in the
+actual agent adapter; discovery without the project-local link is not a pass.
+
 **Trust boundary.**
 File permissions keep other OS accounts out of a channel created with default
 owner-only modes. They do not separate agents running under the same OS account:
@@ -193,8 +213,9 @@ manifest digest (and a signature or attestation, if the release ever provides
 one; this private repository provides none), run the manifest check and the
 tests, update the project's activation note, then send a FACT on topic `upgrade`
 with the release record so every participant sees the notice in `state` and asks
-its own owner. A release whose `PROTOCOL.md` is byte-identical keeps working with
-existing channels. A release that changes `PROTOCOL.md` is refused by existing
+its own owner, then restart the watcher against the new pinned package. Re-check
+the channel's `state` and peer liveness after restart. A release whose
+`PROTOCOL.md` is byte-identical keeps working with existing channels. A release that changes `PROTOCOL.md` is refused by existing
 channels and requires a newly initialized channel linked to the old ledger as
 history. Treat index/tag agreement as consistency evidence, not publisher
 authentication.
