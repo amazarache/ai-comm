@@ -48,7 +48,7 @@ owner may be listed as a reviewer, for example `--reviewers builder reviewer own
 The owner then joins and sends `ACCEPT` personally. On a shared machine this
 records the owner's consent; it does not authenticate it.
 
-**6. Optional session skill.**
+**Optional session skill.**
 The repository includes the agent-neutral `skills/ai-comm/SKILL.md`. Install it
 only in the project where this pinned package is installed. For Codex, create
 `.agents/skills` and link `.agents/skills/ai-comm` to
@@ -71,16 +71,37 @@ From the project root, create the selected adapter link (do not replace an
 existing path):
 
 ```sh
+# Codex
 mkdir -p .agents/skills
 ln -s ../../.tools/ai-comm/skills/ai-comm .agents/skills/ai-comm
+# Claude Code
+mkdir -p .claude/skills
+ln -s ../../.tools/ai-comm/skills/ai-comm .claude/skills/ai-comm
 ```
 
-For Claude Code, use `.claude/skills` and `.claude/skills/ai-comm` in those two
-commands. If symlinks are unavailable, copy the skill directory into the
-adapter's `ai-comm` location, then compare the copied `SKILL.md` SHA-256 with
-the `skills/ai-comm/SKILL.md` entry in the pinned package's manifest. Refresh
-the copy and repeat the comparison after every re-pin. Verify discovery in the
-actual agent adapter; discovery without the project-local link is not a pass.
+Run only the commands for the selected adapter; each adapter must resolve
+inside this project's own pinned `.tools/ai-comm` checkout. A link to another
+project, shared checkout, or external copy is unsupported. Symlink discovery
+was verified on Codex CLI
+0.156.1 and Claude Code 2.1.284; both discovered the linked skill, and Claude's
+no-link control did not.
+
+If symlinks are unavailable, copy the skill directory into the adapter's
+`ai-comm` location. Replace `<adapter>` below with `.agents/skills` or
+`.claude/skills`, then verify the copy against its pinned manifest entry:
+
+```sh
+cp -R .tools/ai-comm/skills/ai-comm <adapter>/ai-comm
+python3 -c 'import hashlib,json,pathlib,sys; root=pathlib.Path(".tools/ai-comm"); entry=next(x for x in json.loads((root/"RELEASE-MANIFEST.json").read_text())["files"] if x["path"]=="skills/ai-comm/SKILL.md"); actual=hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest(); assert actual==entry["sha256"], "skill copy differs from pinned manifest"' <adapter>/ai-comm/SKILL.md
+```
+
+Refresh the copy and repeat the comparison after every re-pin. Verify discovery
+in the actual adapter; discovery without the project-local link is not a pass.
+
+For an agent without skill discovery, add this exact line to the project's
+activation note or instructions file:
+
+> Before using the ai-comm channel, read `.tools/ai-comm/skills/ai-comm/SKILL.md`.
 
 **Trust boundary.**
 File permissions keep other OS accounts out of a channel created with default
@@ -204,7 +225,8 @@ confirmed. An incomplete plan produces no handoff. See
 Nothing is fetched, installed or re-pinned without the applicable permission and
 separate explicit owner approvals. For pins at 1.4.0 or newer, repin steps must
 contain no network operation; if the target tag is missing, return to Gate 1.
-For older pins, the notice must disclose before Gate 2 that the yes also permits
+For older pins, follow the skill's conditional: the released notice remains
+unchanged; before Gate 2, the session must disclose that the yes also permits
 the bounded same-origin tag fetch if the tag is not already local. No answer
 means no.
 

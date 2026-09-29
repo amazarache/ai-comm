@@ -105,6 +105,25 @@ class UpgradePlanTests(unittest.TestCase):
             self.assertEqual("upgrade_plan_unavailable", caught.exception.details["code"])
             self.assertEqual(result_status, caught.exception.details["status"])
 
+    def test_documented_release_commands_run_on_scratch_package(self):
+        tool_source = Path(ac.__file__).read_text(encoding="utf-8")
+        tool_source = tool_source.replace('VERSION = "1.4.0"', 'VERSION = "1.0.0"', 1)
+        (self.repo / "ai_comm.py").write_text(tool_source, encoding="utf-8")
+        env = dict(self.env, PYTHONDONTWRITEBYTECODE="1")
+        status_proc = subprocess.run([sys.executable, "ai_comm.py", "release-status"],
+                                     cwd=self.repo, stdout=subprocess.PIPE,
+                                     stderr=subprocess.PIPE, env=env, timeout=30)
+        self.assertEqual(0, status_proc.returncode, status_proc.stderr.decode("utf-8", "replace"))
+        status = json.loads(status_proc.stdout)
+        self.assertEqual("ok", status["status"])
+        plan_proc = subprocess.run([sys.executable, "ai_comm.py", "upgrade-plan"],
+                                   cwd=self.repo, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, env=env, timeout=30)
+        self.assertEqual(0, plan_proc.returncode, plan_proc.stderr.decode("utf-8", "replace"))
+        plan = json.loads(plan_proc.stdout)
+        self.assertEqual("1.1.0", plan["to"])
+        self.assertIn("repin_steps", plan)
+
     def test_missing_local_release_tag_requires_gate1_without_advice_or_steps(self):
         self._git("tag", "-d", "v1.1.0")
         status = ac.release_status(self.repo)
@@ -116,6 +135,82 @@ class UpgradePlanTests(unittest.TestCase):
         self.assertEqual("upgrade_plan_gate1_required", caught.exception.details["code"])
         self.assertIn("Gate 1", caught.exception.details["hint"])
         self.assertNotIn("repin_steps", caught.exception.details)
+
+    def test_missing_unrelated_historical_tag_is_only_a_warning(self):
+        old_tag = "v0.9.0"
+        self._git("switch", "-c", "historical-0.9")
+        old_manifest_bytes = b'{"release":"0.9.0"}\n'
+        self._write_package("0.9.0", old_manifest_bytes, self.protocol)
+        self._git("add", "ai_comm.py", "RELEASE-MANIFEST.json", "PROTOCOL.md")
+        self._git("commit", "-m", "historical 0.9.0")
+        old_commit = self._git("rev-parse", "HEAD").decode().strip()
+        old_manifest = hashlib.sha256(old_manifest_bytes).hexdigest()
+        self._git("tag", "-a", old_tag, "-m", "ai-comm 0.9.0 manifest sha256 " + old_manifest)
+        self._git("switch", "main")
+        skipped_tag = "v1.0.5"
+        self._git("switch", "-c", "skipped-1.0.5")
+        skipped_manifest_bytes = b'{"release":"1.0.5"}\n'
+        self._write_package("1.0.5", skipped_manifest_bytes, self.protocol)
+        self._git("add", "ai_comm.py", "RELEASE-MANIFEST.json", "PROTOCOL.md")
+        self._git("commit", "-m", "skipped target 1.0.5")
+        skipped_commit = self._git("rev-parse", "HEAD").decode().strip()
+        skipped_manifest = hashlib.sha256(skipped_manifest_bytes).hexdigest()
+        self._git("tag", "-a", skipped_tag, "-m",
+                  "ai-comm 1.0.5 manifest sha256 " + skipped_manifest)
+        self._git("switch", "main")
+        self._git("switch", "release-index")
+        old_entry = {"package_version": "0.9.0", "commit": old_commit,
+                     "tag": old_tag, "manifest_sha256": old_manifest,
+                     "protocol_sha256": hashlib.sha256(self.protocol).hexdigest(),
+                     "summary": "Historical release", "advisory": "optional",
+                     "reason": "Historical only."}
+        skipped_entry = {"package_version": "1.0.5", "commit": skipped_commit,
+                         "tag": skipped_tag, "manifest_sha256": skipped_manifest,
+                         "protocol_sha256": hashlib.sha256(self.protocol).hexdigest(),
+                         "summary": "Skipped target", "advisory": "optional",
+                         "reason": "A later verified target exists."}
+        self.index["releases"] = [old_entry, self.index["releases"][0],
+                                   skipped_entry, self.index["releases"][1]]
+        (self.repo / "RELEASES.json").write_bytes(ac.canonical(self.index))
+        self._git("add", "RELEASES.json")
+        self._git("commit", "-m", "add historical release index record")
+        self._git("update-ref", "refs/remotes/origin/release-index", "HEAD")
+        self._git("switch", "main")
+        self._git("tag", "-d", old_tag)
+        self._git("tag", "-d", skipped_tag)
+
+        status = ac.release_status(self.repo)
+        self.assertEqual("ok", status["status"])
+        self.assertEqual([{"package_version": "0.9.0", "tag": old_tag},
+                          {"package_version": "1.0.5", "tag": skipped_tag}],
+                         status["missing_tags"])
+        self.assertEqual("1.1.0", status["latest_version"])
+        plan = ac.upgrade_plan(directory=self.repo)
+        self.assertEqual("1.1.0", plan["to"])
+        with self.assertRaises(ac.ProtocolError) as caught:
+            ac.upgrade_plan(target_version="1.0.5", directory=self.repo)
+        self.assertEqual("upgrade_plan_gate1_required", caught.exception.details["code"])
+
+    def test_target_tag_checkout_uses_tag_ref_when_branch_shadows_name(self):
+        self._git("branch", "v1.1.0", self.pinned_commit)
+        plan = ac.upgrade_plan(directory=self.repo)
+        check_tag, checkout = plan["repin_steps"][:2]
+        self.assertEqual(["git", "-C", str(self.repo), "show-ref", "--verify", "--quiet",
+                          "refs/tags/v1.1.0"], check_tag)
+        self.assertEqual(["git", "-C", str(self.repo), "checkout", "--detach",
+                          "refs/tags/v1.1.0^{commit}"], checkout)
+        subprocess.run(check_tag, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                       timeout=30, env=self.env)
+        subprocess.run(checkout, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                       timeout=30, env=self.env)
+        check_tag_source = Path(ac.__file__).resolve().parent / "scripts" / "check_tag.py"
+        check_tag_target = self.repo / "scripts" / "check_tag.py"
+        check_tag_target.parent.mkdir(exist_ok=True)
+        shutil.copy2(check_tag_source, check_tag_target)
+        checked = subprocess.run(["python3", str(self.repo / "scripts" / "check_tag.py"),
+                                  "v1.1.0"], check=True, stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE, timeout=30, env=self.env)
+        self.assertIn(b"matches HEAD and manifest", checked.stdout)
 
     def test_upgrade_notice_fields_require_a_matching_verified_record(self):
         state = self.channel.snapshot()
@@ -164,7 +259,8 @@ class UpgradePlanTests(unittest.TestCase):
                             for step in plan["repin_steps"]))
         self.assertEqual(["git", "-C", str(self.repo), "show-ref", "--verify", "--quiet",
                           "refs/tags/v1.1.0"], plan["repin_steps"][0])
-        self.assertEqual(["git", "-C", str(self.repo), "checkout", "--detach", "v1.1.0"],
+        self.assertEqual(["git", "-C", str(self.repo), "checkout", "--detach",
+                          "refs/tags/v1.1.0^{commit}"],
                          plan["repin_steps"][1])
         network_commands = {"fetch", "pull", "clone", "push", "ls-remote", "remote"}
         for step in plan["repin_steps"]:

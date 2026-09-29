@@ -1085,7 +1085,7 @@ def _release_status(repo):
             tag_ref = f"refs/tags/{tag}"
             local_ref = work_git(repo, "show-ref", "--verify", tag_ref, ok=(0, 1, 128)).strip()
             if not local_ref:
-                missing_tags.append(tag)
+                missing_tags.append(entry)
                 continue
             tag_type = work_git(repo, "cat-file", "-t", tag_ref).decode().strip()
             require(tag_type == "tag", "release tag is not annotated", code="index_inconsistent",
@@ -1115,18 +1115,28 @@ def _release_status(repo):
                 "pinned_version": identity["version"], "head": identity["commit"],
                 "advice": [], "message": "release index validation failed; no advice given",
                 "authenticity": "not verified (no attestation)"}
-    if missing_tags:
-        return {"status": "index_tags_missing",
-                "pinned_version": identity["version"], "head": identity["commit"],
-                "advice": [],
-                "message": "one or more release tags are not present locally; no advice given",
-                "authenticity": "not verified (no attestation)"}
     if not entries:
         return {"status": "index_invalid", "pinned_version": identity["version"],
                 "head": identity["commit"], "advice": [],
                 "message": "release index contains no releases; no advice given",
                 "authenticity": "not verified (no attestation)"}
-    latest = max(entries, key=lambda entry: semver(entry["package_version"]))
+    pinned_missing = any(entry["package_version"] == identity["version"]
+                        for entry in missing_tags)
+    latest_indexed = max(entries, key=lambda entry: semver(entry["package_version"]))
+    missing_latest_target = (semver(latest_indexed["package_version"]) >
+                             semver(identity["version"]) and
+                             latest_indexed in missing_tags)
+    verified_entries = [entry for entry in entries if entry not in missing_tags]
+    if pinned_missing or missing_latest_target:
+        return {"status": "index_tags_missing",
+                "pinned_version": identity["version"], "head": identity["commit"],
+                "advice": [],
+                "missing_tags": [{"package_version": entry["package_version"],
+                                  "tag": entry["tag"]} for entry in missing_tags],
+                "message": "one or more release tags are not present locally; no advice given",
+                "authenticity": "not verified (no attestation)"}
+    latest = max(verified_entries, key=lambda entry: semver(entry["package_version"]),
+                 default=latest_indexed)
     verified_releases = [{"package_version": entry["package_version"],
                           "manifest_sha256": entry["manifest_sha256"],
                           "protocol_sha256": entry["protocol_sha256"],
@@ -1135,14 +1145,14 @@ def _release_status(repo):
                           "summary": entry["summary"], "reason": entry["reason"],
                           **({"affects": entry["affects"]} if "affects" in entry else {}),
                           **({"fixed_in": entry["fixed_in"]} if "fixed_in" in entry else {})}
-                         for entry in entries]
+                         for entry in verified_entries]
     advice = [{"package_version": entry["package_version"], "advisory": entry["advisory"],
                "summary": entry["summary"], "reason": entry["reason"]}
-              for entry in entries
+              for entry in verified_entries
               if semver(entry["package_version"]) > semver(identity["version"])]
     active_advisories = []
     local_version = semver(identity["version"])
-    for entry in entries:
+    for entry in verified_entries:
         if entry["advisory"] not in {"recommended", "required"}:
             continue
         parsed, _, _ = parse_affects(entry["affects"])
@@ -1158,6 +1168,8 @@ def _release_status(repo):
             "active_advisories": _annotate_release_entries(
                 active_advisories, verified_releases, identity["protocol_sha256"]),
             "verified_releases": verified_releases,
+            "missing_tags": [{"package_version": entry["package_version"],
+                              "tag": entry["tag"]} for entry in missing_tags],
             "authenticity": "not verified (no attestation)"}
 
 
@@ -1262,14 +1274,19 @@ def upgrade_plan(target_version=None, channel_path=None, participant_values=(), 
         except ProtocolError:
             _upgrade_error("invalid upgrade target version", "invalid_upgrade_target", "target",
                            "Use a three-part package version such as 1.2.3 without leading zeroes.")
-        target = by_version.get(target_version)
-        if target is None:
-            _upgrade_error("upgrade target is not locally verified", "upgrade_target_unverified",
-                           "target", "Choose a version listed in verified_releases.")
         if target_tuple <= pinned:
             _upgrade_error("upgrade target is not newer than the pinned package",
                            "upgrade_target_not_newer", "target",
                            "Choose a package version newer than the pinned version.")
+        target = by_version.get(target_version)
+        if target is None:
+            if any(item.get("package_version") == target_version
+                   for item in status.get("missing_tags", [])):
+                _upgrade_error("target release tag is not available locally; Gate 1 is needed",
+                               "upgrade_plan_gate1_required", "target",
+                               "After the owner's separate Gate 1 approval, refresh release refs with the bounded helper, then retry.")
+            _upgrade_error("upgrade target is not locally verified", "upgrade_target_unverified",
+                           "target", "Choose a version listed in verified_releases.")
 
     transition = _protocol_transition_fields(target.get("protocol_sha256"),
                                              identity.get("protocol_sha256"))
@@ -1301,7 +1318,7 @@ def upgrade_plan(target_version=None, channel_path=None, participant_values=(), 
     repin_steps = [
         ["git", "-C", str(repo), "show-ref", "--verify", "--quiet",
          f"refs/tags/{target['tag']}"] ,
-        ["git", "-C", str(repo), "checkout", "--detach", target["tag"]],
+        ["git", "-C", str(repo), "checkout", "--detach", f"refs/tags/{target['tag']}^{{commit}}"],
         ["python3", str(repo / "scripts" / "check_tag.py"), target["tag"]],
         ["python3", str(repo / "scripts" / "check_release_manifest.py")],
         ["python3", "-m", "unittest", "discover", "-s", str(repo / "tests")],

@@ -199,6 +199,7 @@ changing the platform label alone cannot reactivate an old reference.
 | `1.1.0` | `3.0` (unchanged from `1.0.0`) | Existing protocol-3 channels; migration planning is additive. |
 | `1.2.0` | `3.0` (unchanged) | Existing protocol-3 channels; local package identity and optional release discovery are additive. |
 | `1.3.0` | `3.0` (unchanged) | Existing protocol-3 channels; passive runtime liveness reporting is additive. |
+| `1.4.0` | `3.0` (unchanged) | Existing protocol-3 channels; adds a project-local, agent-neutral session skill and owner-gated offline upgrade planning. |
 
 Package and protocol versions are related but distinct. A protocol MAJOR (for
 example 3.0 to 4.0) always bumps the package MAJOR. A protocol MINOR (3.0 to

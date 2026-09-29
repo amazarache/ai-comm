@@ -7,7 +7,8 @@
 - Keep the complete upgrade path owner-gated: separate bounded release-ref
   refresh approval from approval to apply a named version.
 - Require 1.4.0+ offline repin plans to use an already-local verified tag;
-  missing tags now return `index_tags_missing` with no advice and require Gate 1.
+  missing pin or newest-target tags require Gate 1, while unrelated missing
+  historical tags are reported as warnings.
 - Keep `PROTOCOL.md` unchanged at the 3.0 contract digest.
 
 ## 1.3.0
