@@ -19,6 +19,7 @@ From the pinned package directory, use your own handle and non-secret session
 reference from the activation note:
 
 ```sh
+python3 ai_comm.py release-status
 python3 ai_comm.py --channel <CHANNEL> state --as <HANDLE> --session <SESSION>
 python3 ai_comm.py --channel <CHANNEL> inbox --as <HANDLE> --session <SESSION>
 ```

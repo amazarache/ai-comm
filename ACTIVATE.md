@@ -73,10 +73,18 @@ existing path):
 ```sh
 # Codex
 mkdir -p .agents/skills
-ln -s ../../.tools/ai-comm/skills/ai-comm .agents/skills/ai-comm
+if [ -e .agents/skills/ai-comm ] || [ -L .agents/skills/ai-comm ]; then
+  echo "adapter path already exists; inspect it and do not replace it" >&2
+  exit 1
+fi
+ln -sn ../../.tools/ai-comm/skills/ai-comm .agents/skills/ai-comm
 # Claude Code
 mkdir -p .claude/skills
-ln -s ../../.tools/ai-comm/skills/ai-comm .claude/skills/ai-comm
+if [ -e .claude/skills/ai-comm ] || [ -L .claude/skills/ai-comm ]; then
+  echo "adapter path already exists; inspect it and do not replace it" >&2
+  exit 1
+fi
+ln -sn ../../.tools/ai-comm/skills/ai-comm .claude/skills/ai-comm
 ```
 
 Run only the commands for the selected adapter; each adapter must resolve
@@ -91,6 +99,7 @@ If symlinks are unavailable, copy the skill directory into the adapter's
 `.claude/skills`, then verify the copy against its pinned manifest entry:
 
 ```sh
+mkdir -p <adapter>
 cp -R .tools/ai-comm/skills/ai-comm <adapter>/ai-comm
 python3 -c 'import hashlib,json,pathlib,sys; root=pathlib.Path(".tools/ai-comm"); entry=next(x for x in json.loads((root/"RELEASE-MANIFEST.json").read_text())["files"] if x["path"]=="skills/ai-comm/SKILL.md"); actual=hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest(); assert actual==entry["sha256"], "skill copy differs from pinned manifest"' <adapter>/ai-comm/SKILL.md
 ```

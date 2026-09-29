@@ -38,6 +38,11 @@ class SkillTests(unittest.TestCase):
                          result.stderr.decode("utf-8", "replace"))
         return json.loads(result.stdout.decode("utf-8"))
 
+    def test_resume_checks_cached_release_status(self):
+        text = SKILL.read_text(encoding="utf-8")
+        resume = text.split("## Resume and routine work", 1)[1].split("## Coordination rules", 1)[0]
+        self.assertIn("python3 ai_comm.py release-status", resume)
+
     def test_agent_neutral_skill_covers_the_reviewed_workflow(self):
         text = SKILL.read_text(encoding="utf-8")
         self.assertTrue(text.startswith("---\nname: ai-comm\ndescription: "))
@@ -122,10 +127,13 @@ class SkillTests(unittest.TestCase):
         shutil.copy2(ROOT / "RELEASE-MANIFEST.json", pinned / "RELEASE-MANIFEST.json")
         shutil.copytree(ROOT / "skills" / "ai-comm", pinned / "skills" / "ai-comm")
         destination = self.project / ".agents" / "skills" / "ai-comm" / "SKILL.md"
-        destination.parent.parent.mkdir(parents=True)
-        copied = subprocess.run(["cp", "-R", ".tools/ai-comm/skills/ai-comm",
-                                 ".agents/skills/ai-comm"], cwd=self.project,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+        activate = (ROOT / "ACTIVATE.md").read_text(encoding="utf-8")
+        block = activate.split("If symlinks are unavailable", 1)[1].split("```sh", 1)[1].split("```", 1)[0]
+        copy_commands = [line.replace("<adapter>", ".agents/skills") for line in block.splitlines()
+                         if line.startswith(("mkdir -p <adapter>", "cp -R .tools/ai-comm/skills/ai-comm"))]
+        copied = subprocess.run(["/bin/sh", "-eu", "-c", "\n".join(copy_commands)],
+                                cwd=self.project, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, timeout=30)
         self.assertEqual(0, copied.returncode, copied.stderr.decode("utf-8", "replace"))
         args = [sys.executable, "-c", command.group(1), str(destination)]
         good = subprocess.run(args, cwd=self.project, stdout=subprocess.PIPE,
@@ -147,14 +155,37 @@ class SkillTests(unittest.TestCase):
             ".claude/skills/ai-comm", "../../.tools/ai-comm/skills/ai-comm",
             "each adapter must resolve inside this project's own pinned",
             "Before using the ai-comm channel, read `.tools/ai-comm/skills/ai-comm/SKILL.md`.",
+            "mkdir -p <adapter>",
             "cp -R .tools/ai-comm/skills/ai-comm <adapter>/ai-comm",
-            "ln -s ../../.tools/ai-comm/skills/ai-comm .agents/skills/ai-comm",
-            "ln -s ../../.tools/ai-comm/skills/ai-comm .claude/skills/ai-comm",
+            "ln -sn ../../.tools/ai-comm/skills/ai-comm .agents/skills/ai-comm",
+            "ln -sn ../../.tools/ai-comm/skills/ai-comm .claude/skills/ai-comm",
             "Codex CLI", "0.156.1", "Claude Code", "2.1.284",
         ):
             self.assertIn(phrase, activate)
         self.assertIn("| `1.4.0` | `3.0` (unchanged)",
                       (ROOT / "README.md").read_text(encoding="utf-8"))
+
+    def test_activation_symlink_commands_fail_safely_when_repeated(self):
+        activate = (ROOT / "ACTIVATE.md").read_text(encoding="utf-8")
+        block = activate.split("From the project root", 1)[1].split("```sh", 1)[1].split("```", 1)[0]
+        pinned = self.project / ".tools" / "ai-comm" / "skills" / "ai-comm"
+        pinned.mkdir(parents=True)
+        first = subprocess.run(["/bin/sh", "-eu", "-c", block], cwd=self.project,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+        self.assertEqual(0, first.returncode, first.stderr.decode("utf-8", "replace"))
+        codex = self.project / ".agents" / "skills" / "ai-comm"
+        claude = self.project / ".claude" / "skills" / "ai-comm"
+        expected = "../../.tools/ai-comm/skills/ai-comm"
+        self.assertTrue(codex.is_symlink())
+        self.assertTrue(claude.is_symlink())
+        self.assertEqual(expected, os.readlink(codex))
+        self.assertEqual(expected, os.readlink(claude))
+        second = subprocess.run(["/bin/sh", "-eu", "-c", block], cwd=self.project,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+        self.assertNotEqual(0, second.returncode)
+        self.assertFalse((pinned / "ai-comm").exists())
+        self.assertEqual(expected, os.readlink(codex))
+        self.assertEqual(expected, os.readlink(claude))
 
 
 if __name__ == "__main__":
