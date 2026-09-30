@@ -22,13 +22,13 @@
     },
     {
       "path": "ACTIVATE.md",
-      "bytes": 20866,
-      "sha256": "cbb65a7bd03e9c554a1f33ac98db2ee6aac3e55be6f73301691fe8aeec77e8f1"
+      "bytes": 21166,
+      "sha256": "cc8c325b20eddf3f94b3217ab957f5332a19b77982b26be26e4063e3dc290ac3"
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 7909,
-      "sha256": "48ea81b1a660990e2f41b65d8979e6ead19f96155bc945d759523b0a57981f5a"
+      "bytes": 8051,
+      "sha256": "b3c0b56e51b5ba9959ac1a47e8f1356a78f5950644fa49f92e2dc3ea8f56123a"
     },
     {
       "path": "PROTOCOL.md",
@@ -67,8 +67,8 @@
     },
     {
       "path": "docs/RELEASES.md",
-      "bytes": 13801,
-      "sha256": "a76f4b1bc0f93740a05cba31128e50fe89cf0a06c1cdfda6ef546b99f5c44446"
+      "bytes": 14182,
+      "sha256": "8523aeb1a2a53ef3189f04e21a8a57bd93b3729e994dce8cdf2d7f0d32c24e9b"
     },
     {
       "path": "examples/ask.json",
@@ -82,8 +82,8 @@
     },
     {
       "path": "scripts/check_for_release.py",
-      "bytes": 17962,
-      "sha256": "c97293240baad99064e04f74bc150be62eacc5e253f68d3355914393ac4e9e21"
+      "bytes": 21148,
+      "sha256": "65da5ca500102fc7368323764d88a51a9f750880023876d20e50d1911180a538"
     },
     {
       "path": "scripts/check_release_manifest.py",
@@ -112,8 +112,8 @@
     },
     {
       "path": "skills/ai-comm/SKILL.md",
-      "bytes": 7883,
-      "sha256": "d6a23b0df2f15bcea02db3c24be6c117935ff64bf78dce20abe07feaf0cfc9b1"
+      "bytes": 8187,
+      "sha256": "b14197e942e4e0fdf9f2f7bdd64a26919bab12adada52212ad4c19b0a0c05f32"
     },
     {
       "path": "tests/test_protocol.py",
@@ -122,8 +122,8 @@
     },
     {
       "path": "tests/test_release_check.py",
-      "bytes": 37093,
-      "sha256": "350d84495bd8e779c130b1f47d2d037231e586e88f54693bde72e9b6b7ac31db"
+      "bytes": 38436,
+      "sha256": "c61b1aafb5388b95091f6a5686d92e188d255f1ab3a64dcb554eba9502425613"
     },
     {
       "path": "tests/test_skill.py",

@@ -38,8 +38,18 @@ class FakeRunner:
                 "--show-scope" in argv):
             return subprocess.run(argv, stdout=kwargs["stdout"], stderr=kwargs["stderr"],
                                   env=kwargs["env"], timeout=kwargs["timeout"], check=False)
-        if argv[:4] == ["git", "-C", str(self.calls_root), "remote"]:
-            return subprocess.CompletedProcess(argv, 0, self.remote.encode() + b"\n", b"")
+        if argv[:5] == ["git", "-C", str(self.calls_root), "config", "--local"]:
+            return subprocess.CompletedProcess(argv, 0, self.remote.encode() + b"\0", b"")
+        if "--show-object-format" in argv:
+            return subprocess.CompletedProcess(argv, 0, b"sha1\n", b"")
+        if "--git-path" in argv and "objects" in argv:
+            return subprocess.CompletedProcess(argv, 0, b".git/objects\n", b"")
+        if "for-each-ref" in argv:
+            return subprocess.CompletedProcess(argv, 0, b"", b"")
+        if "update-ref" in argv:
+            return subprocess.CompletedProcess(argv, 0, b"", b"")
+        if "init" in argv and "--bare" in argv:
+            return subprocess.CompletedProcess(argv, 0, b"", b"")
         if "fetch" in argv:
             return subprocess.CompletedProcess(argv, self.fetch_code, b"", self.fetch_stderr)
         if argv[-1:] == ["release-status"]:
@@ -65,20 +75,8 @@ class CredentialTransportRunner(FakeRunner):
         if "fetch" not in argv:
             return super().__call__(argv, **kwargs)
         self.calls.append((list(argv), kwargs))
-        config_args = []
-        index = 1
-        while index < len(argv):
-            if argv[index] == "-c" and index + 1 < len(argv):
-                config_args.extend(argv[index:index + 2])
-                index += 2
-            elif argv[index] == "-C" and index + 1 < len(argv):
-                index += 2
-            elif argv[index] == "fetch":
-                break
-            else:
-                index += 1
         credential = subprocess.run(
-            ["git", *config_args, "credential", "fill"],
+            ["git", "credential", "fill"],
             input=b"protocol=https\nhost=fixture.example\npath=amazarache/ai-comm.git\n\n",
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=kwargs["env"], timeout=10,
             check=False)
@@ -91,14 +89,6 @@ class CredentialTransportRunner(FakeRunner):
             return subprocess.CompletedProcess(
                 argv, 1, b"", b"fatal: The requested URL returned error: 302")
         return subprocess.CompletedProcess(argv, self.fetch_code, b"", self.fetch_stderr)
-
-
-class UnreadableRedirectConfigRunner(FakeRunner):
-    def __call__(self, argv, **kwargs):
-        if "--show-scope" in argv:
-            self.calls.append((list(argv), kwargs))
-            return subprocess.CompletedProcess(argv, 0, b"local\0malformed\0", b"")
-        return super().__call__(argv, **kwargs)
 
 
 class ReleaseCheckTests(unittest.TestCase):
@@ -233,6 +223,12 @@ class ReleaseCheckTests(unittest.TestCase):
         self._git("commit", "-m", "fixture", cwd=package, env=env)
         self._git("remote", "add", "origin", "https://fixture.example/ai-comm.git", cwd=package, env=env)
         self._git("config", "--add", "remote.origin.fetch", "+refs/tags/*:refs/remotes/leak/*", cwd=package, env=env)
+        self._git("config", "--local", "url.https://attacker.invalid/.insteadOf",
+                  "https://fixture.example/", cwd=package, env=env)
+        self._git("config", "--local", "http.proxy", "http://attacker.invalid:8080",
+                  cwd=package, env=env)
+        self._git("config", "--local", "credential.helper", "!echo local-secret",
+                  cwd=package, env=env)
 
         real_git = shutil.which("git")
         bin_dir = Path(self.temp.name) / "bin"
@@ -242,8 +238,8 @@ class ReleaseCheckTests(unittest.TestCase):
                            f"real = {real_git!r}\n"
                            "args = sys.argv[1:]\n"
                            f"bare = {str(bare)!r}\n"
-                           "if 'fetch' in args and 'origin' in args:\n"
-                           "    args[args.index('origin')] = bare\n"
+                           "if 'fetch' in args and 'https://fixture.example/ai-comm.git' in args:\n"
+                           "    args[args.index('https://fixture.example/ai-comm.git')] = bare\n"
                            "os.execv(real, [real, *args])\n")
         wrapper.chmod(0o755)
         run_env = os.environ.copy()
@@ -259,7 +255,7 @@ class ReleaseCheckTests(unittest.TestCase):
         self.assertIn("refs/remotes/origin/release-index", refs)
         self.assertIn("refs/tags/v9.9.9", refs)
         self.assertFalse(any(ref.startswith("refs/remotes/leak/") for ref in refs), refs)
-        self.assertTrue((package / ".git" / "FETCH_HEAD").exists())
+        self.assertFalse((package / ".git" / "FETCH_HEAD").exists())
         self.assertFalse((package / "__pycache__").exists())
 
     def test_no_fetch_without_permission_and_reports_up_to_date(self):
@@ -278,12 +274,10 @@ class ReleaseCheckTests(unittest.TestCase):
         result, code = fake.run(repo=self.repo, fetch_permitted=True)
         self.assertEqual((10, "update_available", "review update"),
                          (code, result["result"], result["owner_notice"]))
-        fetch = next((args for args, _ in fake.calls if "fetch" in args), None)
-        self.assertEqual(["git", *checker._redirect_policy_args(checker.ac.RELEASE_ORIGIN,
-                                                                   self.repo, runner=fake),
-                          "-C", str(self.repo), "fetch", "--refmap=", "--no-tags",
-                          "--no-recurse-submodules", "origin", *checker.REFSPECS], fetch)
-        fetch_env = next(kwargs["env"] for args, kwargs in fake.calls if "fetch" in args)
+        fetch, fetch_kwargs = next((args, kwargs) for args, kwargs in fake.calls if "fetch" in args)
+        self.assertEqual(["fetch", "--refmap=", "--no-tags", "--no-recurse-submodules",
+                          checker.ac.RELEASE_ORIGIN, *checker.REFSPECS], fetch[2:])
+        fetch_env = fetch_kwargs["env"]
         self.assertEqual("1", fetch_env["GIT_NO_LAZY_FETCH"])
         self.assertTrue(result["fetched"])
         self.assertEqual("unchanged", result["channel_action"])
@@ -296,13 +290,11 @@ class ReleaseCheckTests(unittest.TestCase):
                          (code, result["fetch_error"], result["fetched"]))
         self.assertEqual([], fake.calls)
 
-    def test_unreadable_redirect_config_stops_before_fetch(self):
-        fake = UnreadableRedirectConfigRunner()
-        fake.calls_root = self.repo
+    def test_local_redirect_config_is_ignored_by_isolated_fetch(self):
+        fake = self.runner()
         result, code = fake.run(repo=self.repo, fetch_permitted=True)
-        self.assertEqual((2, "redirect_config_unreadable", False),
-                         (code, result["fetch_error"], result["fetched"]))
-        self.assertFalse(any("fetch" in args for args, _ in fake.calls))
+        self.assertEqual((0, None, True), (code, result["fetch_error"], result["fetched"]))
+        self.assertTrue(any("fetch" in args for args, _ in fake.calls))
 
     def test_helper_config_uses_clean_global_read_and_only_helpers_reach_fetch(self):
         config = ("[url \"https://rewritten.example/\"]\n"
@@ -319,6 +311,12 @@ class ReleaseCheckTests(unittest.TestCase):
                   cwd=self.repo, env=package_module.git_env())
         self._git("config", "--local",
                   f"http.{checker.ac.RELEASE_ORIGIN}/objects/info.followRedirects", "true",
+                  cwd=self.repo, env=package_module.git_env())
+        self._git("config", "--local", "url.https://attacker.invalid/.insteadOf",
+                  checker.ac.RELEASE_ORIGIN, cwd=self.repo, env=package_module.git_env())
+        self._git("config", "--local", "http.proxy", "http://attacker.invalid:8080",
+                  cwd=self.repo, env=package_module.git_env())
+        self._git("config", "--local", "credential.helper", "!echo local-secret",
                   cwd=self.repo, env=package_module.git_env())
         injected = {"GIT_CONFIG_GLOBAL": "/untrusted/global",
                     "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "credential.helper",
@@ -342,34 +340,41 @@ class ReleaseCheckTests(unittest.TestCase):
             self.assertNotIn(key, read_env)
         fetch_args, fetch_kwargs = next((args, kwargs) for args, kwargs in fake.calls
                                         if "fetch" in args)
-        self.assertEqual([
-            "git", "-c", "credential.helper=first-helper", "-c", "credential.helper=",
-            "-c", "credential.helper=second-helper",
-            *checker._redirect_policy_args(checker.ac.RELEASE_ORIGIN, self.repo, runner=fake),
-            "-C", str(self.repo), "fetch", "--refmap=", "--no-tags",
-            "--no-recurse-submodules", "origin", *checker.REFSPECS,
-        ], fetch_args)
+        self.assertEqual(["fetch", "--refmap=", "--no-tags", "--no-recurse-submodules",
+                          checker.ac.RELEASE_ORIGIN, *checker.REFSPECS], fetch_args[2:])
+        self.assertNotIn("first-helper", " ".join(fetch_args))
         fetch_env = fetch_kwargs["env"]
         self.assertEqual(os.devnull, fetch_env["GIT_CONFIG_GLOBAL"])
         self.assertEqual("1", fetch_env["GIT_CONFIG_NOSYSTEM"])
+        config_count = int(fetch_env["GIT_CONFIG_COUNT"])
+        configured = [(fetch_env[f"GIT_CONFIG_KEY_{i}"], fetch_env[f"GIT_CONFIG_VALUE_{i}"])
+                      for i in range(config_count)]
+        self.assertEqual([("credential.helper", ""), ("credential.helper", "first-helper"),
+                          ("credential.helper", ""), ("credential.helper", "second-helper")],
+                         configured[:4])
+        self.assertNotIn(("credential.helper", "injected-helper"), configured)
+        self.assertNotIn(("credential.helper", "injected-parameters"), configured)
+        self.assertNotIn("credential.helper=first-helper", " ".join(fetch_args))
+        self.assertIn(checker.ac.RELEASE_ORIGIN, fetch_args)
+        self.assertNotIn("attacker.invalid", " ".join(fetch_args))
+        self.assertNotIn("attacker.invalid", " ".join(fetch_env.values()))
+        self.assertNotIn("local-secret", " ".join(fetch_env.values()))
         for key in injected:
             if key == "GIT_CONFIG_GLOBAL":
                 self.assertNotEqual(injected[key], fetch_env[key])
+            elif key == "GIT_CONFIG_KEY_0":
+                self.assertEqual("credential.helper", fetch_env[key])
+            elif key in {"GIT_CONFIG_COUNT", "GIT_CONFIG_VALUE_0"}:
+                self.assertNotEqual(injected[key], fetch_env[key])
             else:
                 self.assertNotIn(key, fetch_env)
-        config_options = []
-        index = 1
-        while index < fetch_args.index("-C"):
-            self.assertEqual("-c", fetch_args[index])
-            config_options.extend(fetch_args[index:index + 2])
-            index += 2
         for request_url in (
                 checker.ac.RELEASE_ORIGIN,
                 checker.ac.RELEASE_ORIGIN + "/info/refs?service=git-upload-pack",
                 checker.ac.RELEASE_ORIGIN + "/git-upload-pack",
                 checker.ac.RELEASE_ORIGIN + "/objects/info/packs"):
             effective_redirects = subprocess.run(
-                ["git", *config_options, "-C", str(self.repo), "config", "--get-urlmatch",
+                ["git", "config", "--get-urlmatch",
                  "http.followRedirects", request_url], stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE, env=fetch_env, timeout=10, check=False)
             self.assertEqual((0, b"false\n"),
@@ -382,9 +387,11 @@ class ReleaseCheckTests(unittest.TestCase):
             result, code = fake.run(repo=self.repo, fetch_permitted=True,
                                     use_git_credential_helper=True)
         self.assertEqual(0, code)
-        fetch = next(args for args, _ in fake.calls if "fetch" in args)
-        self.assertIn("credential.helper=first\ncontinued", fetch)
-        self.assertIn("credential.helper=final", fetch)
+        fetch, fetch_kwargs = next((args, kwargs) for args, kwargs in fake.calls if "fetch" in args)
+        configured = [fetch_kwargs["env"][f"GIT_CONFIG_VALUE_{i}"]
+                      for i in range(int(fetch_kwargs["env"]["GIT_CONFIG_COUNT"]))]
+        self.assertIn("first\ncontinued", configured)
+        self.assertIn("final", configured)
 
     def test_no_effective_helper_stops_before_fetch(self):
         for contents in ("", "[credential]\n\thelper =\n"):
@@ -525,7 +532,7 @@ class ReleaseCheckTests(unittest.TestCase):
                 self.assertEqual("origin_mismatch" if "@" not in remote else "credential_bearing_origin",
                                  result["fetch_error"])
                 self.assertEqual(1, len(fake.calls))
-                self.assertIn("remote", fake.calls[0][0])
+                self.assertIn("remote.origin.url", fake.calls[0][0])
 
     def test_default_origin_comes_from_manifest_bound_head_not_dirty_code(self):
         source = (self.repo / "ai_comm.py").read_text(encoding="utf-8")

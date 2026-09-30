@@ -3,11 +3,12 @@
 ## 1.4.1
 
 - Add an explicit private-origin release-check option that reads only configured
-  global Git credential helpers, passes them to one verified-origin fetch, and
-  keeps other global Git configuration isolated.
+  global Git credential helpers and passes them through Git's environment config
+  instead of process arguments. Fetch in a temporary bare Git directory that
+  shares only the target object store, then atomically publish only permitted refs.
 - Fail closed when helper configuration is missing, unreadable or ambiguous;
-  refuse redirects even against more-specific repository URL settings and
-  report bounded authentication/fetch error categories.
+  isolate network access from checkout-level URL rewrites, proxies, redirect and
+  credential settings; report bounded authentication/fetch error categories.
 - Keep the concurrent heartbeat ordering test strict while reducing contention,
   and test lock exhaustion separately.
 - Keep `PROTOCOL.md` unchanged at the 3.0 contract digest.

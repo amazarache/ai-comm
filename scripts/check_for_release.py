@@ -10,6 +10,7 @@ import re
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 from urllib.parse import urlsplit
 
 sys.dont_write_bytecode = True
@@ -27,9 +28,6 @@ MAX_ORIGIN_LENGTH = 2048
 MAX_CREDENTIAL_HELPER_BYTES = 65536
 MAX_CREDENTIAL_HELPER_COUNT = 128
 MAX_CREDENTIAL_HELPER_VALUE_BYTES = 8192
-MAX_REDIRECT_CONFIG_BYTES = 65536
-MAX_REDIRECT_CONFIG_COUNT = 128
-MAX_REDIRECT_CONFIG_KEY_BYTES = 8192
 
 
 class CheckError(Exception):
@@ -175,50 +173,125 @@ def _fetch_error(stderr):
     return "fetch_failed"
 
 
-def _local_redirect_config_keys(repo, *, runner=subprocess.run):
-    """Find local URL-specific redirect settings so the fetch can override them."""
-    proc = _run(["git", "-C", str(repo), "config", "--show-scope", "--null",
-                 "--get-regexp", r"^http\..*\.followredirects$"], runner=runner)
-    stdout = proc.stdout
-    if not isinstance(stdout, bytes) or len(stdout) > MAX_REDIRECT_CONFIG_BYTES:
-        raise CheckError("redirect_config_unreadable")
-    if proc.returncode == 1 and stdout == b"":
-        return []
-    if proc.returncode != 0 or not stdout or not stdout.endswith(b"\0"):
-        raise CheckError("redirect_config_unreadable")
-    fields = stdout[:-1].split(b"\0")
-    if len(fields) % 2:
-        raise CheckError("redirect_config_unreadable")
-    keys = []
-    for scope, key_and_value in zip(fields[::2], fields[1::2]):
-        if scope not in {b"local", b"worktree"}:
-            raise CheckError("redirect_config_unreadable")
-        key, separator, _value = key_and_value.partition(b"\n")
-        if (not separator or len(key) > MAX_REDIRECT_CONFIG_KEY_BYTES or
-                re.fullmatch(rb"http\..*\.followredirects", key, re.IGNORECASE) is None):
-            raise CheckError("redirect_config_unreadable")
-        try:
-            text_key = key.decode("ascii", "strict")
-        except UnicodeError as exc:
-            raise CheckError("redirect_config_unreadable") from exc
-        if text_key not in keys:
-            keys.append(text_key)
-        if len(keys) > MAX_REDIRECT_CONFIG_COUNT:
-            raise CheckError("redirect_config_unreadable")
-    return keys
-
-
-def _redirect_policy_args(origin, repo, *, runner=subprocess.run):
-    """Disable redirects generally, by URL, and against local URL-specific overrides."""
+def _redirect_policy_args(origin):
+    """Return redirects disabled for the isolated fetch configuration."""
     base = origin.rstrip("/")
     request_bases = (base, base + "/info/refs", base + "/git-upload-pack",
                      base + "/objects")
-    args = ["-c", "http.followRedirects=false"]
+    args = [("http.followRedirects", "false")]
     for request_url in request_bases:
-        args.extend(("-c", f"http.{request_url}.followRedirects=false"))
-    for key in _local_redirect_config_keys(repo, runner=runner):
-        args.extend(("-c", key + "=false"))
+        args.append((f"http.{request_url}.followRedirects", "false"))
     return args
+
+
+def _fetch_config_env(origin, helpers):
+    """Pass only explicitly approved config through Git's non-argv config channel."""
+    entries = [("credential.helper", "")]
+    entries.extend(("credential.helper", helper) for helper in helpers)
+    entries.extend(_redirect_policy_args(origin))
+    env = ac.git_env({"GIT_CONFIG_GLOBAL": os.devnull,
+                      "GIT_CONFIG_NOSYSTEM": "1",
+                      "GIT_TERMINAL_PROMPT": "0",
+                      "GIT_NO_LAZY_FETCH": "1",
+                      "GIT_CONFIG_COUNT": str(len(entries))})
+    for index, (key, value) in enumerate(entries):
+        env[f"GIT_CONFIG_KEY_{index}"] = key
+        env[f"GIT_CONFIG_VALUE_{index}"] = value
+    return env
+
+
+def _git_result(argv, *, runner, env):
+    proc = _run(argv, runner=runner, env=env)
+    if proc.returncode != 0:
+        raise CheckError("fetch_failed")
+    return proc.stdout
+
+
+def _read_release_refs(location, *, runner, env, worktree=False):
+    prefix = ["git", "-C", str(location)] if worktree else ["git", f"--git-dir={location}"]
+    raw = _git_result([*prefix, "for-each-ref",
+                       "--format=%(refname)%00%(objectname)",
+                       "refs/remotes/origin/release-index", "refs/tags/v*"],
+                      runner=runner, env=env)
+    if not isinstance(raw, bytes) or (raw and not raw.endswith(b"\n")):
+        raise CheckError("fetch_failed")
+    refs = {}
+    for line in raw.splitlines():
+        fields = line.split(b"\0")
+        if len(fields) != 2 or re.fullmatch(rb"[0-9a-f]{40,64}", fields[1]) is None:
+            raise CheckError("fetch_failed")
+        try:
+            name, oid = (item.decode("ascii", "strict") for item in fields)
+        except UnicodeError as exc:
+            raise CheckError("fetch_failed") from exc
+        if (name != "refs/remotes/origin/release-index" and
+                not (name.startswith("refs/tags/v") and len(name) > len("refs/tags/v"))):
+            raise CheckError("fetch_failed")
+        refs[name] = oid
+    return refs
+
+
+def _publish_release_refs(repo, refs, *, runner, env):
+    if not refs:
+        return
+    old = _read_release_refs(repo, runner=runner, env=env, worktree=True)
+    commands = ["start"]
+    zero = "0" * len(next(iter(refs.values())))
+    for name, oid in sorted(refs.items()):
+        commands.append(f"update {name} {oid} {old.get(name, zero)}")
+    commands.extend(("prepare", "commit", ""))
+    proc = runner(["git", "-C", str(repo), "update-ref", "--stdin"],
+                  input="\n".join(commands).encode("ascii"),
+                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
+                  timeout=120, check=False)
+    if proc.returncode != 0:
+        raise CheckError("fetch_failed")
+
+
+def _fetch_isolated(repo, origin, helpers, *, runner=subprocess.run):
+    """Fetch through a fresh Git directory, sharing only the target object store."""
+    clean_env = ac.git_env({"GIT_CONFIG_GLOBAL": os.devnull,
+                            "GIT_CONFIG_NOSYSTEM": "1",
+                            "GIT_NO_LAZY_FETCH": "1"})
+    object_format_raw = _git_result(["git", "-C", str(repo), "rev-parse", "--show-object-format"],
+                                    runner=runner, env=clean_env)
+    try:
+        object_format = object_format_raw.decode("ascii").strip()
+    except (AttributeError, UnicodeError) as exc:
+        raise CheckError("fetch_failed") from exc
+    if object_format not in {"sha1", "sha256"}:
+        raise CheckError("fetch_failed")
+    objects_raw = _git_result(["git", "-C", str(repo), "rev-parse", "--git-path", "objects"],
+                              runner=runner, env=clean_env)
+    try:
+        objects = Path(objects_raw.decode("utf-8").strip())
+        if not objects.is_absolute():
+            objects = repo / objects
+        objects = objects.resolve()
+    except (AttributeError, UnicodeError, OSError) as exc:
+        raise CheckError("fetch_failed") from exc
+    if not objects.is_absolute() or not objects.is_dir():
+        raise CheckError("fetch_failed")
+    with tempfile.TemporaryDirectory(prefix="ai-comm-release-fetch-") as temp:
+        git_dir = Path(temp) / "git"
+        init_args = ["git", "init", "--bare"]
+        if object_format == "sha256":
+            init_args.append("--object-format=sha256")
+        init_args.append(str(git_dir))
+        _git_result(init_args, runner=runner, env=clean_env)
+        fetch_env = _fetch_config_env(origin, helpers) | {"GIT_OBJECT_DIRECTORY": str(objects)}
+        # Seed only the exact permitted refs so normal tag/release-index update rules apply.
+        existing = _read_release_refs(repo, runner=runner, env=clean_env, worktree=True)
+        for name, oid in existing.items():
+            _git_result(["git", f"--git-dir={git_dir}", "update-ref", name, oid],
+                        runner=runner, env=fetch_env)
+        fetch_args = ["git", f"--git-dir={git_dir}", "fetch", "--refmap=", "--no-tags",
+                      "--no-recurse-submodules", origin, *REFSPECS]
+        proc = _run(fetch_args, runner=runner, env=fetch_env)
+        if proc.returncode != 0:
+            raise CheckError(_fetch_error(proc.stderr))
+        fetched_refs = _read_release_refs(git_dir, runner=runner, env=fetch_env)
+        _publish_release_refs(repo, fetched_refs, runner=runner, env=clean_env)
 
 
 def _local_status(repo, runner):
@@ -301,29 +374,23 @@ def run_check(*, repo=ROOT, fetch_permitted=False, use_git_credential_helper=Fal
                 raise CheckError("not_git_checkout", "not_git_checkout")
             trusted_origin = expected_origin if expected_origin is not None else _manifest_bound_origin(repo)
             expected = _normalize_origin(trusted_origin)
-            remote = _run(["git", "-C", str(repo), "remote", "get-url", "origin"], runner=runner)
+            remote = _run(["git", "-C", str(repo), "config", "--local", "--null",
+                           "--get-all", "remote.origin.url"], runner=runner)
             if remote.returncode != 0:
                 raise CheckError("origin_missing")
-            if len(remote.stdout) > MAX_ORIGIN_LENGTH + 1:
+            if (not isinstance(remote.stdout, bytes) or len(remote.stdout) > MAX_ORIGIN_LENGTH + 1 or
+                    not remote.stdout.endswith(b"\0") or remote.stdout.count(b"\0") != 1):
                 raise CheckError("invalid_origin")
             try:
-                actual = remote.stdout.decode("utf-8").removesuffix("\n")
+                actual = remote.stdout[:-1].decode("utf-8")
             except UnicodeError as exc:
                 raise CheckError("invalid_origin") from exc
             if _normalize_origin(actual) != expected:
                 raise CheckError("origin_mismatch")
             helpers = (_read_credential_helpers(runner=runner)
                        if use_git_credential_helper else [])
-            fetch_args = ["git"]
-            for helper in helpers:
-                fetch_args.extend(("-c", "credential.helper=" + helper))
-            fetch_args.extend(_redirect_policy_args(actual, repo, runner=runner))
-            fetch_args.extend(("-C", str(repo), "fetch", "--refmap=", "--no-tags",
-                               "--no-recurse-submodules", "origin", *REFSPECS))
             fetched = True
-            proc = _run(fetch_args, runner=runner)
-            if proc.returncode != 0:
-                raise CheckError(_fetch_error(proc.stderr))
+            _fetch_isolated(repo, trusted_origin, helpers, runner=runner)
         release_data = _local_status(repo, runner)
         current_status = release_data.get("status")
         status_name = current_status

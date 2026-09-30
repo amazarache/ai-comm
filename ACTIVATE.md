@@ -167,15 +167,19 @@ automatically. The chain is:
 
    Only after an explicit yes to that question, run with both
    `--fetch-permitted --use-git-credential-helper`. The helper reads only the
-   user's configured `credential.helper` entries and uses them for this
-   manifest-verified origin fetch. It does not pass other global Git settings,
-   print or store credentials, follow redirects, install or re-pin. A configured
-   credential helper is executable user configuration and may have side effects;
-   disclose this before asking. If the owner declines, the helper is absent, or
-   its configuration cannot be read safely, stop without fetching.
+   user's configured `credential.helper` entries and passes them through Git's
+   environment config, not its argument list. The fetch uses a temporary bare
+   Git directory sharing only the checkout's object store, the manifest-bound
+   HTTPS URL, and only the approved release-index/tag refs. Checkout-level URL
+   rewrites, proxies, redirect rules, and credential settings cannot change the
+   request. The helper does not print or store credentials, follow redirects,
+   install or re-pin. A configured credential helper is executable user
+   configuration and may have side effects; disclose this before asking. If the
+   owner declines, the helper is absent, or its configuration cannot be read
+   safely, stop without fetching.
 3. The helper validates the expected HTTPS origin before network access, fetches
-   only `release-index` and `v*` tags, then runs `release-status` and, when a
-   newer verified release exists, `upgrade-plan`.
+   only `release-index` and `v*` tags into the checkout's refs, then runs
+   `release-status` and, when a newer verified release exists, `upgrade-plan`.
 4. It reports JSON and exit code `0` (up to date), `10` (update available),
    `11` (recommended or required advisory applies to the pinned version), or
    `2` (error, including an absent or invalid index). The CLI never performs

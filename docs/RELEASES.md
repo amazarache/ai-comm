@@ -96,14 +96,17 @@ a trailing slash and `.git`. A mismatch or missing origin is rejected before
 any fetch.
 
 The permitted fetch is exactly the `release-index` branch and `v*` tags, with
-implicit tag following and submodule recursion disabled. `GIT_NO_LAZY_FETCH=1`
-is set. Git may update those remote/tag refs and `FETCH_HEAD`; the helper does
-not check out files or change the working tree. A failed partial fetch is an
-error, never an up-to-date result. The helper validates the fetched data through
-`release-status` and runs `upgrade-plan` only when a newer verified release
-exists. Redirects are refused for the verified origin and the Git HTTP request
-paths even if a more-specific repository URL setting attempts to enable them.
-It emits one JSON result on operational success
+implicit tag following and submodule recursion disabled. It runs in a fresh,
+temporary bare Git directory that shares only the checkout's object store. The
+helper uses the manifest-approved HTTPS URL directly and atomically publishes
+only the two permitted ref patterns into the checkout; it does not read the
+checkout's fetch, proxy, URL rewrite, redirect, or credential settings for the
+network operation. It does not check out files or change the working tree or
+`FETCH_HEAD`. `GIT_NO_LAZY_FETCH=1` is set. A failed fetch or ref publication is
+an error, never an up-to-date result. The helper validates the fetched data
+through `release-status` and runs `upgrade-plan` only when a newer verified
+release exists. Redirects are refused for the verified origin and Git HTTP
+request paths. It emits one JSON result on operational success
 and failure; errors never include raw Git stderr, credential-helper values,
 usernames, passwords or URL credentials.
 
@@ -112,8 +115,10 @@ from `<origin>`, using your configured git credential helper for that fetch
 only?”, add `--use-git-credential-helper`. This reads only global
 `credential.helper` values using the user's normal `HOME`/`XDG_CONFIG_HOME`
 resolution, then passes those helper entries to this single verified-origin
-fetch. All other Git configuration remains isolated. Empty helper entries keep
-their reset semantics. If no effective helper is configured, or the values
+fetch through Git's environment-based config interface, keeping helper values
+out of the process argument list. The temporary fetch disables system and
+global config, then adds only the approved helpers and redirect limits. Empty
+helper entries keep their reset semantics. If no effective helper is configured, or the values
 cannot be read unambiguously, the helper stops without fetching. Configured
 helpers are executable programs running with the user's rights and may have
 side effects. This flag does not install or save credentials, change the pin,
@@ -139,7 +144,7 @@ not infer applicability from the `advisory` value alone.
 `invalid_origin`, `credential_bearing_origin`, `origin_missing`,
 `origin_mismatch`, `credential_helper_requires_fetch_permission`,
 `credential_helper_not_configured`, `credential_helper_config_unreadable`,
-`redirect_config_unreadable`, `auth_failed`, `origin_redirect_refused`,
+`auth_failed`, `origin_redirect_refused`,
 `fetch_failed`, `index_missing`, `index_invalid`,
 `index_inconsistent`, `index_tags_missing`, `release_status_failed`,
 `release_status_invalid_json`, `release_status_invalid_shape`,
