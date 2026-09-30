@@ -1,11 +1,14 @@
 import json
 import os
 from pathlib import Path
+import contextlib
 import shutil
+import shlex
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import ai_comm as package_module
@@ -15,22 +18,26 @@ checker.ac = package_module
 
 class FakeRunner:
     def __init__(self, *, remote=checker.ac.RELEASE_ORIGIN, status=None,
-                 plan=None, fetch_code=0, plan_code=0):
+                 plan=None, fetch_code=0, fetch_stderr=b"must not leak", plan_code=0):
         self.remote = remote
         self.status = status or {"status": "ok", "pinned_version": "1.1.0",
                                  "latest_version": "1.1.0", "advice": [],
                                  "active_advisories": []}
         self.plan = plan or {"owner_notice": "review update"}
         self.fetch_code = fetch_code
+        self.fetch_stderr = fetch_stderr
         self.plan_code = plan_code
         self.calls = []
 
     def __call__(self, argv, **kwargs):
         self.calls.append((list(argv), kwargs))
+        if argv[:4] == ["git", "config", "--global", "--null"]:
+            return subprocess.run(argv, stdout=kwargs["stdout"], stderr=kwargs["stderr"],
+                                  env=kwargs["env"], timeout=kwargs["timeout"], check=False)
         if argv[:4] == ["git", "-C", str(self.calls_root), "remote"]:
             return subprocess.CompletedProcess(argv, 0, self.remote.encode() + b"\n", b"")
         if "fetch" in argv:
-            return subprocess.CompletedProcess(argv, self.fetch_code, b"", b"must not leak")
+            return subprocess.CompletedProcess(argv, self.fetch_code, b"", self.fetch_stderr)
         if argv[-1:] == ["release-status"]:
             return subprocess.CompletedProcess(argv, 0, json.dumps(self.status).encode(), b"")
         if argv[-1:] == ["upgrade-plan"]:
@@ -39,6 +46,47 @@ class FakeRunner:
 
     def run(self, **kwargs):
         return checker.run_check(runner=self, **kwargs)
+
+
+class CredentialTransportRunner(FakeRunner):
+    """HTTPS transport stub: exercise Git's helper protocol without network access."""
+
+    def __init__(self, *, remote=checker.ac.RELEASE_ORIGIN, fetch_code=0,
+                 fetch_stderr=b"", redirect=False):
+        super().__init__(remote=remote, fetch_code=fetch_code, fetch_stderr=fetch_stderr)
+        self.redirect = redirect
+        self.credential_stdout = b""
+
+    def __call__(self, argv, **kwargs):
+        if "fetch" not in argv:
+            return super().__call__(argv, **kwargs)
+        self.calls.append((list(argv), kwargs))
+        config_args = []
+        index = 1
+        while index < len(argv):
+            if argv[index] == "-c" and index + 1 < len(argv):
+                config_args.extend(argv[index:index + 2])
+                index += 2
+            elif argv[index] == "-C" and index + 1 < len(argv):
+                index += 2
+            elif argv[index] == "fetch":
+                break
+            else:
+                index += 1
+        credential = subprocess.run(
+            ["git", *config_args, "credential", "fill"],
+            input=b"protocol=https\nhost=fixture.example\npath=amazarache/ai-comm.git\n\n",
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=kwargs["env"], timeout=10,
+            check=False)
+        self.credential_stdout = credential.stdout
+        if credential.returncode != 0:
+            return subprocess.CompletedProcess(argv, 1, b"", b"HTTP/1.1 401 Unauthorized")
+        if self.redirect:
+            # The stub models a redirect response; the fetch command's explicit
+            # followRedirects=false prevents a second request/helper lookup.
+            return subprocess.CompletedProcess(
+                argv, 1, b"", b"fatal: The requested URL returned error: 302")
+        return subprocess.CompletedProcess(argv, self.fetch_code, b"", self.fetch_stderr)
 
 
 class ReleaseCheckTests(unittest.TestCase):
@@ -80,6 +128,28 @@ class ReleaseCheckTests(unittest.TestCase):
         value = FakeRunner(**kwargs)
         value.calls_root = self.repo
         return value
+
+    @contextlib.contextmanager
+    def _global_git_config(self, contents, *, xdg=False, extra_env=None):
+        home = Path(self.temp.name) / ("credential home xdg" if xdg else "credential home")
+        home.mkdir(exist_ok=True)
+        if xdg:
+            config = home / "xdg" / "git" / "config"
+            config.parent.mkdir(parents=True, exist_ok=True)
+            xdg_home = config.parents[1]
+        else:
+            config = home / ".gitconfig"
+            xdg_home = None
+        config.write_text(contents, encoding="utf-8")
+        clean_env = {key: value for key, value in os.environ.items()
+                     if not key.startswith("GIT_")}
+        clean_env["HOME"] = str(home)
+        clean_env.pop("XDG_CONFIG_HOME", None)
+        if xdg_home is not None:
+            clean_env["XDG_CONFIG_HOME"] = str(xdg_home)
+        clean_env.update(extra_env or {})
+        with mock.patch.dict(os.environ, clean_env, clear=True):
+            yield home
 
     def _copy_real_package(self, target):
         shutil.copytree(Path(checker.__file__).resolve().parents[1], target,
@@ -197,12 +267,152 @@ class ReleaseCheckTests(unittest.TestCase):
         self.assertEqual((10, "update_available", "review update"),
                          (code, result["result"], result["owner_notice"]))
         fetch = next((args for args, _ in fake.calls if "fetch" in args), None)
-        self.assertEqual(["git", "-C", str(self.repo), "fetch", "--refmap=", "--no-tags",
-                          "--no-recurse-submodules", "origin", *checker.REFSPECS], fetch)
+        self.assertEqual(["git", "-c", "http.followRedirects=false", "-C", str(self.repo),
+                          "fetch", "--refmap=", "--no-tags", "--no-recurse-submodules",
+                          "origin", *checker.REFSPECS], fetch)
         fetch_env = next(kwargs["env"] for args, kwargs in fake.calls if "fetch" in args)
         self.assertEqual("1", fetch_env["GIT_NO_LAZY_FETCH"])
         self.assertTrue(result["fetched"])
         self.assertEqual("unchanged", result["channel_action"])
+
+    def test_helper_flag_requires_fetch_permission(self):
+        fake = self.runner()
+        result, code = fake.run(repo=self.repo, fetch_permitted=False,
+                                use_git_credential_helper=True)
+        self.assertEqual((2, "credential_helper_requires_fetch_permission", False),
+                         (code, result["fetch_error"], result["fetched"]))
+        self.assertEqual([], fake.calls)
+
+    def test_helper_config_uses_clean_global_read_and_only_helpers_reach_fetch(self):
+        config = ("[url \"https://rewritten.example/\"]\n"
+                  "\tinsteadOf = https://github.com/\n"
+                  "[http]\n\tproxy = http://proxy.invalid/\n"
+                  "[core]\n\thooksPath = /untrusted/hooks\n"
+                  "[credential]\n\thelper = first-helper\n\thelper =\n"
+                  "\thelper = second-helper\n")
+        injected = {"GIT_CONFIG_GLOBAL": "/untrusted/global",
+                    "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "credential.helper",
+                    "GIT_CONFIG_VALUE_0": "injected-helper",
+                    "GIT_CONFIG_PARAMETERS": "'credential.helper=injected-parameters'"}
+        with self._global_git_config(config, xdg=True, extra_env=injected) as home:
+            fake = self.runner()
+            result, code = fake.run(repo=self.repo, fetch_permitted=True,
+                                    use_git_credential_helper=True)
+        self.assertEqual(0, code)
+        self.assertTrue(result["fetched"])
+        read_args, read_kwargs = next((args, kwargs) for args, kwargs in fake.calls
+                                      if args[:4] == ["git", "config", "--global", "--null"])
+        self.assertEqual(["git", "config", "--global", "--null", "--get-all",
+                          "credential.helper"], read_args)
+        read_env = read_kwargs["env"]
+        self.assertEqual(str(home), read_env["HOME"])
+        self.assertTrue(read_env["XDG_CONFIG_HOME"].endswith("/xdg"))
+        self.assertEqual(("1", "C"), (read_env["GIT_CONFIG_NOSYSTEM"], read_env["LC_ALL"]))
+        for key in injected:
+            self.assertNotIn(key, read_env)
+        fetch_args, fetch_kwargs = next((args, kwargs) for args, kwargs in fake.calls
+                                        if "fetch" in args)
+        self.assertEqual([
+            "git", "-c", "credential.helper=first-helper", "-c", "credential.helper=",
+            "-c", "credential.helper=second-helper", "-c", "http.followRedirects=false",
+            "-C", str(self.repo), "fetch", "--refmap=", "--no-tags",
+            "--no-recurse-submodules", "origin", *checker.REFSPECS,
+        ], fetch_args)
+        fetch_env = fetch_kwargs["env"]
+        self.assertEqual(os.devnull, fetch_env["GIT_CONFIG_GLOBAL"])
+        self.assertEqual("1", fetch_env["GIT_CONFIG_NOSYSTEM"])
+        for key in injected:
+            if key == "GIT_CONFIG_GLOBAL":
+                self.assertNotEqual(injected[key], fetch_env[key])
+            else:
+                self.assertNotIn(key, fetch_env)
+
+    def test_newline_in_helper_config_is_preserved_without_delimiter_ambiguity(self):
+        with self._global_git_config('[credential]\n\thelper = "first\\ncontinued"\n'
+                                     '\thelper = final\n'):
+            fake = self.runner()
+            result, code = fake.run(repo=self.repo, fetch_permitted=True,
+                                    use_git_credential_helper=True)
+        self.assertEqual(0, code)
+        fetch = next(args for args, _ in fake.calls if "fetch" in args)
+        self.assertIn("credential.helper=first\ncontinued", fetch)
+        self.assertIn("credential.helper=final", fetch)
+
+    def test_no_effective_helper_stops_before_fetch(self):
+        for contents in ("", "[credential]\n\thelper =\n"):
+            with self.subTest(contents=contents), self._global_git_config(contents):
+                fake = self.runner()
+                result, code = fake.run(repo=self.repo, fetch_permitted=True,
+                                        use_git_credential_helper=True)
+                self.assertEqual((2, "credential_helper_not_configured", False),
+                                 (code, result["fetch_error"], result["fetched"]))
+                self.assertFalse(any("fetch" in args for args, _ in fake.calls))
+
+    def test_unreadable_helper_config_stops_without_disclosing_git_error(self):
+        with self._global_git_config("[credential\n\thelper = broken\n"):
+            fake = self.runner()
+            result, code = fake.run(repo=self.repo, fetch_permitted=True,
+                                    use_git_credential_helper=True)
+        self.assertEqual((2, "credential_helper_config_unreadable", False),
+                         (code, result["fetch_error"], result["fetched"]))
+        self.assertFalse(any("fetch" in args for args, _ in fake.calls))
+        self.assertNotIn("broken", json.dumps(result))
+
+    def test_error_classifier_is_bounded_and_never_echoes_stderr(self):
+        cases = ((b"HTTP/1.1 401 Unauthorized", "auth_failed"),
+                 (b"fatal: The requested URL returned error: 403", "auth_failed"),
+                 (b"fatal: The requested URL returned error: 302", "origin_redirect_refused"),
+                 (b"remote failure secret-marker", "fetch_failed"))
+        for stderr, expected in cases:
+            with self.subTest(stderr=stderr):
+                fake = self.runner(fetch_code=1, fetch_stderr=stderr)
+                result, code = fake.run(repo=self.repo, fetch_permitted=True)
+                self.assertEqual((2, expected), (code, result["fetch_error"]))
+                self.assertNotIn(b"secret-marker", json.dumps(result).encode())
+
+    def test_credential_transport_stub_and_cross_origin_redirect_boundary(self):
+        helper = Path(self.temp.name) / "credential helper stub.py"
+        host_log = Path(self.temp.name) / "credential helper hosts.log"
+        helper.write_text(
+            "#!/usr/bin/env python3\nimport os, sys\n"
+            "request = sys.stdin.buffer.read()\n"
+            "if sys.argv[1] == 'get':\n"
+            " host = next((line[5:] for line in request.splitlines() if line.startswith(b'host=')), b'')\n"
+            " with open(os.environ['AI_COMM_TEST_HELPER_LOG'], 'ab') as out: out.write(host + b'\\n')\n"
+            " sys.stdout.buffer.write(b'username=fixture-user\\npassword=sentinel-secret\\n\\n')\n",
+            encoding="utf-8")
+        helper.chmod(0o700)
+        helper_value = "!" + shlex.quote(sys.executable) + " " + shlex.quote(str(helper))
+        config = f"[credential]\n\thelper = {helper_value}\n"
+        test_env = {"AI_COMM_TEST_HELPER_LOG": str(host_log)}
+        with self._global_git_config(config, extra_env=test_env):
+            remote = "https://fixture.example/ai-comm.git"
+            without_helper = CredentialTransportRunner(remote=remote)
+            without_helper.calls_root = self.repo
+            result, code = without_helper.run(repo=self.repo, fetch_permitted=True,
+                                              expected_origin=remote)
+            self.assertEqual((2, "auth_failed"), (code, result["fetch_error"]))
+            self.assertFalse(host_log.exists())
+
+            transport = CredentialTransportRunner(remote=remote)
+            transport.calls_root = self.repo
+            result, code = transport.run(repo=self.repo, fetch_permitted=True,
+                                         use_git_credential_helper=True,
+                                         expected_origin=remote)
+            self.assertEqual((0, "up_to_date"), (code, result["result"]))
+            self.assertIn(b"password=sentinel-secret", transport.credential_stdout)
+            self.assertEqual(b"fixture.example\n", host_log.read_bytes())
+            self.assertNotIn("sentinel-secret", json.dumps(result))
+
+            host_log.unlink()
+            redirect = CredentialTransportRunner(remote=remote, redirect=True)
+            redirect.calls_root = self.repo
+            result, code = redirect.run(repo=self.repo, fetch_permitted=True,
+                                        use_git_credential_helper=True,
+                                        expected_origin=remote)
+            self.assertEqual((2, "origin_redirect_refused"),
+                             (code, result["fetch_error"]))
+            self.assertEqual(b"fixture.example\n", host_log.read_bytes())
 
     def test_applicable_advisory_has_priority_without_newer_release(self):
         status = {"status": "ok", "pinned_version": "1.1.0", "latest_version": "1.1.0",
@@ -278,7 +488,7 @@ class ReleaseCheckTests(unittest.TestCase):
         result, code = fake.run(repo=self.repo, fetch_permitted=True)
         self.assertEqual(0, code)
         self.assertTrue(result["fetched"])
-        self.assertTrue(any(args[3] == "fetch" for args, _ in fake.calls if args[0] == "git"))
+        self.assertTrue(any("fetch" in args for args, _ in fake.calls if args[0] == "git"))
 
     def test_origin_length_is_bounded(self):
         with self.assertRaises(checker.CheckError) as caught:

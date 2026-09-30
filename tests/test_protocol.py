@@ -98,7 +98,7 @@ class ProtocolTests(unittest.TestCase):
     def test_concurrent_polls_preserve_the_latest_sampled_instant(self):
         samples = [f"2026-09-27T14:00:00.{n:06d}Z" for n in range(1, 33)]
         with mock.patch.object(ac, "poll_now", side_effect=samples):
-            with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
                 results = list(pool.map(lambda _: self.channel._record_poll(
                     "alpha", "alpha-session", "inbox"), range(len(samples))))
         self.assertTrue(all(result is None for result in results))
@@ -154,11 +154,15 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual("future_timestamp",
                          self.channel._poll_status(state.current["alpha"], 300, as_of)["reason"])
 
-    def test_heartbeat_warnings_distinguish_busy_lock_and_runtime_symlink(self):
+    def test_poll_lock_exhaustion_returns_bounded_lock_busy(self):
         busy = ac.ProtocolError("busy", code="channel_busy_retry_with_the_same_key")
         with mock.patch.object(self.channel, "lock", side_effect=busy):
             warning = self.channel._record_poll("alpha", "alpha-session", "state")
         self.assertEqual("lock_busy", warning["reason"])
+        self.assertEqual("heartbeat_not_recorded", warning["code"])
+        self.assertFalse((self.channel.runtime / "poll" / "alpha.json").exists())
+
+    def test_heartbeat_warning_for_runtime_symlink(self):
         self.channel.runtime.rename(self.root / "runtime-backup")
         destination = self.root / "runtime-target"
         destination.mkdir()

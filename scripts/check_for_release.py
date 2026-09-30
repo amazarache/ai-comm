@@ -24,6 +24,9 @@ SCHEMA = "ai-comm-release-check/1"
 RELEASE_STATUSES = {"ok", "index_missing", "index_invalid", "index_inconsistent",
                     "index_tags_missing", "not_git_checkout"}
 MAX_ORIGIN_LENGTH = 2048
+MAX_CREDENTIAL_HELPER_BYTES = 65536
+MAX_CREDENTIAL_HELPER_COUNT = 128
+MAX_CREDENTIAL_HELPER_VALUE_BYTES = 8192
 
 
 class CheckError(Exception):
@@ -106,9 +109,67 @@ def _manifest_bound_origin(repo):
     return matches[0]
 
 
-def _run(argv, *, cwd=None, runner=subprocess.run):
+def _run(argv, *, cwd=None, runner=subprocess.run, env=None):
     return runner(argv, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                  env=ac.git_env({"GIT_NO_LAZY_FETCH": "1"}), timeout=120, check=False)
+                  env=(env if env is not None else
+                       ac.git_env({"GIT_NO_LAZY_FETCH": "1"})),
+                  timeout=120, check=False)
+
+
+def _credential_config_env():
+    """Expose only the user's normal global config to a read-only helper lookup."""
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith("GIT_")}
+    env.update(GIT_CONFIG_NOSYSTEM="1", LC_ALL="C")
+    return env
+
+
+def _read_credential_helpers(*, runner=subprocess.run):
+    """Read bounded, NUL-delimited credential helper values from global config."""
+    proc = _run(["git", "config", "--global", "--null", "--get-all",
+                 "credential.helper"], runner=runner,
+                env=_credential_config_env())
+    stdout = proc.stdout
+    if not isinstance(stdout, bytes) or len(stdout) > MAX_CREDENTIAL_HELPER_BYTES:
+        raise CheckError("credential_helper_config_unreadable")
+    if proc.returncode == 1 and stdout == b"":
+        raise CheckError("credential_helper_not_configured")
+    if proc.returncode != 0:
+        raise CheckError("credential_helper_config_unreadable")
+    if not stdout or not stdout.endswith(b"\0"):
+        raise CheckError("credential_helper_config_unreadable")
+    raw_values = stdout[:-1].split(b"\0")
+    if (len(raw_values) > MAX_CREDENTIAL_HELPER_COUNT or
+            any(len(value) > MAX_CREDENTIAL_HELPER_VALUE_BYTES for value in raw_values)):
+        raise CheckError("credential_helper_config_unreadable")
+    try:
+        values = [value.decode("utf-8", "strict") for value in raw_values]
+    except UnicodeError as exc:
+        raise CheckError("credential_helper_config_unreadable") from exc
+
+    # Git treats an empty helper value as a reset of the accumulated helper list.
+    effective = []
+    for value in values:
+        if value == "":
+            effective.clear()
+        else:
+            effective.append(value)
+    if not effective:
+        raise CheckError("credential_helper_not_configured")
+    return values
+
+
+def _fetch_error(stderr):
+    """Map Git's C-locale response to bounded categories without exposing it."""
+    if not isinstance(stderr, bytes):
+        return "fetch_failed"
+    if re.search(rb"(?:HTTP/[0-9.]+\s+|returned error:\s*)(?:401|403)(?:\D|$)",
+                 stderr, re.IGNORECASE):
+        return "auth_failed"
+    if re.search(rb"(?:HTTP/[0-9.]+\s+|returned error:\s*)30[12378](?:\D|$)",
+                 stderr, re.IGNORECASE):
+        return "origin_redirect_refused"
+    return "fetch_failed"
 
 
 def _local_status(repo, runner):
@@ -169,7 +230,8 @@ def _result(status="error", *, result="error", fetched=False, fetch_error=None,
             "owner_notice": owner_notice}
 
 
-def run_check(*, repo=ROOT, fetch_permitted=False, expected_origin=None,
+def run_check(*, repo=ROOT, fetch_permitted=False, use_git_credential_helper=False,
+              expected_origin=None,
               runner=subprocess.run):
     repo = Path(repo).resolve()
     fetched = False
@@ -178,6 +240,8 @@ def run_check(*, repo=ROOT, fetch_permitted=False, expected_origin=None,
     latest = None
     try:
         _load_package(repo)
+        if use_git_credential_helper and not fetch_permitted:
+            raise CheckError("credential_helper_requires_fetch_permission")
         if fetch_permitted:
             try:
                 identity = ac.package_identity(repo)
@@ -199,12 +263,18 @@ def run_check(*, repo=ROOT, fetch_permitted=False, expected_origin=None,
                 raise CheckError("invalid_origin") from exc
             if _normalize_origin(actual) != expected:
                 raise CheckError("origin_mismatch")
-            fetch_args = ["git", "-C", str(repo), "fetch", "--refmap=", "--no-tags",
-                          "--no-recurse-submodules", "origin", *REFSPECS]
+            helpers = (_read_credential_helpers(runner=runner)
+                       if use_git_credential_helper else [])
+            fetch_args = ["git"]
+            for helper in helpers:
+                fetch_args.extend(("-c", "credential.helper=" + helper))
+            fetch_args.extend(("-c", "http.followRedirects=false", "-C", str(repo),
+                               "fetch", "--refmap=", "--no-tags",
+                               "--no-recurse-submodules", "origin", *REFSPECS))
             fetched = True
             proc = _run(fetch_args, runner=runner)
             if proc.returncode != 0:
-                raise CheckError("fetch_failed")
+                raise CheckError(_fetch_error(proc.stderr))
         release_data = _local_status(repo, runner)
         current_status = release_data.get("status")
         status_name = current_status
@@ -258,6 +328,8 @@ def parser():
     result = JsonArgumentParser(description=__doc__)
     result.add_argument("--fetch-permitted", action="store_true",
                         help="owner-authorized opt-in to fetch only the release-index branch and v* tags")
+    result.add_argument("--use-git-credential-helper", action="store_true",
+                        help="run configured global Git credential helper(s) for this verified-origin fetch only")
     result.add_argument("--expected-origin",
                         help="explicit owner override for the expected origin URL")
     return result
@@ -267,6 +339,7 @@ def main(argv=None):
     try:
         args = parser().parse_args(argv)
         value, code = run_check(fetch_permitted=args.fetch_permitted,
+                                use_git_credential_helper=args.use_git_credential_helper,
                                 expected_origin=args.expected_origin)
     except CheckError as exc:
         value, code = _result(exc.status, fetch_error=exc.code), 2

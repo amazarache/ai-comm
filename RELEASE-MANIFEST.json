@@ -22,13 +22,13 @@
     },
     {
       "path": "ACTIVATE.md",
-      "bytes": 19763,
-      "sha256": "4ba2ce800f8a8d78d276610f9b4b6a71925a73d67949a6dd1c7e8f6f4fa4c928"
+      "bytes": 20866,
+      "sha256": "cbb65a7bd03e9c554a1f33ac98db2ee6aac3e55be6f73301691fe8aeec77e8f1"
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 7304,
-      "sha256": "53178aa6b58e522eb09e819bf701d4dcef1ee7ba4a980784ade12ff1f1586282"
+      "bytes": 7856,
+      "sha256": "7e0e04cdb3ae7f3768ca977434d1c857a40e078f564e50eb512a95d00f62f64c"
     },
     {
       "path": "PROTOCOL.md",
@@ -37,8 +37,8 @@
     },
     {
       "path": "README.md",
-      "bytes": 16570,
-      "sha256": "6e0c904db57c6677ea24ee6d9adf3c04075499753029b859c75c398c1c760ace"
+      "bytes": 16723,
+      "sha256": "07bded2494f01aa467cc4b114fe6e7e0d8c91bd68c37e90a65405bf4d37d6d39"
     },
     {
       "path": "SECURITY.md",
@@ -48,7 +48,7 @@
     {
       "path": "ai_comm.py",
       "bytes": 153060,
-      "sha256": "70a69f55446205d28b1eecb306941817084603b9158b899282f4207bd61fb973"
+      "sha256": "fee7fa6e5d1144d5dd02cef73fa070774bfcc33000df7d945d15f3e057c3d140"
     },
     {
       "path": "docs/ERRORS.md",
@@ -67,8 +67,8 @@
     },
     {
       "path": "docs/RELEASES.md",
-      "bytes": 12628,
-      "sha256": "b0ede4ff521468093cb9dd4a09250ad1deb0beb8e9823c24647ce6943bb2e583"
+      "bytes": 13645,
+      "sha256": "ca6494effbf95038f1d17ccc873f7d2dd8cef2039f223ebb52825d6541906ee6"
     },
     {
       "path": "examples/ask.json",
@@ -82,8 +82,8 @@
     },
     {
       "path": "scripts/check_for_release.py",
-      "bytes": 12271,
-      "sha256": "e06d21cd09301d58a8309b2f34c020e40553021ee2ebd11096387a2e10aa3014"
+      "bytes": 15643,
+      "sha256": "5012211566861c900ba43a0962ba06ea0eabf0ec232b95d301a3a108adbe0d8d"
     },
     {
       "path": "scripts/check_release_manifest.py",
@@ -112,18 +112,18 @@
     },
     {
       "path": "skills/ai-comm/SKILL.md",
-      "bytes": 7221,
-      "sha256": "7847694b0ad56d7c471a9fc097e292a3ebe38aa60a434a037b79d9e8c6298da1"
+      "bytes": 7883,
+      "sha256": "d6a23b0df2f15bcea02db3c24be6c117935ff64bf78dce20abe07feaf0cfc9b1"
     },
     {
       "path": "tests/test_protocol.py",
-      "bytes": 87806,
-      "sha256": "5977a0fecbc625b0e88fa56db312378b63a5b1d5f7add927b774886aa7f28b99"
+      "bytes": 88000,
+      "sha256": "572122c45bbd230e3dd5d2fdc699fcf28a7d24ab5d3ae921866fbf0b5d4547aa"
     },
     {
       "path": "tests/test_release_check.py",
-      "bytes": 22665,
-      "sha256": "adff68600d9342a82839662aa339b38f6b463f5b8332d20fd2efa772c40e26e4"
+      "bytes": 34354,
+      "sha256": "02519965b355213173a96afc830e4f499636b2b5ac9c5265e03ee5dfe783ee10"
     },
     {
       "path": "tests/test_skill.py",

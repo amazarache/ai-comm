@@ -101,8 +101,21 @@ is set. Git may update those remote/tag refs and `FETCH_HEAD`; the helper does
 not check out files or change the working tree. A failed partial fetch is an
 error, never an up-to-date result. The helper validates the fetched data through
 `release-status` and runs `upgrade-plan` only when a newer verified release
-exists. It emits one JSON result on operational success and failure; errors
-never include raw Git stderr or URL credentials.
+exists. Redirects are refused. It emits one JSON result on operational success
+and failure; errors never include raw Git stderr, credential-helper values,
+usernames, passwords or URL credentials.
+
+For a private origin, after the owner's explicit yes to “Refresh release refs
+from `<origin>`, using your configured git credential helper for that fetch
+only?”, add `--use-git-credential-helper`. This reads only global
+`credential.helper` values using the user's normal `HOME`/`XDG_CONFIG_HOME`
+resolution, then passes those helper entries to this single verified-origin
+fetch. All other Git configuration remains isolated. Empty helper entries keep
+their reset semantics. If no effective helper is configured, or the values
+cannot be read unambiguously, the helper stops without fetching. Configured
+helpers are executable programs running with the user's rights and may have
+side effects. This flag does not install or save credentials, change the pin,
+or authorize Gate 2.
 
 The JSON schema is `ai-comm-release-check/1`. `result` is `up_to_date`,
 `update_available`, `advisory_applies` or `error`; `status` carries the release
@@ -122,7 +135,9 @@ not infer applicability from the `advisory` value alone.
 `invalid_arguments`, `package_unavailable`, `package_identity_invalid`,
 `package_manifest_mismatch`, `package_origin_unavailable`, `not_git_checkout`,
 `invalid_origin`, `credential_bearing_origin`, `origin_missing`,
-`origin_mismatch`, `fetch_failed`, `index_missing`, `index_invalid`,
+`origin_mismatch`, `credential_helper_requires_fetch_permission`,
+`credential_helper_not_configured`, `credential_helper_config_unreadable`,
+`auth_failed`, `origin_redirect_refused`, `fetch_failed`, `index_missing`, `index_invalid`,
 `index_inconsistent`, `index_tags_missing`, `release_status_failed`,
 `release_status_invalid_json`, `release_status_invalid_shape`,
 `release_status_invalid_version`, `upgrade_plan_failed`,

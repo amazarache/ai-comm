@@ -1,5 +1,16 @@
 # Changes
 
+## 1.4.1
+
+- Add an explicit private-origin release-check option that reads only configured
+  global Git credential helpers, passes them to one verified-origin fetch, and
+  keeps other global Git configuration isolated.
+- Fail closed when helper configuration is missing, unreadable or ambiguous;
+  refuse redirects and report bounded authentication/fetch error categories.
+- Keep the concurrent heartbeat ordering test strict while reducing contention,
+  and test lock exhaustion separately.
+- Keep `PROTOCOL.md` unchanged at the 3.0 contract digest.
+
 ## 1.4.0
 
 - Add an agent-neutral project skill and document Codex/Claude project-local

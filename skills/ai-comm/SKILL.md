@@ -105,6 +105,18 @@ run:
 python3 scripts/check_for_release.py --fetch-permitted
 ```
 
+If the origin is private and needs a credential helper, ask the owner exactly:
+
+> Refresh release refs from `<origin>`, using your configured git credential helper for that fetch only?
+
+After an explicit yes, add `--use-git-credential-helper`. Explain that the
+configured helper is an executable program running with the owner's rights and
+may have side effects. The flag passes only global `credential.helper` entries
+to this one manifest-verified HTTPS fetch; other global Git settings stay
+isolated. Stop without fetching if consent is absent, no effective helper is
+configured, or its config cannot be read safely. Gate 2 remains a separate
+owner decision.
+
 The helper validates the pinned manifest's HTTPS origin and fetches only the
 release-index branch and `v*` tags. It updates refs only, never the working
 tree, and never installs or re-pins. On origin mismatch or any fetch failure,

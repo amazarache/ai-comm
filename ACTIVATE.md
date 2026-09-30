@@ -160,7 +160,19 @@ automatically. The chain is:
    and does not refresh them.
 2. Gate 1: only after the owner explicitly approves a fresh release-ref refresh,
    the session runs `scripts/check_for_release.py --fetch-permitted`. Without
-   that approval, it cannot fetch.
+   that approval, it cannot fetch. For a private origin that needs the owner's
+   configured Git credential helper, ask this exact additional question:
+
+   > Refresh release refs from `<origin>`, using your configured git credential helper for that fetch only?
+
+   Only after an explicit yes to that question, run with both
+   `--fetch-permitted --use-git-credential-helper`. The helper reads only the
+   user's configured `credential.helper` entries and uses them for this
+   manifest-verified origin fetch. It does not pass other global Git settings,
+   print or store credentials, follow redirects, install or re-pin. A configured
+   credential helper is executable user configuration and may have side effects;
+   disclose this before asking. If the owner declines, the helper is absent, or
+   its configuration cannot be read safely, stop without fetching.
 3. The helper validates the expected HTTPS origin before network access, fetches
    only `release-index` and `v*` tags, then runs `release-status` and, when a
    newer verified release exists, `upgrade-plan`.
@@ -179,6 +191,11 @@ removes or disables that job. The example uses absolute paths; replace both
 paths and connect the generic notifier to the owner's chosen notification
 system. It passes the helper's JSON and exit status to that notifier and
 serializes runs with `flock`:
+
+For a private origin, schedule the additional
+`--use-git-credential-helper` flag only after the owner explicitly approves the
+exact Gate 1 question above for the scheduled fetch. That standing permission
+also authorizes running the configured helper at each scheduled check.
 
 ```cron
 CRON_TZ=UTC
