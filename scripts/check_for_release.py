@@ -210,7 +210,7 @@ def _git_result(argv, *, runner, env):
 def _read_release_refs(location, *, runner, env, worktree=False):
     prefix = ["git", "-C", str(location)] if worktree else ["git", f"--git-dir={location}"]
     raw = _git_result([*prefix, "for-each-ref",
-                       "--format=%(refname)%00%(objectname)",
+                       "--format=%(refname)%00%(objectname)%00%(symref)",
                        "refs/remotes/origin/release-index", "refs/tags/v*"],
                       runner=runner, env=env)
     if not isinstance(raw, bytes) or (raw and not raw.endswith(b"\n")):
@@ -218,10 +218,11 @@ def _read_release_refs(location, *, runner, env, worktree=False):
     refs = {}
     for line in raw.splitlines():
         fields = line.split(b"\0")
-        if len(fields) != 2 or re.fullmatch(rb"[0-9a-f]{40,64}", fields[1]) is None:
+        if (len(fields) != 3 or fields[2] != b"" or
+                re.fullmatch(rb"[0-9a-f]{40,64}", fields[1]) is None):
             raise CheckError("fetch_failed")
         try:
-            name, oid = (item.decode("ascii", "strict") for item in fields)
+            name, oid, _symref = (item.decode("ascii", "strict") for item in fields)
         except UnicodeError as exc:
             raise CheckError("fetch_failed") from exc
         if (name != "refs/remotes/origin/release-index" and
@@ -235,7 +236,7 @@ def _publish_release_refs(repo, refs, *, runner, env):
     if not refs:
         return
     old = _read_release_refs(repo, runner=runner, env=env, worktree=True)
-    commands = ["start"]
+    commands = ["start", "option no-deref"]
     zero = "0" * len(next(iter(refs.values())))
     for name, oid in sorted(refs.items()):
         commands.append(f"update {name} {oid} {old.get(name, zero)}")

@@ -252,7 +252,7 @@ class ReleaseCheckTests(unittest.TestCase):
         value = json.loads(proc.stdout.decode().splitlines()[0])
         self.assertTrue(value["fetched"])
         refs = self._git("for-each-ref", "--format=%(refname)", cwd=package, env=env).stdout.decode().splitlines()
-        self.assertIn("refs/remotes/origin/release-index", refs)
+        self.assertIn("refs/remotes/origin/release-index", refs, (value, refs, proc.stderr))
         self.assertIn("refs/tags/v9.9.9", refs)
         self.assertFalse(any(ref.startswith("refs/remotes/leak/") for ref in refs), refs)
         self.assertFalse((package / ".git" / "FETCH_HEAD").exists())
@@ -295,6 +295,19 @@ class ReleaseCheckTests(unittest.TestCase):
         result, code = fake.run(repo=self.repo, fetch_permitted=True)
         self.assertEqual((0, None, True), (code, result["fetch_error"], result["fetched"]))
         self.assertTrue(any("fetch" in args for args, _ in fake.calls))
+
+    def test_symbolic_release_ref_is_rejected_without_following_it(self):
+        env = package_module.git_env()
+        self._git("symbolic-ref", "refs/tags/v1.4.1", "refs/heads/main",
+                  cwd=self.repo, env=env)
+        before = self._git("rev-parse", "refs/heads/main", cwd=self.repo, env=env).stdout
+        with self.assertRaises(checker.CheckError) as raised:
+            checker._read_release_refs(self.repo, runner=subprocess.run, env=env, worktree=True)
+        self.assertEqual("fetch_failed", raised.exception.code)
+        after = self._git("rev-parse", "refs/heads/main", cwd=self.repo, env=env).stdout
+        target = self._git("symbolic-ref", "refs/tags/v1.4.1", cwd=self.repo, env=env).stdout
+        self.assertEqual(before, after)
+        self.assertEqual(b"refs/heads/main\n", target)
 
     def test_helper_config_uses_clean_global_read_and_only_helpers_reach_fetch(self):
         config = ("[url \"https://rewritten.example/\"]\n"

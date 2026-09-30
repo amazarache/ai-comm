@@ -82,8 +82,8 @@
     },
     {
       "path": "scripts/check_for_release.py",
-      "bytes": 21148,
-      "sha256": "65da5ca500102fc7368323764d88a51a9f750880023876d20e50d1911180a538"
+      "bytes": 21226,
+      "sha256": "7c1f3b573612822e240aa9c61fad89c621c4372fcd1d2944bdc0f1bdbf5549fd"
     },
     {
       "path": "scripts/check_release_manifest.py",
@@ -122,8 +122,8 @@
     },
     {
       "path": "tests/test_release_check.py",
-      "bytes": 38436,
-      "sha256": "c61b1aafb5388b95091f6a5686d92e188d255f1ab3a64dcb554eba9502425613"
+      "bytes": 39284,
+      "sha256": "f018261ae34d9cdc7237f8d03a5e6fe0c1892573bf1662773caca42639507f41"
     },
     {
       "path": "tests/test_skill.py",
