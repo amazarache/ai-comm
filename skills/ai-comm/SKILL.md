@@ -122,8 +122,9 @@ release-index branch and `v*` tags through a temporary bare Git directory. The
 fetch shares only the checkout's object store and atomically publishes those
 refs; checkout-local URL rewrites, proxies, redirect rules and credential
 settings cannot affect it. Approved global helper entries travel through Git's
-environment config rather than process arguments. It never changes the
-working tree or installs or re-pins. On origin mismatch or any fetch failure,
+environment config rather than process arguments. It updates refs only; fetched
+objects go to the local object store and the working tree stays unchanged. It
+never installs or re-pins. On origin mismatch or any fetch failure,
 including a partial fetch, stop, report the result, and do not retry or
 improvise. After success, rerun `release-status` and `upgrade-plan`; present the
 notice before asking for Gate 2.

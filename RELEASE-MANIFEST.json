@@ -112,8 +112,8 @@
     },
     {
       "path": "skills/ai-comm/SKILL.md",
-      "bytes": 8187,
-      "sha256": "b14197e942e4e0fdf9f2f7bdd64a26919bab12adada52212ad4c19b0a0c05f32"
+      "bytes": 8264,
+      "sha256": "387a5801c53e3bffe9fb3b6ce9aee379a226c562d2c5ea23db15ce1ea352d317"
     },
     {
       "path": "tests/test_protocol.py",
