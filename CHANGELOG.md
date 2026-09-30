@@ -6,7 +6,8 @@
   global Git credential helpers, passes them to one verified-origin fetch, and
   keeps other global Git configuration isolated.
 - Fail closed when helper configuration is missing, unreadable or ambiguous;
-  refuse redirects and report bounded authentication/fetch error categories.
+  refuse redirects even against more-specific repository URL settings and
+  report bounded authentication/fetch error categories.
 - Keep the concurrent heartbeat ordering test strict while reducing contention,
   and test lock exhaustion separately.
 - Keep `PROTOCOL.md` unchanged at the 3.0 contract digest.

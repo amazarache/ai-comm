@@ -172,6 +172,17 @@ def _fetch_error(stderr):
     return "fetch_failed"
 
 
+def _redirect_policy_args(origin):
+    """Disable redirects generally and for URL-specific Git config matches."""
+    base = origin.rstrip("/")
+    request_bases = (base, base + "/info/refs", base + "/git-upload-pack",
+                     base + "/objects")
+    args = ["-c", "http.followRedirects=false"]
+    for request_url in request_bases:
+        args.extend(("-c", f"http.{request_url}.followRedirects=false"))
+    return args
+
+
 def _local_status(repo, runner):
     proc = _run([sys.executable, str(repo / "ai_comm.py"), "release-status"], runner=runner)
     if proc.returncode != 0:
@@ -268,8 +279,8 @@ def run_check(*, repo=ROOT, fetch_permitted=False, use_git_credential_helper=Fal
             fetch_args = ["git"]
             for helper in helpers:
                 fetch_args.extend(("-c", "credential.helper=" + helper))
-            fetch_args.extend(("-c", "http.followRedirects=false", "-C", str(repo),
-                               "fetch", "--refmap=", "--no-tags",
+            fetch_args.extend(_redirect_policy_args(actual))
+            fetch_args.extend(("-C", str(repo), "fetch", "--refmap=", "--no-tags",
                                "--no-recurse-submodules", "origin", *REFSPECS))
             fetched = True
             proc = _run(fetch_args, runner=runner)

@@ -267,9 +267,9 @@ class ReleaseCheckTests(unittest.TestCase):
         self.assertEqual((10, "update_available", "review update"),
                          (code, result["result"], result["owner_notice"]))
         fetch = next((args for args, _ in fake.calls if "fetch" in args), None)
-        self.assertEqual(["git", "-c", "http.followRedirects=false", "-C", str(self.repo),
-                          "fetch", "--refmap=", "--no-tags", "--no-recurse-submodules",
-                          "origin", *checker.REFSPECS], fetch)
+        self.assertEqual(["git", *checker._redirect_policy_args(checker.ac.RELEASE_ORIGIN),
+                          "-C", str(self.repo), "fetch", "--refmap=", "--no-tags",
+                          "--no-recurse-submodules", "origin", *checker.REFSPECS], fetch)
         fetch_env = next(kwargs["env"] for args, kwargs in fake.calls if "fetch" in args)
         self.assertEqual("1", fetch_env["GIT_NO_LAZY_FETCH"])
         self.assertTrue(result["fetched"])
@@ -290,6 +290,9 @@ class ReleaseCheckTests(unittest.TestCase):
                   "[core]\n\thooksPath = /untrusted/hooks\n"
                   "[credential]\n\thelper = first-helper\n\thelper =\n"
                   "\thelper = second-helper\n")
+        self._git("config", "--local",
+                  f"http.{checker.ac.RELEASE_ORIGIN}.followRedirects", "true",
+                  cwd=self.repo, env=package_module.git_env())
         injected = {"GIT_CONFIG_GLOBAL": "/untrusted/global",
                     "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "credential.helper",
                     "GIT_CONFIG_VALUE_0": "injected-helper",
@@ -314,7 +317,8 @@ class ReleaseCheckTests(unittest.TestCase):
                                         if "fetch" in args)
         self.assertEqual([
             "git", "-c", "credential.helper=first-helper", "-c", "credential.helper=",
-            "-c", "credential.helper=second-helper", "-c", "http.followRedirects=false",
+            "-c", "credential.helper=second-helper",
+            *checker._redirect_policy_args(checker.ac.RELEASE_ORIGIN),
             "-C", str(self.repo), "fetch", "--refmap=", "--no-tags",
             "--no-recurse-submodules", "origin", *checker.REFSPECS,
         ], fetch_args)
@@ -326,6 +330,23 @@ class ReleaseCheckTests(unittest.TestCase):
                 self.assertNotEqual(injected[key], fetch_env[key])
             else:
                 self.assertNotIn(key, fetch_env)
+        config_options = []
+        index = 1
+        while index < fetch_args.index("-C"):
+            self.assertEqual("-c", fetch_args[index])
+            config_options.extend(fetch_args[index:index + 2])
+            index += 2
+        for request_url in (
+                checker.ac.RELEASE_ORIGIN,
+                checker.ac.RELEASE_ORIGIN + "/info/refs?service=git-upload-pack",
+                checker.ac.RELEASE_ORIGIN + "/git-upload-pack",
+                checker.ac.RELEASE_ORIGIN + "/objects/info/packs"):
+            effective_redirects = subprocess.run(
+                ["git", *config_options, "-C", str(self.repo), "config", "--get-urlmatch",
+                 "http.followRedirects", request_url], stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, env=fetch_env, timeout=10, check=False)
+            self.assertEqual((0, b"false\n"),
+                             (effective_redirects.returncode, effective_redirects.stdout))
 
     def test_newline_in_helper_config_is_preserved_without_delimiter_ambiguity(self):
         with self._global_git_config('[credential]\n\thelper = "first\\ncontinued"\n'

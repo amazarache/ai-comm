@@ -101,7 +101,9 @@ is set. Git may update those remote/tag refs and `FETCH_HEAD`; the helper does
 not check out files or change the working tree. A failed partial fetch is an
 error, never an up-to-date result. The helper validates the fetched data through
 `release-status` and runs `upgrade-plan` only when a newer verified release
-exists. Redirects are refused. It emits one JSON result on operational success
+exists. Redirects are refused for the verified origin and the Git HTTP request
+paths even if a more-specific repository URL setting attempts to enable them.
+It emits one JSON result on operational success
 and failure; errors never include raw Git stderr, credential-helper values,
 usernames, passwords or URL credentials.
 
