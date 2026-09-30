@@ -105,14 +105,18 @@ run:
 python3 scripts/check_for_release.py --fetch-permitted
 ```
 
-If the origin is private and needs a credential helper, ask the owner exactly:
+If the origin is private and needs a credential helper, disclose first that
+Git may invoke the helper's normal `store` behavior after success or `erase`
+after an authentication failure. Then ask the owner exactly:
 
 > Refresh release refs from `<origin>`, using your configured git credential helper for that fetch only?
 
 After an explicit yes, add `--use-git-credential-helper`. Explain that the
 configured helper is an executable program running with the owner's rights and
 may have side effects. The flag passes only global `credential.helper` entries
-to this one manifest-verified HTTPS fetch; other global Git settings stay
+to this one manifest-verified HTTPS fetch through Git's environment config.
+Git can save credentials through a store helper or remove them through erase;
+the release-check tool does not write them directly. Other Git settings remain
 isolated. Stop without fetching if consent is absent, no effective helper is
 configured, or its config cannot be read safely. Gate 2 remains a separate
 owner decision.

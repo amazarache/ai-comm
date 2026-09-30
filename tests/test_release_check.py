@@ -229,6 +229,14 @@ class ReleaseCheckTests(unittest.TestCase):
                   cwd=package, env=env)
         self._git("config", "--local", "credential.helper", "!echo local-secret",
                   cwd=package, env=env)
+        hooks = Path(self.temp.name) / "checkout hooks"
+        hooks.mkdir()
+        hook_marker = Path(self.temp.name) / "reference hook ran"
+        hook = hooks / "reference-transaction"
+        hook.write_text("#!/bin/sh\ntouch " + shlex.quote(str(hook_marker)) + "\n",
+                        encoding="utf-8")
+        hook.chmod(0o700)
+        self._git("config", "--local", "core.hooksPath", str(hooks), cwd=package, env=env)
 
         real_git = shutil.which("git")
         bin_dir = Path(self.temp.name) / "bin"
@@ -256,6 +264,7 @@ class ReleaseCheckTests(unittest.TestCase):
         self.assertIn("refs/tags/v9.9.9", refs)
         self.assertFalse(any(ref.startswith("refs/remotes/leak/") for ref in refs), refs)
         self.assertFalse((package / ".git" / "FETCH_HEAD").exists())
+        self.assertFalse(hook_marker.exists())
         self.assertFalse((package / "__pycache__").exists())
 
     def test_no_fetch_without_permission_and_reports_up_to_date(self):

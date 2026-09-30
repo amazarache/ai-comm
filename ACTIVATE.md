@@ -161,7 +161,9 @@ automatically. The chain is:
 2. Gate 1: only after the owner explicitly approves a fresh release-ref refresh,
    the session runs `scripts/check_for_release.py --fetch-permitted`. Without
    that approval, it cannot fetch. For a private origin that needs the owner's
-   configured Git credential helper, ask this exact additional question:
+   configured Git credential helper, first disclose that Git may ask the helper
+   to store credentials after success or erase one after an authentication
+   failure. Then ask this exact additional question:
 
    > Refresh release refs from `<origin>`, using your configured git credential helper for that fetch only?
 
@@ -172,11 +174,12 @@ automatically. The chain is:
    Git directory sharing only the checkout's object store, the manifest-bound
    HTTPS URL, and only the approved release-index/tag refs. Checkout-level URL
    rewrites, proxies, redirect rules, and credential settings cannot change the
-   request. The helper does not print or store credentials, follow redirects,
-   install or re-pin. A configured credential helper is executable user
-   configuration and may have side effects; disclose this before asking. If the
-   owner declines, the helper is absent, or its configuration cannot be read
-   safely, stop without fetching.
+   request. Helper values stay out of process arguments. The release-check tool
+   does not print or write credentials itself; Git invokes the helper's normal
+   `store`/`erase` behavior, which may save a credential or remove an expired
+   one. The fetch does not follow redirects, install or re-pin. If the owner
+   declines, the helper is absent, or its configuration cannot be read safely,
+   stop without fetching.
 3. The helper validates the expected HTTPS origin before network access, fetches
    only `release-index` and `v*` tags into the checkout's refs, then runs
    `release-status` and, when a newer verified release exists, `upgrade-plan`.

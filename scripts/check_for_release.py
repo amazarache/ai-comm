@@ -241,9 +241,12 @@ def _publish_release_refs(repo, refs, *, runner, env):
     for name, oid in sorted(refs.items()):
         commands.append(f"update {name} {oid} {old.get(name, zero)}")
     commands.extend(("prepare", "commit", ""))
+    publish_env = ac.git_env({"GIT_CONFIG_COUNT": "1",
+                              "GIT_CONFIG_KEY_0": "core.hooksPath",
+                              "GIT_CONFIG_VALUE_0": os.devnull})
     proc = runner(["git", "-C", str(repo), "update-ref", "--stdin"],
                   input="\n".join(commands).encode("ascii"),
-                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
+                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=publish_env,
                   timeout=120, check=False)
     if proc.returncode != 0:
         raise CheckError("fetch_failed")

@@ -110,19 +110,24 @@ request paths. It emits one JSON result on operational success
 and failure; errors never include raw Git stderr, credential-helper values,
 usernames, passwords or URL credentials.
 
-For a private origin, after the owner's explicit yes to “Refresh release refs
-from `<origin>`, using your configured git credential helper for that fetch
-only?”, add `--use-git-credential-helper`. This reads only global
+For a private origin, before asking permission, disclose that Git may call the
+configured helper's `store` operation after success or `erase` after an
+authentication failure. A store helper may write a credential to a store such
+as `~/.git-credentials`; erase may remove an expired credential. Then ask:
+
+> Refresh release refs from `<origin>`, using your configured git credential helper for that fetch only?
+
+After an explicit yes, add `--use-git-credential-helper`. This reads only global
 `credential.helper` values using the user's normal `HOME`/`XDG_CONFIG_HOME`
 resolution, then passes those helper entries to this single verified-origin
 fetch through Git's environment-based config interface, keeping helper values
 out of the process argument list. The temporary fetch disables system and
 global config, then adds only the approved helpers and redirect limits. Empty
-helper entries keep their reset semantics. If no effective helper is configured, or the values
-cannot be read unambiguously, the helper stops without fetching. Configured
-helpers are executable programs running with the user's rights and may have
-side effects. This flag does not install or save credentials, change the pin,
-or authorize Gate 2.
+helper entries keep their reset semantics. If no effective helper is configured,
+or the values cannot be read unambiguously, the helper stops without fetching.
+Configured helpers are executable programs running with the user's rights. The
+release-check tool does not itself write credentials, change the pin, or
+authorize Gate 2.
 
 The JSON schema is `ai-comm-release-check/1`. `result` is `up_to_date`,
 `update_available`, `advisory_applies` or `error`; `status` carries the release
@@ -151,7 +156,9 @@ not infer applicability from the `advisory` value alone.
 `release_status_invalid_version`, `upgrade_plan_failed`,
 `upgrade_plan_invalid_json`, `upgrade_plan_invalid_shape`, and
 `operation_failed`. The codes identify a failed validation or subprocess stage;
-output never includes the raw subprocess error.
+output never includes the raw subprocess error. Git may omit the HTTP status
+from an authentication error; in that case classification is conservatively
+`fetch_failed` rather than `auth_failed`.
 
 Exit status is `0` for up to date, `10` for an update available, `11` when a
 recommended or required advisory applies to the pinned version, and `2` for an

@@ -8,7 +8,11 @@
   shares only the target object store, then atomically publish only permitted refs.
 - Fail closed when helper configuration is missing, unreadable or ambiguous;
   isolate network access from checkout-level URL rewrites, proxies, redirect and
-  credential settings; report bounded authentication/fetch error categories.
+  credential settings. Explicit 403 responses now report `auth_failed`, and
+  redirects are refused even when credential-helper use is not enabled; when
+  Git omits an authentication status, retain the generic `fetch_failed` code.
+- Document that Git may invoke a helper's normal credential `store` or `erase`
+  operation on fetch success or authentication failure.
 - Keep the concurrent heartbeat ordering test strict while reducing contention,
   and test lock exhaustion separately.
 - Keep `PROTOCOL.md` unchanged at the 3.0 contract digest.
