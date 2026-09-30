@@ -27,6 +27,9 @@ MAX_ORIGIN_LENGTH = 2048
 MAX_CREDENTIAL_HELPER_BYTES = 65536
 MAX_CREDENTIAL_HELPER_COUNT = 128
 MAX_CREDENTIAL_HELPER_VALUE_BYTES = 8192
+MAX_REDIRECT_CONFIG_BYTES = 65536
+MAX_REDIRECT_CONFIG_COUNT = 128
+MAX_REDIRECT_CONFIG_KEY_BYTES = 8192
 
 
 class CheckError(Exception):
@@ -172,14 +175,49 @@ def _fetch_error(stderr):
     return "fetch_failed"
 
 
-def _redirect_policy_args(origin):
-    """Disable redirects generally and for URL-specific Git config matches."""
+def _local_redirect_config_keys(repo, *, runner=subprocess.run):
+    """Find local URL-specific redirect settings so the fetch can override them."""
+    proc = _run(["git", "-C", str(repo), "config", "--show-scope", "--null",
+                 "--get-regexp", r"^http\..*\.followredirects$"], runner=runner)
+    stdout = proc.stdout
+    if not isinstance(stdout, bytes) or len(stdout) > MAX_REDIRECT_CONFIG_BYTES:
+        raise CheckError("redirect_config_unreadable")
+    if proc.returncode == 1 and stdout == b"":
+        return []
+    if proc.returncode != 0 or not stdout or not stdout.endswith(b"\0"):
+        raise CheckError("redirect_config_unreadable")
+    fields = stdout[:-1].split(b"\0")
+    if len(fields) % 2:
+        raise CheckError("redirect_config_unreadable")
+    keys = []
+    for scope, key_and_value in zip(fields[::2], fields[1::2]):
+        if scope not in {b"local", b"worktree"}:
+            raise CheckError("redirect_config_unreadable")
+        key, separator, _value = key_and_value.partition(b"\n")
+        if (not separator or len(key) > MAX_REDIRECT_CONFIG_KEY_BYTES or
+                re.fullmatch(rb"http\..*\.followredirects", key, re.IGNORECASE) is None):
+            raise CheckError("redirect_config_unreadable")
+        try:
+            text_key = key.decode("ascii", "strict")
+        except UnicodeError as exc:
+            raise CheckError("redirect_config_unreadable") from exc
+        if text_key not in keys:
+            keys.append(text_key)
+        if len(keys) > MAX_REDIRECT_CONFIG_COUNT:
+            raise CheckError("redirect_config_unreadable")
+    return keys
+
+
+def _redirect_policy_args(origin, repo, *, runner=subprocess.run):
+    """Disable redirects generally, by URL, and against local URL-specific overrides."""
     base = origin.rstrip("/")
     request_bases = (base, base + "/info/refs", base + "/git-upload-pack",
                      base + "/objects")
     args = ["-c", "http.followRedirects=false"]
     for request_url in request_bases:
         args.extend(("-c", f"http.{request_url}.followRedirects=false"))
+    for key in _local_redirect_config_keys(repo, runner=runner):
+        args.extend(("-c", key + "=false"))
     return args
 
 
@@ -279,7 +317,7 @@ def run_check(*, repo=ROOT, fetch_permitted=False, use_git_credential_helper=Fal
             fetch_args = ["git"]
             for helper in helpers:
                 fetch_args.extend(("-c", "credential.helper=" + helper))
-            fetch_args.extend(_redirect_policy_args(actual))
+            fetch_args.extend(_redirect_policy_args(actual, repo, runner=runner))
             fetch_args.extend(("-C", str(repo), "fetch", "--refmap=", "--no-tags",
                                "--no-recurse-submodules", "origin", *REFSPECS))
             fetched = True

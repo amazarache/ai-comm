@@ -34,6 +34,10 @@ class FakeRunner:
         if argv[:4] == ["git", "config", "--global", "--null"]:
             return subprocess.run(argv, stdout=kwargs["stdout"], stderr=kwargs["stderr"],
                                   env=kwargs["env"], timeout=kwargs["timeout"], check=False)
+        if (argv[:4] == ["git", "-C", str(self.calls_root), "config"] and
+                "--show-scope" in argv):
+            return subprocess.run(argv, stdout=kwargs["stdout"], stderr=kwargs["stderr"],
+                                  env=kwargs["env"], timeout=kwargs["timeout"], check=False)
         if argv[:4] == ["git", "-C", str(self.calls_root), "remote"]:
             return subprocess.CompletedProcess(argv, 0, self.remote.encode() + b"\n", b"")
         if "fetch" in argv:
@@ -87,6 +91,14 @@ class CredentialTransportRunner(FakeRunner):
             return subprocess.CompletedProcess(
                 argv, 1, b"", b"fatal: The requested URL returned error: 302")
         return subprocess.CompletedProcess(argv, self.fetch_code, b"", self.fetch_stderr)
+
+
+class UnreadableRedirectConfigRunner(FakeRunner):
+    def __call__(self, argv, **kwargs):
+        if "--show-scope" in argv:
+            self.calls.append((list(argv), kwargs))
+            return subprocess.CompletedProcess(argv, 0, b"local\0malformed\0", b"")
+        return super().__call__(argv, **kwargs)
 
 
 class ReleaseCheckTests(unittest.TestCase):
@@ -267,7 +279,8 @@ class ReleaseCheckTests(unittest.TestCase):
         self.assertEqual((10, "update_available", "review update"),
                          (code, result["result"], result["owner_notice"]))
         fetch = next((args for args, _ in fake.calls if "fetch" in args), None)
-        self.assertEqual(["git", *checker._redirect_policy_args(checker.ac.RELEASE_ORIGIN),
+        self.assertEqual(["git", *checker._redirect_policy_args(checker.ac.RELEASE_ORIGIN,
+                                                                   self.repo, runner=fake),
                           "-C", str(self.repo), "fetch", "--refmap=", "--no-tags",
                           "--no-recurse-submodules", "origin", *checker.REFSPECS], fetch)
         fetch_env = next(kwargs["env"] for args, kwargs in fake.calls if "fetch" in args)
@@ -283,6 +296,14 @@ class ReleaseCheckTests(unittest.TestCase):
                          (code, result["fetch_error"], result["fetched"]))
         self.assertEqual([], fake.calls)
 
+    def test_unreadable_redirect_config_stops_before_fetch(self):
+        fake = UnreadableRedirectConfigRunner()
+        fake.calls_root = self.repo
+        result, code = fake.run(repo=self.repo, fetch_permitted=True)
+        self.assertEqual((2, "redirect_config_unreadable", False),
+                         (code, result["fetch_error"], result["fetched"]))
+        self.assertFalse(any("fetch" in args for args, _ in fake.calls))
+
     def test_helper_config_uses_clean_global_read_and_only_helpers_reach_fetch(self):
         config = ("[url \"https://rewritten.example/\"]\n"
                   "\tinsteadOf = https://github.com/\n"
@@ -292,6 +313,12 @@ class ReleaseCheckTests(unittest.TestCase):
                   "\thelper = second-helper\n")
         self._git("config", "--local",
                   f"http.{checker.ac.RELEASE_ORIGIN}.followRedirects", "true",
+                  cwd=self.repo, env=package_module.git_env())
+        self._git("config", "--local",
+                  f"http.{checker.ac.RELEASE_ORIGIN}/info/refs.followRedirects", "true",
+                  cwd=self.repo, env=package_module.git_env())
+        self._git("config", "--local",
+                  f"http.{checker.ac.RELEASE_ORIGIN}/objects/info.followRedirects", "true",
                   cwd=self.repo, env=package_module.git_env())
         injected = {"GIT_CONFIG_GLOBAL": "/untrusted/global",
                     "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "credential.helper",
@@ -318,7 +345,7 @@ class ReleaseCheckTests(unittest.TestCase):
         self.assertEqual([
             "git", "-c", "credential.helper=first-helper", "-c", "credential.helper=",
             "-c", "credential.helper=second-helper",
-            *checker._redirect_policy_args(checker.ac.RELEASE_ORIGIN),
+            *checker._redirect_policy_args(checker.ac.RELEASE_ORIGIN, self.repo, runner=fake),
             "-C", str(self.repo), "fetch", "--refmap=", "--no-tags",
             "--no-recurse-submodules", "origin", *checker.REFSPECS,
         ], fetch_args)
