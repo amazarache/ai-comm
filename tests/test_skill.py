@@ -82,6 +82,52 @@ class SkillTests(unittest.TestCase):
         self.assertNotIn("Claude", text)
         self.assertFalse(any(line.lstrip().startswith("/") for line in text.splitlines()))
 
+    def test_start_status_stop_and_release_awareness_instructions(self):
+        skill = " ".join(SKILL.read_text(encoding="utf-8").split())
+        for phrase in (
+            "## Start, status, and stop",
+            "Start A.",
+            "Start B.",
+            "Start this host's approved listener first",
+            "bounded wait calls of at most 30 seconds",
+            "PING / PONG / final ACK",
+            "three substantive proposal/critique cycles",
+            "notification form of bounded `wait`",
+            "Do not call `inbox` or `ack` just to count unread messages",
+            "Stop. Stop only a listener this session started",
+            "unverified peer claim",
+            "Only the configured notifier",
+            "topic `upgrade-prompt`",
+            "never authorizes a fetch or re-pin",
+            "recorded no or later",
+            "at least daily while the session is already running",
+            "Nothing here wakes an idle model",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, skill)
+        self.assertNotIn("Codex", skill)
+        self.assertNotIn("Claude", skill)
+
+        activate = " ".join((ROOT / "ACTIVATE.md").read_text(encoding="utf-8").split())
+        for phrase in (
+            "## Start a two-session exchange",
+            "`$ai-comm start A <subject>`",
+            "`$ai-comm start B`",
+            "`/comm start A <subject>`",
+            "`/ai-comm start A <subject>`",
+            "Exactly one role is the notifier",
+            "never authorize another session to fetch or re-pin",
+            "does not wake an idle model",
+            "Package 1.4.2 session flow",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, activate)
+
+        readme = " ".join((ROOT / "README.md").read_text(encoding="utf-8").split())
+        self.assertIn("$ai-comm start A <subject>", readme)
+        self.assertIn("/comm start A <subject>", readme)
+        self.assertIn("Nothing wakes a session after its host leaves it idle", readme)
+
     def test_skill_channel_commands_run_against_a_scratch_channel(self):
         init = self.run_cli("init", "--task", "Test the installed skill commands",
                             "--reviewers", "alpha", "beta")
@@ -163,6 +209,8 @@ class SkillTests(unittest.TestCase):
         ):
             self.assertIn(phrase, activate)
         self.assertIn("| `1.4.0` | `3.0` (unchanged)",
+                      (ROOT / "README.md").read_text(encoding="utf-8"))
+        self.assertIn("| `1.4.2` | `3.0` (unchanged)",
                       (ROOT / "README.md").read_text(encoding="utf-8"))
 
     def test_activation_symlink_commands_fail_safely_when_repeated(self):

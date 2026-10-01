@@ -22,13 +22,13 @@
     },
     {
       "path": "ACTIVATE.md",
-      "bytes": 21379,
-      "sha256": "2fffa54ba620c9b72b0240a615cd8a8de31466887a407a6cbfb1bbc2bd69d6ee"
+      "bytes": 26022,
+      "sha256": "f4e7e84261c8fd01d15d1d69e53596c20f968a846085c2b2ea4aeee94980f834"
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 8340,
-      "sha256": "0556c23849ee540e1c9df15980e59458675f038dcd58c2b17cf1d1ff296c1b04"
+      "bytes": 8858,
+      "sha256": "927092776d59bf2f105e63432e2c0451aa958e2b37c0251a6ec696c4c3e02f13"
     },
     {
       "path": "PROTOCOL.md",
@@ -37,8 +37,8 @@
     },
     {
       "path": "README.md",
-      "bytes": 16723,
-      "sha256": "07bded2494f01aa467cc4b114fe6e7e0d8c91bd68c37e90a65405bf4d37d6d39"
+      "bytes": 17722,
+      "sha256": "298f060b39435fe31a29045db171c93f5400cb3c42a3fc2d0ce26a2418b79fe4"
     },
     {
       "path": "SECURITY.md",
@@ -48,7 +48,7 @@
     {
       "path": "ai_comm.py",
       "bytes": 153060,
-      "sha256": "fee7fa6e5d1144d5dd02cef73fa070774bfcc33000df7d945d15f3e057c3d140"
+      "sha256": "f18195720aa236adbf40a42c1671c3b0cb1266b9614b8c0220d85d32de2ba099"
     },
     {
       "path": "docs/ERRORS.md",
@@ -112,8 +112,8 @@
     },
     {
       "path": "skills/ai-comm/SKILL.md",
-      "bytes": 8558,
-      "sha256": "00888c40995ac5f20a60197dbb274db48e46aab92e41c3fd318b6b78a05b2f48"
+      "bytes": 15022,
+      "sha256": "a3fd42a4a6ec344fb9140c67fb0bb68ee33fdc4e76fcbcfb8f0642d1c72a74d2"
     },
     {
       "path": "tests/test_protocol.py",
@@ -127,8 +127,8 @@
     },
     {
       "path": "tests/test_skill.py",
-      "bytes": 11196,
-      "sha256": "3bbd0fa221d282cfa9dc81580d51e4eb9e8c7c5892cefd41ffbf007c9ef15d6c"
+      "bytes": 13398,
+      "sha256": "27e416cd59b9db723cf44c65d133f352ad7c886556d6e398bd7de2c58dc1f468"
     },
     {
       "path": "tests/test_upgrade_plan.py",

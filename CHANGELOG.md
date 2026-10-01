@@ -1,5 +1,15 @@
 # Changes
 
+## 1.4.2
+
+- Add skill-guided start A/B, status, and stop workflows with a role table,
+  listener-first startup, durable PING handshake, host-specific invocation, and
+  bounded waits that do not promise to wake an idle model.
+- Add one release notifier per shared pin, release notices for older pinned
+  sessions, separate Gate 1 and Gate 2 questions, and channel-recorded prompt
+  status that deduplicates across takeovers without transferring owner approval.
+- Keep PROTOCOL.md unchanged at the 3.0 contract digest.
+
 ## 1.4.1
 
 - Add an explicit private-origin release-check option that reads only configured

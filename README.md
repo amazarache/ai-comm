@@ -27,6 +27,22 @@ The session checks the inbox while working on the authorized task. An idle or
 closed model cannot be woken by a file watcher. [Protocol](PROTOCOL.md) and
 [trust boundary](SECURITY.md) describe what is guaranteed.
 
+## Start the exchange from the discovered skill
+
+After both sessions have read this pinned package skill and the project role
+table, the owner starts each session directly:
+
+- Codex: `$ai-comm start A <subject>` and `$ai-comm start B`
+- Claude Code: `/comm start A <subject>` and `/comm start B` when the project
+  provides the optional comm skill link; otherwise use `/ai-comm start A
+  <subject>` and `/ai-comm start B`
+
+A performs the handshake after B joins, then opens the subject for review. These
+requests never initialize a channel or take over an identity without the
+owner's direct instruction in that session. Use status to inspect progress
+without changing the inbox receipt and stop to stop only your own listener.
+Nothing wakes a session after its host leaves it idle.
+
 ## Two-session quick start
 
 Clone and pin the package with Git. Choose a new, dedicated channel path outside
@@ -201,6 +217,7 @@ changing the platform label alone cannot reactivate an old reference.
 | `1.3.0` | `3.0` (unchanged) | Existing protocol-3 channels; passive runtime liveness reporting is additive. |
 | `1.4.0` | `3.0` (unchanged) | Existing protocol-3 channels; adds a project-local, agent-neutral session skill and owner-gated offline upgrade planning. |
 | `1.4.1` | `3.0` (unchanged) | Existing protocol-3 channels; adds an owner-approved, opt-in credential-helper path for private-origin release checks. |
+| `1.4.2` | `3.0` (unchanged) | Existing protocol-3 channels; adds skill-guided start A/B, status, and stop flows, host-specific invocation, and notifier-based release awareness with durable prompt deduplication. |
 
 Package and protocol versions are related but distinct. A protocol MAJOR (for
 example 3.0 to 4.0) always bumps the package MAJOR. A protocol MINOR (3.0 to
