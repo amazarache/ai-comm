@@ -22,8 +22,8 @@
     },
     {
       "path": "ACTIVATE.md",
-      "bytes": 27143,
-      "sha256": "80c2966649e6f7d53567e072b9ea5e0dfd4d91d3701bae07d2bfb9cc3347052f"
+      "bytes": 28178,
+      "sha256": "75e6c16f51605943c8e17aadf0a7c3e33bd71f58614fbc94bd46a20956a4a81f"
     },
     {
       "path": "CHANGELOG.md",
@@ -112,8 +112,8 @@
     },
     {
       "path": "skills/ai-comm/SKILL.md",
-      "bytes": 16526,
-      "sha256": "56f2ac4489e8fa2690627d8da219e21c74deecca50fcd14d7f7fc2a09669007d"
+      "bytes": 17245,
+      "sha256": "5c18187cc5b5197e345722452bdb898e94dd1283288afff3568680d2dbe27c75"
     },
     {
       "path": "tests/test_protocol.py",
@@ -127,8 +127,8 @@
     },
     {
       "path": "tests/test_skill.py",
-      "bytes": 15724,
-      "sha256": "a35df895c40ca793cedf0c3b565323214ba4332f880d908a53a716a2acb8e4b9"
+      "bytes": 19154,
+      "sha256": "6ba7e5ee70f459e10148fcb2c132be3ecff187525e190c6dd3485012061699b8"
     },
     {
       "path": "tests/test_upgrade_plan.py",

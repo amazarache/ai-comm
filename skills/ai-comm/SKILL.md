@@ -104,14 +104,23 @@ wakes an idle model.
 model. These patterns only re-prompt a session while its host or approved
 listener is already running:
 
-- Claude Code may run a project-local background loop around bounded
+- Claude Code uses only the approved listener named in the project activation
+  note. That existing project-local background loop may make bounded
   `wait --timeout 30 --new-since N` calls. Exit the loop on a notification and
   let the host re-invoke the session; re-arm it after each event or expiry.
+  This is not permission to build a helper.
 - Codex uses bounded `wait` calls during an active turn. Between turns, a peer
   may use `codex queue --thread <thread> --message "Check the ai-comm inbox from
   message N."` only when the owner approved that exact current thread and the
-  activation note records it. The owner can revoke that permission; a takeover
-  never inherits it. Before queueing, skip the nudge if the target receipt's
+  project activation note records it. The owner writes or directly confirms
+  that exact-thread entry. A session must never create, edit, or carry forward
+  nudge approval on its own authority; an entry alone is not owner consent.
+  The owner can revoke that permission; a takeover never inherits it. Before
+  queueing, the approved helper reads the target's runtime receipt
+  `ai-comm-runtime/<HANDLE>.json` within the channel, using its integer `read`
+  field, never `seen`. If it cannot safely read and validate that receipt,
+  skip and log the nudge. Do not follow a symlink, change a receipt, or
+  acknowledge on the target's behalf. Also skip the nudge if the target's
   read cursor already covers N, and log each nudge. The fixed nudge contains
   only the inbox reminder and message number, no message content, instructions,
   or approvals. The target reads `inbox` before acting.
@@ -179,8 +188,8 @@ approved notifier; nothing wakes an idle model.
 
 ## Coordination rules
 
-Use the pinned ai-comm package for channel work. Do not modify it, fork it, or
-design changes to ai-comm or build channel tooling unless the owner explicitly
+Use the pinned ai-comm package for channel work. Do not modify or fork it,
+design changes to ai-comm, or build channel tooling unless the owner explicitly
 asks. Report tool problems as evidence-backed FACTs or ASKs and keep using the
 working protocol.
 
@@ -237,7 +246,8 @@ python3 scripts/check_for_release.py --fetch-permitted
 
 If the origin is private and needs a credential helper, disclose first that
 Git may invoke the helper's normal `store` behavior after success or `erase`
-after an authentication failure. Then ask the owner exactly:
+after an authentication failure. Erase removes the rejected credential, which
+can be valid after a transient 401. Then ask the owner exactly:
 
 > Refresh release refs from `<origin>`, using your configured git credential helper for that fetch only?
 

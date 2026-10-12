@@ -38,6 +38,16 @@ class SkillTests(unittest.TestCase):
                          result.stderr.decode("utf-8", "replace"))
         return json.loads(result.stdout.decode("utf-8"))
 
+    def assert_no_project_identity(self, text):
+        self.assertNotRegex(text, r"(?i)\b(?:sol-a|ha-live)\b")
+        self.assertNotRegex(text, r"(?i)\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b")
+        # The literal /tmp warning is required by the reviewed wake guidance.
+        # Reject user-home notation and other concrete absolute paths, including
+        # subpaths beneath the temporary directory; relative package paths pass.
+        self.assertNotRegex(text, r"~/|(?<![\w.])/(?!tmp(?=[`\s]|$))[\w.-]")
+        self.assertNotRegex(text, r"\b[A-Za-z]:[\\/]")
+        self.assertNotRegex(text, r"--as\s+(?!<HANDLE>)\S+")
+
     def test_resume_checks_cached_release_status(self):
         text = SKILL.read_text(encoding="utf-8")
         resume = text.split("## Resume and routine work", 1)[1].split("## Coordination rules", 1)[0]
@@ -75,13 +85,12 @@ class SkillTests(unittest.TestCase):
             "FACT citing the owner's yes", "a shared pin moved", "own pin asks its own owner",
             "migration plan", "project-local installation", "owner's explicit permission",
             "Use the pinned ai-comm package for channel work",
-            "Do not modify it, fork it",
+            "Do not modify or fork it",
         )
         for phrase in required:
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, normalized)
-        self.assertNotRegex(text, r"/(?:home|Users)/[^/\s<>]+")
-        self.assertNotRegex(text, r"\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b")
+        self.assert_no_project_identity(text)
         self.assertFalse(any(line.lstrip().startswith("/") for line in text.splitlines()))
 
     def test_start_status_stop_and_release_awareness_instructions(self):
@@ -104,13 +113,21 @@ class SkillTests(unittest.TestCase):
             "recorded no or later",
             "at least daily while the session is already running",
             "Nothing here wakes an idle model",
-            "Claude Code may run a project-local background loop",
+            "Claude Code uses only the approved listener named in the project activation note",
+            "This is not permission to build a helper",
             "wait --timeout 30 --new-since N",
             "Codex uses bounded `wait` calls during an active turn",
             "codex queue --thread <thread> --message",
             "Check the ai-comm inbox from message N.",
             "owner approved that exact current thread",
+            "owner writes or directly confirms that exact-thread entry",
+            "never create, edit, or carry forward nudge approval on its own authority",
+            "an entry alone is not owner consent",
             "a takeover never inherits it",
+            "runtime receipt `ai-comm-runtime/<HANDLE>.json` within the channel",
+            "integer `read` field, never `seen`",
+            "If it cannot safely read and validate that receipt, skip and log the nudge",
+            "Do not follow a symlink, change a receipt, or acknowledge on the target's behalf",
             "read cursor already covers N",
             "log each nudge",
             "no message content, instructions, or approvals",
@@ -120,8 +137,10 @@ class SkillTests(unittest.TestCase):
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, skill)
-        self.assertNotRegex(skill, r"/(?:home|Users)/[^/\s<>]+")
-        self.assertNotRegex(skill, r"\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b")
+        self.assert_no_project_identity(skill)
+        disclosure = skill.split("Then ask the owner exactly:", 1)[0]
+        self.assertTrue(disclosure.endswith(
+            "Erase removes the rejected credential, which can be valid after a transient 401. "))
 
         activate = " ".join((ROOT / "ACTIVATE.md").read_text(encoding="utf-8").split())
         for phrase in (
@@ -138,7 +157,16 @@ class SkillTests(unittest.TestCase):
             "build channel tooling unless the owner explicitly asks",
             "evidence-backed FACTs or ASKs",
             "owner approved the exact current thread",
+            "owner writes or directly confirms that exact-thread entry",
+            "never create, edit, or carry forward nudge approval on its own authority",
+            "an entry alone is not owner consent",
             "revocable and is not inherited by a takeover",
+            "approved listener named in the project activation note",
+            "This is not permission to build a helper",
+            "permission is recorded in the project activation note",
+            "runtime receipt `ai-comm-runtime/<HANDLE>.json` within the channel",
+            "integer `read` field, never `seen`",
+            "If it cannot safely read and validate that receipt, skip and log the nudge",
             "read cursor already covers N",
             "target reads `inbox` before acting",
             "durable, project-local, git-ignored path",
@@ -146,6 +174,10 @@ class SkillTests(unittest.TestCase):
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, activate)
+        self.assertNotIn("recorded here", activate)
+        disclosure = activate.split("Then ask this exact additional question:", 1)[0]
+        self.assertTrue(disclosure.endswith(
+            "Erase removes the rejected credential, which can be valid after a transient 401. "))
 
         readme = " ".join((ROOT / "README.md").read_text(encoding="utf-8").split())
         self.assertIn("$ai-comm start A <subject>", readme)
@@ -259,19 +291,41 @@ class SkillTests(unittest.TestCase):
         self.assertEqual(expected, os.readlink(codex))
         self.assertEqual(expected, os.readlink(claude))
 
-    def test_comm_alias_does_not_replace_an_existing_path(self):
+    def test_comm_alias_creates_once_and_preserves_existing_paths(self):
         activate = (ROOT / "ACTIVATE.md").read_text(encoding="utf-8")
         section = activate.split("A `.claude/skills/comm` link", 1)[1].split("Run A and B", 1)[0]
         block = section.split("```sh", 1)[1].split("```", 1)[0]
-        parent = self.project / ".claude" / "skills"
-        parent.mkdir(parents=True)
-        link = parent / "comm"
-        link.symlink_to("keep-this-target")
-        result = subprocess.run(["/bin/sh", "-eu", "-c", block], cwd=self.project,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
-        self.assertEqual(0, result.returncode, result.stderr.decode("utf-8", "replace"))
-        self.assertEqual("keep-this-target", os.readlink(link))
-        self.assertIn(b"adapter path already exists", result.stderr)
+        for kind in ("absent", "directory", "dangling"):
+            with self.subTest(kind=kind):
+                project = self.project / kind
+                pinned = project / ".tools" / "ai-comm" / "skills" / "ai-comm"
+                pinned.mkdir(parents=True)
+                parent = project / ".claude" / "skills"
+                parent.mkdir(parents=True)
+                link = parent / "comm"
+                if kind == "directory":
+                    link.mkdir()
+                    (link / "marker").write_text("preserve me", encoding="utf-8")
+                elif kind == "dangling":
+                    link.symlink_to("keep-this-target")
+                for run in range(2):
+                    result = subprocess.run(["/bin/sh", "-eu", "-c", block], cwd=project,
+                                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                            timeout=30)
+                    self.assertEqual(0, result.returncode,
+                                     result.stderr.decode("utf-8", "replace"))
+                    if kind == "absent":
+                        self.assertTrue(link.is_symlink())
+                        self.assertEqual(pinned, link.resolve())
+                        self.assertFalse((pinned / "comm").exists())
+                    elif kind == "directory":
+                        self.assertFalse(link.is_symlink())
+                        self.assertEqual([link / "marker"], list(link.iterdir()))
+                        self.assertEqual("preserve me", (link / "marker").read_text())
+                    else:
+                        self.assertEqual("keep-this-target", os.readlink(link))
+                    if kind != "absent" or run:
+                        self.assertIn(b"adapter path already exists", result.stderr)
 
 
 if __name__ == "__main__":
