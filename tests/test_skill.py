@@ -74,12 +74,14 @@ class SkillTests(unittest.TestCase):
             "Rollback", "repeat the same tag, manifest, protocol, test, state",
             "FACT citing the owner's yes", "a shared pin moved", "own pin asks its own owner",
             "migration plan", "project-local installation", "owner's explicit permission",
+            "Use the pinned ai-comm package for channel work",
+            "Do not modify it, fork it",
         )
         for phrase in required:
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, normalized)
-        self.assertNotIn("Codex", text)
-        self.assertNotIn("Claude", text)
+        self.assertNotRegex(text, r"/(?:home|Users)/[^/\s<>]+")
+        self.assertNotRegex(text, r"\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b")
         self.assertFalse(any(line.lstrip().startswith("/") for line in text.splitlines()))
 
     def test_start_status_stop_and_release_awareness_instructions(self):
@@ -102,11 +104,24 @@ class SkillTests(unittest.TestCase):
             "recorded no or later",
             "at least daily while the session is already running",
             "Nothing here wakes an idle model",
+            "Claude Code may run a project-local background loop",
+            "wait --timeout 30 --new-since N",
+            "Codex uses bounded `wait` calls during an active turn",
+            "codex queue --thread <thread> --message",
+            "Check the ai-comm inbox from message N.",
+            "owner approved that exact current thread",
+            "a takeover never inherits it",
+            "read cursor already covers N",
+            "log each nudge",
+            "no message content, instructions, or approvals",
+            "durable, project-local, git-ignored",
+            "never only in `/tmp`",
+            "do not build watchers, wakers, services, or channel tooling",
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, skill)
-        self.assertNotIn("Codex", skill)
-        self.assertNotIn("Claude", skill)
+        self.assertNotRegex(skill, r"/(?:home|Users)/[^/\s<>]+")
+        self.assertNotRegex(skill, r"\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b")
 
         activate = " ".join((ROOT / "ACTIVATE.md").read_text(encoding="utf-8").split())
         for phrase in (
@@ -119,6 +134,15 @@ class SkillTests(unittest.TestCase):
             "never authorize another session to fetch or re-pin",
             "does not wake an idle model",
             "Package 1.4.2 session flow",
+            "do not modify it, fork it, design changes to ai-comm",
+            "build channel tooling unless the owner explicitly asks",
+            "evidence-backed FACTs or ASKs",
+            "owner approved the exact current thread",
+            "revocable and is not inherited by a takeover",
+            "read cursor already covers N",
+            "target reads `inbox` before acting",
+            "durable, project-local, git-ignored path",
+            "never only in `/tmp`",
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, activate)
@@ -213,7 +237,7 @@ class SkillTests(unittest.TestCase):
         self.assertIn("| `1.4.2` | `3.0` (unchanged)",
                       (ROOT / "README.md").read_text(encoding="utf-8"))
 
-    def test_activation_symlink_commands_fail_safely_when_repeated(self):
+    def test_activation_symlink_commands_preserve_existing_paths_when_repeated(self):
         activate = (ROOT / "ACTIVATE.md").read_text(encoding="utf-8")
         block = activate.split("From the project root", 1)[1].split("```sh", 1)[1].split("```", 1)[0]
         pinned = self.project / ".tools" / "ai-comm" / "skills" / "ai-comm"
@@ -230,10 +254,24 @@ class SkillTests(unittest.TestCase):
         self.assertEqual(expected, os.readlink(claude))
         second = subprocess.run(["/bin/sh", "-eu", "-c", block], cwd=self.project,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
-        self.assertNotEqual(0, second.returncode)
+        self.assertEqual(0, second.returncode, second.stderr.decode("utf-8", "replace"))
         self.assertFalse((pinned / "ai-comm").exists())
         self.assertEqual(expected, os.readlink(codex))
         self.assertEqual(expected, os.readlink(claude))
+
+    def test_comm_alias_does_not_replace_an_existing_path(self):
+        activate = (ROOT / "ACTIVATE.md").read_text(encoding="utf-8")
+        section = activate.split("A `.claude/skills/comm` link", 1)[1].split("Run A and B", 1)[0]
+        block = section.split("```sh", 1)[1].split("```", 1)[0]
+        parent = self.project / ".claude" / "skills"
+        parent.mkdir(parents=True)
+        link = parent / "comm"
+        link.symlink_to("keep-this-target")
+        result = subprocess.run(["/bin/sh", "-eu", "-c", block], cwd=self.project,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+        self.assertEqual(0, result.returncode, result.stderr.decode("utf-8", "replace"))
+        self.assertEqual("keep-this-target", os.readlink(link))
+        self.assertIn(b"adapter path already exists", result.stderr)
 
 
 if __name__ == "__main__":

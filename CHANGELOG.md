@@ -8,6 +8,8 @@
 - Add one release notifier per shared pin, release notices for older pinned
   sessions, separate Gate 1 and Gate 2 questions, and channel-recorded prompt
   status that deduplicates across takeovers without transferring owner approval.
+- Document wake limits and exact-thread nudge controls; clarify credential
+  helper erase behavior and make skill links preserve existing paths safely.
 - Keep PROTOCOL.md unchanged at the 3.0 contract digest.
 
 ## 1.4.1

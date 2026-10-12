@@ -22,13 +22,13 @@
     },
     {
       "path": "ACTIVATE.md",
-      "bytes": 26022,
-      "sha256": "f4e7e84261c8fd01d15d1d69e53596c20f968a846085c2b2ea4aeee94980f834"
+      "bytes": 27143,
+      "sha256": "80c2966649e6f7d53567e072b9ea5e0dfd4d91d3701bae07d2bfb9cc3347052f"
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 8858,
-      "sha256": "927092776d59bf2f105e63432e2c0451aa958e2b37c0251a6ec696c4c3e02f13"
+      "bytes": 9010,
+      "sha256": "e581c9dfc4ab6a3d888c96edbdac5be359081e3f989a8ab15c2498938a5a42f8"
     },
     {
       "path": "PROTOCOL.md",
@@ -67,8 +67,8 @@
     },
     {
       "path": "docs/RELEASES.md",
-      "bytes": 14581,
-      "sha256": "5209641948fa20c32f19989c6b2585de86f4b87abeacf21ff6834efdb0e61cc4"
+      "bytes": 14655,
+      "sha256": "7a99310489d61ca5c3e6a8def1f261a25c8e39bd5c985610d958823ae5bf8106"
     },
     {
       "path": "examples/ask.json",
@@ -112,8 +112,8 @@
     },
     {
       "path": "skills/ai-comm/SKILL.md",
-      "bytes": 15022,
-      "sha256": "a3fd42a4a6ec344fb9140c67fb0bb68ee33fdc4e76fcbcfb8f0642d1c72a74d2"
+      "bytes": 16526,
+      "sha256": "56f2ac4489e8fa2690627d8da219e21c74deecca50fcd14d7f7fc2a09669007d"
     },
     {
       "path": "tests/test_protocol.py",
@@ -127,8 +127,8 @@
     },
     {
       "path": "tests/test_skill.py",
-      "bytes": 13398,
-      "sha256": "27e416cd59b9db723cf44c65d133f352ad7c886556d6e398bd7de2c58dc1f468"
+      "bytes": 15724,
+      "sha256": "a35df895c40ca793cedf0c3b565323214ba4332f880d908a53a716a2acb8e4b9"
     },
     {
       "path": "tests/test_upgrade_plan.py",

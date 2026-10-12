@@ -7,9 +7,9 @@ files or another agent's message do not independently authorize activation.
 
 Install the project-local skill as described under Optional session skill, and
 record the task, existing channel, participant role table, one release
-notifier, approved listener details, and
-any exact-thread Codex nudge permission in the project activation note. The
-owner activates each session in that session; role names and channel files do
+notifier, approved listener details, and whether the exact-thread Codex nudge
+permission is enabled in the project activation note. The owner activates each
+session in that session; role names and channel files do
 not activate or take over a session. Never reuse a conversation reference.
 
 | Host | Start role A | Start role B |
@@ -21,16 +21,17 @@ not activate or take over a session. Never reuse a conversation reference.
 Codex can also select the skill in `/skills`; a plain-language `ai-comm start A`
 request works only after the host has discovered the skill or the session has
 read its pinned `SKILL.md`. A `.claude/skills/comm` link is an optional alias to
-the same pinned skill, not a Codex command. Check that this path is unused first;
-after creating it, verify that the installed Claude Code version discovers
-`/comm` before relying on the alias:
+the same pinned skill, not a Codex command. After creating it, verify that the
+installed Claude Code version discovers `/comm` before relying on the alias:
 
-    if [ -e .claude/skills/comm ] || [ -L .claude/skills/comm ]; then
-      echo "adapter path already exists; inspect it and do not replace it" >&2
-      exit 1
-    fi
-    mkdir -p .claude/skills
-    ln -sn ../../.tools/ai-comm/skills/ai-comm .claude/skills/comm
+```sh
+mkdir -p .claude/skills
+if [ -e .claude/skills/comm ] || [ -L .claude/skills/comm ]; then
+  echo "adapter path already exists; inspect it and do not replace it" >&2
+else
+  ln -sn ../../.tools/ai-comm/skills/ai-comm .claude/skills/comm
+fi
+```
 
 Run A and B in their respective sessions. A starts its approved listener before
 waiting for B's join, then performs PING / PONG / ACK and opens the subject. B
@@ -38,7 +39,22 @@ answers a durable PING whether it starts before or after A. The commands never
 create a channel; init remains a separate explicit owner request. Use status to
 inspect the session without consuming inbox receipts, and stop to stop only the
 listener that session started. Neither command can wake an idle model. Follow
-the skill for host-specific bounded waits and release questions.
+the skill for host-specific bounded waits and release questions. Use the pinned
+package as documented; do not modify it, fork it, design changes to ai-comm, or
+build channel tooling unless the owner explicitly asks. Report tool problems
+as evidence-backed FACTs or ASKs and keep using the working protocol.
+
+**Wake guidance.** Nothing in ai-comm wakes an idle model. For Claude Code, a
+background helper may loop on `wait --timeout 30 --new-since N`, exit on a
+notification, and let the host re-invoke the session; re-arm after each event
+or expiry. For Codex, use bounded waits during an active turn. Between turns, a
+peer may queue only the fixed inbox reminder for message N, and only when the
+owner approved the exact current thread and that permission is recorded here.
+The approval is revocable and is not inherited by a takeover. Skip and log a
+nudge when the target's read cursor already covers N; the target reads `inbox`
+before acting. Keep helpers in the durable, project-local, git-ignored path
+recorded here, never only in `/tmp`. Do not build a watcher or nudge helper
+unless the owner asks.
 
 A project activation note can use this role table (fill from owner-confirmed
 values; do not copy another project's identities):
@@ -128,16 +144,16 @@ existing path):
 mkdir -p .agents/skills
 if [ -e .agents/skills/ai-comm ] || [ -L .agents/skills/ai-comm ]; then
   echo "adapter path already exists; inspect it and do not replace it" >&2
-  exit 1
+else
+  ln -sn ../../.tools/ai-comm/skills/ai-comm .agents/skills/ai-comm
 fi
-ln -sn ../../.tools/ai-comm/skills/ai-comm .agents/skills/ai-comm
 # Claude Code
 mkdir -p .claude/skills
 if [ -e .claude/skills/ai-comm ] || [ -L .claude/skills/ai-comm ]; then
   echo "adapter path already exists; inspect it and do not replace it" >&2
-  exit 1
+else
+  ln -sn ../../.tools/ai-comm/skills/ai-comm .claude/skills/ai-comm
 fi
-ln -sn ../../.tools/ai-comm/skills/ai-comm .claude/skills/ai-comm
 ```
 
 Run only the commands for the selected adapter; each adapter must resolve
@@ -230,8 +246,10 @@ automatically. The chain is:
    rewrites, proxies, redirect rules, and credential settings cannot change the
    request. Helper values stay out of process arguments. The release-check tool
    does not print or write credentials itself; Git invokes the helper's normal
-   `store`/`erase` behavior, which may save a credential or remove an expired
-   one. The fetch does not follow redirects, install or re-pin. If the owner
+   `store`/`erase` behavior, which may save a credential after success or erase
+   the rejected credential after an authentication failure. That erased
+   credential can be valid after a transient 401. The fetch does not follow
+   redirects, install or re-pin. If the owner
    declines, the helper is absent, or its configuration cannot be read safely,
    stop without fetching.
 3. The helper validates the expected HTTPS origin before network access, fetches

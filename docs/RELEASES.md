@@ -113,7 +113,8 @@ usernames, passwords or URL credentials.
 For a private origin, before asking permission, disclose that Git may call the
 configured helper's `store` operation after success or `erase` after an
 authentication failure. A store helper may write a credential to a store such
-as `~/.git-credentials`; erase may remove an expired credential. Then ask:
+as `~/.git-credentials`; after an authentication failure, erase removes the
+rejected credential, which can be valid after a transient 401. Then ask:
 
 > Refresh release refs from `<origin>`, using your configured git credential helper for that fetch only?
 
