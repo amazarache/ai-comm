@@ -52,6 +52,9 @@ INTEGRATION_ID = re.compile(r"[a-z][a-z0-9_-]{0,63}\Z")
 MESSAGE_ID = re.compile(r"[0-9]{8}-[a-z][a-z0-9_-]{0,31}\Z")
 ANSWERS = ("yes", "fetch_only", "not_now", "skip", "never")
 PHASES = ("pause", "install_source", "rebind", "check", "resume", "restore_source")
+REPORT_PHASES = PHASES + ("attest",)
+ATTEST_MAX_AGE = 3600
+RELEASE_CHECK_SCHEMA = "ai-comm-release-check/1"
 GIT_ENV_DROP = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
                 "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_CONFIG", "GIT_CONFIG_PARAMETERS",
                 "GIT_CONFIG_COUNT", "GIT_NAMESPACE", "GIT_CEILING_DIRECTORIES")
@@ -221,10 +224,12 @@ def create_private_exclusive(path, data):
 
 
 class Project:
-    def __init__(self, directory, pin=None, channel=None):
+    def __init__(self, directory, channel=None):
+        # The pin location is fixed by the accepted layout (R7): an override could
+        # redirect an approved transaction to another project's checkout.
         self.dir = check_ancestry(directory)
-        self.pin = Path(pin) if pin else self.dir / ".tools" / "ai-comm"
-        self.channel = Path(channel) if channel else self.dir / ".ai-comm"
+        self.pin = self.dir / ".tools" / "ai-comm"
+        self.channel = check_ancestry(channel) if channel else self.dir / ".ai-comm"
         self.local = self.dir / ".ai-comm-local"
         self.root = self.local / "upgrade"
 
@@ -262,7 +267,11 @@ class Project:
         return roots[0]
 
     def project_id(self):
-        return {"path": str(self.dir), "channel": self.channel_id()}
+        """Identity bound into consent and transactions: canonical locations, not just commits."""
+        pin = check_ancestry(self.pin)
+        channel = check_ancestry(self.channel)
+        return {"path": str(self.dir), "channel": self.channel_id(),
+                "pin_path": os.path.realpath(pin), "channel_path": os.path.realpath(channel)}
 
 
 def clean_env():
@@ -456,7 +465,10 @@ def load_project_manifest(project):
     need(value.get("status") in {"declared", "unintegrated"}, "project_manifest_invalid")
     need(value.get("status") == "declared", "project_integration_undeclared")
     pid = value.get("project_id")
-    need(pid == project.project_id(), "project_identity_mismatch")
+    live = project.project_id()
+    need(pid == {"path": live["path"], "channel": live["channel"]}, "project_identity_mismatch")
+    guidance = value.get("guidance", [])
+    need(isinstance(guidance, list) and all(isinstance(g, str) and g for g in guidance), "project_manifest_invalid")
     integrations = value.get("integrations")
     need(isinstance(integrations, list), "project_manifest_invalid")
     seen = set()
@@ -640,7 +652,11 @@ def consume_consent(project, consent, txn):
 
 
 def cmd_check(project, args):
-    project.runtime()
+    with project.lock():
+        return _check(project)
+
+
+def _check(project):
     pin = package_identity(project.pin)
     status = release_status(project.pin)
     plan = upgrade_plan(project.pin) if status.get("status") == "ok" else {}
@@ -653,8 +669,14 @@ def cmd_check(project, args):
         result["prompt"] = {"should_ask": False, "blocked": "release_tags_missing_gate1_required"}
     if version and plan.get("channel_action") == "unchanged":
         advisory = (plan.get("applicable_advisory") or {}).get("advisory", "none")
+        ask = should_ask(state, version, advisory, now())
+        entry = state["versions"].get(version, {})
+        if ask and advisory == "required" and (state.get("never") or entry.get("skip")):
+            # A required notice overrides skip/never once per version; remember it was shown.
+            state["versions"].setdefault(version, {})["required_shown"] = True
+            write_private_atomic(project.root / "prompt.json", canonical(state))
         result["prompt"] = {
-            "should_ask": should_ask(state, version, advisory, now()),
+            "should_ask": ask,
             "target": version, "target_commit": plan.get("commit"), "target_tag": plan.get("tag"),
             "source": pin["origin"], "project": str(project.dir),
             "advisory": advisory, "owner_notice": plan.get("owner_notice"),
@@ -679,8 +701,12 @@ def cmd_fetch(project, args):
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise Stop("fetch_failed") from exc
         value = parse_json(result.stdout, "fetch_failed")
-        need(result.returncode == 0 and isinstance(value, dict), "fetch_failed",
-             code=value.get("code") if isinstance(value, dict) else None)
+        need(isinstance(value, dict), "fetch_failed")
+        helper_error = value.get("fetch_error")
+        # 0 up_to_date, 10 update_available, 11 advisory_applies are successful checks.
+        need(result.returncode in (0, 10, 11) and value.get("schema") == RELEASE_CHECK_SCHEMA
+             and value.get("status") == "ok" and value.get("fetched") is True, "fetch_failed",
+             helper_error=helper_error if isinstance(helper_error, str) and len(helper_error) <= 64 else None)
         tag = tag_identity(project.pin, args.target)
         return {"status": "fetched", "target": args.target, "tag_object": tag["tag_object"],
                 "commit": tag["commit"]}
@@ -728,6 +754,8 @@ def verify_target(project, tag, workdir):
 
 def cmd_prepare(project, args):
     with project.lock():
+        need(HANDLE.fullmatch(args.as_handle or ""), "invalid_handle")
+        verify_session(project, args.as_handle, args.session)
         pin = package_identity(project.pin)
         need(not pin["dirty"], "pin_dirty")
         consent = load_consent(project, args.consent)
@@ -744,7 +772,9 @@ def cmd_prepare(project, args):
                 if "install_source" in item["steps"] or "restore_source" in item["steps"]:
                     need(commit in item.get("sources", {}), "upgrade_integration_unsupported",
                          integration=item["id"])
-            state = probe(project, item)
+            # Owner-only probes are never run by another agent (R3).
+            state = probe(project, item) if (item["owner"] == args.as_handle
+                                             or item["probe"]["run_by"] == "any") else None
             integrations.append({"id": item["id"], "owner": item["owner"],
                                  "run_by": item["probe"]["run_by"], "code": code_hashes(project, item),
                                  "sources": item.get("sources", {}), "initial_probe": state,
@@ -774,15 +804,49 @@ def cmd_prepare(project, args):
                   "controller_sha256": controller_sha,
                   "project_manifest_sha256": sha256_bytes(read_private(project.root / "project.json")),
                   "integrations": integrations,
-                  "applier": args.as_handle,
+                  "applier": args.as_handle, "applier_session": args.session,
                   "invocation": [sys.executable, "-I", str(controller_path), "--project", str(project.dir)]}
-        need(HANDLE.fullmatch(args.as_handle or ""), "invalid_handle")
+        if project.channel != project.dir / ".ai-comm":
+            frozen["invocation"] += ["--channel", str(project.channel)]
         journal = Journal(tdir)
         journal.append("start", frozen)
         journal.append("state", {"state": "prepared"})
+        proposal = write_guidance_proposal(project, manifest, frozen, tdir)
         write_private_atomic(project.root / "current", txn.encode())
         return {"status": "prepared", "txn": txn, "verification": verification,
-                "invocation": frozen["invocation"], "consent": "unconsumed"}
+                "invocation": frozen["invocation"], "consent": "unconsumed",
+                "guidance_proposal": str(proposal)}
+
+
+def write_guidance_proposal(project, manifest, frozen, tdir):
+    """Emit a reviewable guidance-change proposal for this transaction (design §6).
+
+    It lists every line of each declared guidance file that names the from-version
+    or from-commit, and carries the marker lines `finalize` checks. It does not edit
+    any guidance file; the guidance owner edits, publishes and DECIDEs it.
+    """
+    old = frozen["from"]
+    needles = [f"v{old['version']}", old["version"], old["commit"], old["commit"][:7]]
+    lines = [f"# ai-comm guidance change for {frozen['txn']}", "",
+             f"ai-comm-upgrade-txn: {frozen['txn']}",
+             f"Replace v{old['version']} ({old['commit']}) with "
+             f"v{frozen['to']['version']} ({frozen['to']['commit']}).", "",
+             "Lines naming the old pin:"]
+    for name in manifest.get("guidance", []):
+        path = (project.dir / name).resolve()
+        need(str(path).startswith(str(project.dir) + os.sep), "guidance_path_escapes")
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise Stop("guidance_unreadable") from exc
+        for number, line in enumerate(text.splitlines(), 1):
+            if any(n in line for n in needles):
+                lines.append(f"- {name}:{number}: {line.strip()[:200]}")
+    lines += ["", "After editing, add the installed file's hash before publishing:",
+              "ai-comm-upgrade-guidance-sha256: <sha256 of the edited guidance file>"]
+    out = tdir / "guidance-proposal.md"
+    write_private_atomic(out, ("\n".join(lines) + "\n").encode())
+    return out
 
 
 # --------------------------------------------------------------------------- transaction engine
@@ -863,7 +927,8 @@ class Txn:
         """Map action index -> last intent/outcome after the active plan record."""
         done = {}
         for record in self.records():
-            if record["seq"] <= plan_seq or record["kind"] not in {"intent", "outcome"}:
+            if (record["seq"] <= plan_seq or record["kind"] not in {"intent", "outcome"}
+                    or "index" not in record["data"]):
                 continue
             idx = record["data"]["index"]
             done.setdefault(idx, {})[record["kind"]] = record["data"]
@@ -918,7 +983,7 @@ class Txn:
         for record in self.records():
             if record["kind"] == "plan":
                 plan_actions = record["data"]["actions"]
-            elif record["kind"] == "outcome" and record["data"].get("ok"):
+            elif record["kind"] == "outcome" and record["data"].get("ok") and "index" in record["data"]:
                 action = plan_actions[record["data"]["index"]]
                 if (action.get("integration") == integ_id
                         and action["op"] in ("install_source", "restore_source")):
@@ -995,6 +1060,8 @@ def advance(txn, applier):
             if owner != applier:
                 return {"status": "awaiting_peer", "integration": integ["id"], "phase": action["op"],
                         "owner": owner, "nonce": intent.get("nonce"), "index": index}
+        if plan["data"]["direction"] == "forward":
+            ensure_consent(txn)
         if owner != applier:
             if intent is None:
                 nonce = secrets.token_hex(16)
@@ -1005,14 +1072,6 @@ def advance(txn, applier):
             txn.journal.append("state", {"state": f"awaiting_peer:{integ['id']}:{action['op']}"})
             return {"status": "awaiting_peer", "integration": integ["id"], "phase": action["op"],
                     "owner": owner, "nonce": nonce, "index": index}
-        if plan["data"]["direction"] == "forward" and index == 0:
-            consent = load_consent(txn.project, txn.frozen["consent"])
-            if consent["consumed_by"] is None:
-                pin = package_identity(txn.project.pin)
-                check_consent(txn.project, consent, scope="upgrade", target=txn.frozen["to"]["version"],
-                              pin=pin, tag=txn.frozen["to"])
-                consume_consent(txn.project, consent, txn.id)
-            need(load_consent(txn.project, txn.frozen["consent"])["consumed_by"] == txn.id, "consent_spent")
         txn.journal.append("intent", {"index": index, "action": action, "owner": owner})
         try:
             observed = perform_own(txn, action)
@@ -1039,6 +1098,40 @@ def advance(txn, applier):
     return {"status": final, "txn": txn.id}
 
 
+def ensure_consent(txn):
+    """Validate and atomically consume the transaction's consent before any live action (R2).
+
+    Bound to the transaction, not to an action index or owner order; a resumed
+    transaction reuses only its own consumed consent.
+    """
+    consent = load_consent(txn.project, txn.frozen["consent"])
+    if consent["consumed_by"] is None:
+        pin = package_identity(txn.project.pin)
+        need(pin["commit"] == txn.frozen["from"]["commit"], "consent_from_mismatch")
+        check_consent(txn.project, consent, scope="upgrade", target=txn.frozen["to"]["version"],
+                      pin=pin, tag=txn.frozen["to"])
+        consume_consent(txn.project, consent, txn.id)
+        consent = load_consent(txn.project, txn.frozen["consent"])
+    need(consent["consumed_by"] == txn.id, "consent_spent")
+
+
+def require_applier(project, txn, args):
+    """The applier handle and its current channel session (R3).
+
+    The session frozen at prepare is the starting point. A legitimate channel
+    takeover by the same handle is journaled and becomes the effective session;
+    the replaced (stale) session and any non-current session are refused.
+    """
+    need(args.as_handle == txn.frozen["applier"], "not_applier")
+    verify_session(project, args.as_handle, args.session)
+    effective = txn.frozen["applier_session"]
+    for record in txn.records():
+        if record["kind"] == "note" and "applier_takeover" in record["data"]:
+            effective = record["data"]["applier_takeover"]["to"]
+    if args.session != effective:
+        txn.journal.append("note", {"applier_takeover": {"from": effective, "to": args.session}})
+
+
 def open_txn(project, txn_id):
     if txn_id is None:
         txn_id = read_private(project.root / "current", missing=b"").decode() or None
@@ -1048,7 +1141,7 @@ def open_txn(project, txn_id):
 def cmd_apply(project, args):
     with project.lock():
         txn = open_txn(project, args.txn)
-        need(args.as_handle == txn.frozen["applier"], "not_applier")
+        require_applier(project, txn, args)
         state = txn.state()
         need(state not in {"completed", "rolled_back", "integrated_pending_liveness"}, "transaction_finished")
         if txn.current_plan() is None:
@@ -1064,10 +1157,18 @@ def cmd_continue(project, args):
 def cmd_rollback(project, args):
     with project.lock():
         txn = open_txn(project, args.txn)
-        need(args.as_handle == txn.frozen["applier"], "not_applier")
-        need(txn.state() not in {"completed", "rolled_back"}, "transaction_finished")
+        require_applier(project, txn, args)
+        state = txn.state()
+        need(state != "rolled_back", "transaction_finished")
+        if state == "completed":
+            # Only the project's latest transaction, still in its target state (R4).
+            current = read_private(project.root / "current", missing=b"").decode()
+            need(current == txn.id, "transaction_stale")
+            txn.check_identities(txn.frozen["to"]["commit"])
         plan = txn.current_plan()
         if plan is None or plan["data"]["direction"] == "forward":
+            if plan is not None:
+                reconcile_outstanding(txn, plan, args.as_handle)
             live = package_identity(txn.project.pin)
             switched = live["commit"] != txn.frozen["from"]["commit"]
             txn.journal.append("state", {"state": "rolling_back"})
@@ -1076,14 +1177,38 @@ def cmd_rollback(project, args):
         return advance(txn, args.as_handle)
 
 
+def reconcile_outstanding(txn, plan, applier):
+    """Resolve every intent without an outcome by probe before changing direction (R5)."""
+    progress = txn.progress(plan["seq"])
+    for index, action in enumerate(plan["data"]["actions"]):
+        entry = progress.get(index, {})
+        if entry.get("intent") is None or entry.get("outcome") is not None:
+            continue
+        if action["op"] == "checkout":
+            ok = action_satisfied(txn, action, None)
+            txn.journal.append("outcome", {"index": index, "ok": ok, "by": "probe", "observed": {}})
+            continue
+        integ = txn.integration(action["integration"])
+        if integ["owner"] != applier and integ["run_by"] != "any":
+            raise Stop("peer_reconcile_required", integration=integ["id"], phase=action["op"],
+                       owner=integ["owner"], nonce=entry["intent"].get("nonce"))
+        observed = probe(txn.project, txn.manifest_item(integ["id"]))
+        ok = action["op"] != "check" and action_satisfied(txn, action, observed)
+        txn.journal.append("outcome", {"index": index, "ok": ok, "by": "probe", "observed": observed})
+
+
 def cmd_report(project, args):
     """A peer runs its own phase in its own session and records the outcome with the nonce."""
     with project.lock():
         txn = open_txn(project, args.txn)
         need(HANDLE.fullmatch(args.as_handle or ""), "invalid_handle")
         verify_session(project, args.as_handle, args.session)
+        if args.phase == "attest":
+            return report_attestation(project, txn, args)
         plan = txn.current_plan()
         need(plan is not None, "no_pending_phase")
+        if plan["data"]["direction"] == "forward":
+            need(load_consent(project, txn.frozen["consent"])["consumed_by"] == txn.id, "consent_not_consumed")
         progress = txn.progress(plan["seq"])
         for index, action in enumerate(plan["data"]["actions"]):
             entry = progress.get(index, {})
@@ -1139,10 +1264,75 @@ def decision_binds(project, decision_id, txn_id):
     return artifact
 
 
+def integration_final_ok(txn, item_id, observed):
+    frozen = txn.integration(item_id)
+    expected_source = frozen["sources"].get(txn.frozen["to"]["commit"])
+    return (observed.get("paused") is False and observed.get("running") is True
+            and observed.get("bound_cli_sha256") == txn.frozen["to"]["cli_sha256"]
+            and (expected_source is None or observed.get("source_sha256") == expected_source))
+
+
+def attestations(txn):
+    """Latest peer attestation intents/outcomes since the transaction became ready."""
+    ready_seq = 0
+    out = {}
+    for record in txn.records():
+        if record["kind"] == "state" and record["data"]["state"] == "integrated_pending_liveness":
+            ready_seq = record["seq"]
+        if record["seq"] > ready_seq and "attest" in record.get("data", {}):
+            out.setdefault(record["data"]["attest"], {})[record["kind"]] = dict(record["data"], ts=record["ts"])
+    return out
+
+
+def report_attestation(project, txn, args):
+    need(txn.state() == "awaiting_attestation", "no_pending_phase")
+    entry = attestations(txn).get(args.integration, {})
+    intent = entry.get("intent")
+    need(intent is not None, "no_pending_phase")
+    need(intent["nonce"] == args.nonce, "stale_report")
+    need(txn.integration(args.integration)["owner"] == args.as_handle, "not_integration_owner")
+    txn.check_identities(txn.frozen["to"]["commit"])
+    observed = probe(project, txn.manifest_item(args.integration))
+    ok = integration_final_ok(txn, args.integration, observed)
+    txn.journal.append("outcome", {"attest": args.integration, "ok": ok, "nonce": args.nonce,
+                                   "by": args.as_handle, "session": args.session, "observed": observed})
+    need(ok, "postcondition_failed", integration=args.integration, phase="attest")
+    return {"status": "reported", "txn": txn.id, "integration": args.integration, "phase": "attest"}
+
+
 def cmd_finalize(project, args):
     with project.lock():
         txn = open_txn(project, args.txn)
-        need(txn.state() == "integrated_pending_liveness", "not_ready_to_finalize")
+        require_applier(project, txn, args)
+        need(txn.state() in {"integrated_pending_liveness", "awaiting_attestation"}, "not_ready_to_finalize")
+        # Re-verify the live state under the lock (R6): a decision is not a substitute.
+        txn.check_identities(txn.frozen["to"]["commit"])
+        status = release_status(project.pin)
+        need(status.get("pinned_version") == txn.frozen["to"]["version"], "postcondition_failed",
+             what="release_status")
+        pending = []
+        current = attestations(txn)
+        for item in txn.frozen["integrations"]:
+            if item["owner"] == args.as_handle or item["run_by"] == "any":
+                observed = probe(project, txn.manifest_item(item["id"]))
+                need(integration_final_ok(txn, item["id"], observed), "postcondition_failed",
+                     integration=item["id"])
+                continue
+            outcome = current.get(item["id"], {}).get("outcome")
+            fresh = outcome is not None and outcome.get("ok") and now() - outcome["ts"] <= ATTEST_MAX_AGE
+            if not fresh:
+                intent = current.get(item["id"], {}).get("intent")
+                if intent is None or outcome is not None:
+                    nonce = secrets.token_hex(16)
+                    txn.journal.append("intent", {"attest": item["id"], "nonce": nonce, "owner": item["owner"]})
+                else:
+                    nonce = intent["nonce"]
+                pending.append({"integration": item["id"], "owner": item["owner"], "phase": "attest",
+                                "nonce": nonce})
+        if pending:
+            if txn.state() != "awaiting_attestation":
+                txn.journal.append("state", {"state": "awaiting_attestation"})
+            return {"status": "awaiting_peer", "txn": txn.id, "attestations": pending}
         decision_binds(project, args.liveness_decision, txn.id)
         guidance = decision_binds(project, args.guidance_decision, txn.id)
         match = re.search(rb"ai-comm-upgrade-guidance-sha256: ([0-9a-f]{64})", guidance)
@@ -1204,7 +1394,6 @@ def cmd_recover(project, args):
 def build_parser():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--project", required=True)
-    parser.add_argument("--pin")
     parser.add_argument("--channel")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("check")
@@ -1223,19 +1412,23 @@ def build_parser():
     p.add_argument("--target", required=True)
     p.add_argument("--consent", required=True)
     p.add_argument("--as", dest="as_handle", required=True)
+    p.add_argument("--session", required=True)
     for name in ("apply", "continue", "rollback", "recover"):
         p = sub.add_parser(name)
         p.add_argument("--txn")
         p.add_argument("--as", dest="as_handle", required=True)
+        p.add_argument("--session", required=name != "recover")
     p = sub.add_parser("report")
     p.add_argument("--txn")
     p.add_argument("--integration", required=True)
-    p.add_argument("--phase", required=True, choices=PHASES)
+    p.add_argument("--phase", required=True, choices=REPORT_PHASES)
     p.add_argument("--nonce", required=True)
     p.add_argument("--as", dest="as_handle", required=True)
     p.add_argument("--session", required=True)
     p = sub.add_parser("finalize")
     p.add_argument("--txn")
+    p.add_argument("--as", dest="as_handle", required=True)
+    p.add_argument("--session", required=True)
     p.add_argument("--liveness-decision", required=True)
     p.add_argument("--guidance-decision", required=True)
     p.add_argument("--guidance-file", required=True)
@@ -1256,7 +1449,7 @@ def main(argv=None):
         print(json.dumps({"status": "stopped", "code": "invalid_arguments"}))
         return 2
     try:
-        project = Project(args.project, args.pin, args.channel)
+        project = Project(args.project, args.channel)
         result = COMMANDS[args.command](project, args)
         print(json.dumps(result, sort_keys=True))
         return 0

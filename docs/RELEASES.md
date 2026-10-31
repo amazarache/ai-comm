@@ -236,6 +236,15 @@ arguments. Commands, all JSON with non-zero exit on any stop:
   `.ai-comm-local/upgrade/controller/<sha256>/`; freezes identities.
 - `apply`, `continue`, `rollback`, `recover`, `report`, `finalize`, `status`.
 
+The pin location is fixed at the project's `.tools/ai-comm`; consent and each
+transaction bind the canonical project, pin and channel paths and the channel
+root commit. The applier's handle and session are frozen at `prepare` and
+re-validated for every mutation. Consent is validated and consumed before the
+first live action of any owner. Rollback first resolves unfinished steps by
+probe, or stops with `peer_reconcile_required` for a peer's step. Finalize
+re-verifies the live state and requires a fresh attestation from each
+peer-owned integration.
+
 State lives only in the project's `.ai-comm-local/upgrade/`: private (0700/0600)
 and user-owned. The journal is hash-chained JSON Lines with fsync. An
 unterminated final line is preserved in `torn-<seq>.bin` and chained by a note;

@@ -329,7 +329,10 @@ commit, expires after 24 hours, is consumed at the first live change, and is
 spent after completion, rollback or failure.
 
 **Transaction.** `upgrade fetch`, then `upgrade prepare` (verifies the target in a
-private clone and freezes every identity), then `upgrade apply`. `prepare`
+private clone and freezes every identity), then `upgrade apply`. The pin is
+always the project's `.tools/ai-comm`. The applier passes `--as <HANDLE> --session
+<SESSION>` to every mutating command; the session is frozen at `prepare` and must still
+be that handle's current channel session. `prepare`
 prints the frozen controller invocation under `.ai-comm-local/upgrade/controller/`;
 use that path for `continue`, `rollback`, `recover` and `status`, because it keeps
 working after the pin changes. Stop at the first non-zero exit and report the
@@ -351,8 +354,13 @@ posts a FACT. Continue with `upgrade continue`.
 in each direction where wake helpers exist, record it in an artifact containing
 the line `ai-comm-upgrade-txn: <txn>`, and DECIDE it. Publish the activation
 guidance change with the same line plus
-`ai-comm-upgrade-guidance-sha256: <hash>`, DECIDE it, install it, then run
-`upgrade finalize`. After any interruption run `upgrade recover`: it reports what
+`ai-comm-upgrade-guidance-sha256: <hash>` (start from the `guidance_proposal`
+file that `prepare` writes), DECIDE it, install it, then run `upgrade finalize`.
+Finalize re-checks the live package and listeners; for each peer-owned listener
+it returns `awaiting_peer` with an `attest` nonce, and that peer runs
+`upgrade report --phase attest` before finalize can complete. A completed
+upgrade can be rolled back once, while it is still the project's latest
+transaction and in its target state. After any interruption run `upgrade recover`: it reports what
 it can actually observe for each integration and never claims a peer listener is
 paused without that peer's probe.
 
