@@ -182,7 +182,7 @@ class SkillTests(unittest.TestCase):
         readme = " ".join((ROOT / "README.md").read_text(encoding="utf-8").split())
         self.assertIn("$ai-comm start A <subject>", readme)
         self.assertIn("/comm start A <subject>", readme)
-        self.assertIn("Nothing wakes a session after its host leaves it idle", readme)
+        self.assertIn("ai-comm itself does not wake idle sessions; separately approved host listeners or nudge helpers must remain available", readme)
 
     def test_skill_channel_commands_run_against_a_scratch_channel(self):
         init = self.run_cli("init", "--task", "Test the installed skill commands",

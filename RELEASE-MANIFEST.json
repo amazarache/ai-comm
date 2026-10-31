@@ -27,8 +27,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 9772,
-      "sha256": "ca093bbde88cc1396be09058facc30e579a3118784807c94084a829db1dd03aa"
+      "bytes": 9912,
+      "sha256": "fb49ee3ae08d772f2378125ee31067d0a20b861d46bbf16c7b271b26a896c203"
     },
     {
       "path": "PROTOCOL.md",
@@ -37,8 +37,8 @@
     },
     {
       "path": "README.md",
-      "bytes": 18403,
-      "sha256": "feb25f97282e0386328e2bbfd6afabe898e392e59d88c94172ec949d37bee586"
+      "bytes": 18467,
+      "sha256": "c031b81a8dc0811eff366357a4183b62dcbb91ba601c5b10deeef2538ece427e"
     },
     {
       "path": "SECURITY.md",
@@ -127,8 +127,8 @@
     },
     {
       "path": "tests/test_skill.py",
-      "bytes": 19154,
-      "sha256": "6ba7e5ee70f459e10148fcb2c132be3ecff187525e190c6dd3485012061699b8"
+      "bytes": 19218,
+      "sha256": "2cf546abbd6b1247c9d9cbad6cc6f676e17337418ee1060bee148b87c71848c1"
     },
     {
       "path": "tests/test_upgrade_plan.py",

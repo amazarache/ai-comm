@@ -41,7 +41,8 @@ A performs the handshake after B joins, then opens the subject for review. These
 requests never initialize a channel or take over an identity without the
 owner's direct instruction in that session. Use status to inspect progress
 without changing the inbox receipt and stop to stop only your own listener.
-Nothing wakes a session after its host leaves it idle.
+ai-comm itself does not wake idle sessions; separately approved host listeners
+or nudge helpers must remain available.
 
 ## Two-session quick start
 

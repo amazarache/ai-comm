@@ -21,6 +21,8 @@
   section 3: peers settle routine authorship, the first committed drafting
   notice wins, only active notices block a topic, and duplicate owner relays
   keep their own provenance. Role binding and owner gates are unchanged.
+- Correct the README start note: ai-comm itself does not wake idle sessions,
+  but separately approved host listeners or nudge helpers can.
 - Keep PROTOCOL.md unchanged at the 3.0 contract digest.
 
 ## 1.4.1
