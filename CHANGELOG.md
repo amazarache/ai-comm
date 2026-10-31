@@ -10,6 +10,13 @@
   status that deduplicates across takeovers without transferring owner approval.
 - Document wake limits and exact-thread nudge controls; clarify credential
   helper erase behavior and make skill links preserve existing paths safely.
+- State the expected format in rejection hints for every shared format
+  validator (topics, handles, ids, retry keys, digests, nonces, message ids).
+  Hints are built from fixed rule text only and never reflect the rejected
+  value. Error codes and fields are unchanged.
+- Document `show-artifact` in command help and the README, including reading
+  an artifact before ACCEPT, and state that a plain `wait` returns the same page
+  and `through` value as `inbox`.
 - Keep PROTOCOL.md unchanged at the 3.0 contract digest.
 
 ## 1.4.1

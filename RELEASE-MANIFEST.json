@@ -27,8 +27,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 9010,
-      "sha256": "e581c9dfc4ab6a3d888c96edbdac5be359081e3f989a8ab15c2498938a5a42f8"
+      "bytes": 9473,
+      "sha256": "52eb5c921394a6b9a55ec30fc258606d1950d11474719cb596f1eb19aeba9cfd"
     },
     {
       "path": "PROTOCOL.md",
@@ -37,8 +37,8 @@
     },
     {
       "path": "README.md",
-      "bytes": 17722,
-      "sha256": "298f060b39435fe31a29045db171c93f5400cb3c42a3fc2d0ce26a2418b79fe4"
+      "bytes": 18234,
+      "sha256": "be580d60ef863d081410ddd0a64acc9a0f4000f99d291c13af81b93e352a8d55"
     },
     {
       "path": "SECURITY.md",
@@ -47,8 +47,8 @@
     },
     {
       "path": "ai_comm.py",
-      "bytes": 153060,
-      "sha256": "f18195720aa236adbf40a42c1671c3b0cb1266b9614b8c0220d85d32de2ba099"
+      "bytes": 154398,
+      "sha256": "e8d745e754a2938c1b99471af0708a76c078aea81851f0b2acd5b8a6c13d471a"
     },
     {
       "path": "docs/ERRORS.md",
@@ -117,8 +117,8 @@
     },
     {
       "path": "tests/test_protocol.py",
-      "bytes": 88000,
-      "sha256": "572122c45bbd230e3dd5d2fdc699fcf28a7d24ab5d3ae921866fbf0b5d4547aa"
+      "bytes": 91915,
+      "sha256": "89360d29fec8ba908ba30d35c8b8382a38c94c192111bc1d15d45d6a71ee15fe"
     },
     {
       "path": "tests/test_release_check.py",

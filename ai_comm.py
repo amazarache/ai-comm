@@ -670,11 +670,25 @@ def text_field(value, name, maximum, multiline=False):
     return value
 
 
+# Fixed, human-readable rules for the shared format validators. Hints are built
+# only from these constants and the field's fixed name, never from the rejected
+# value, so a rejection cannot reflect untrusted input.
+PATTERN_RULES = {
+    IDENT: "1-64 characters: a lowercase ASCII letter first, then lowercase letters, digits, '_', '.' or '-'",
+    HANDLE: "1-32 characters: a lowercase ASCII letter first, then lowercase letters, digits or '-'",
+    KEY: "1-96 characters from A-Z, a-z, 0-9, '_', '.', ':' or '-'",
+    HEX: "exactly 64 lowercase hexadecimal characters (a SHA-256 digest)",
+    NONCE: "exactly 32 lowercase hexadecimal characters",
+    MID: "an 8-digit sequence number, '-', then the sender handle (for example 00000012-claude)",
+}
+
+
 def pattern(value, regex, name):
     safe_name = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+    rule = PATTERN_RULES.get(regex)
+    hint = f"Use a valid {name}: {rule}." if rule else f"Use a valid {name} value."
     require(isinstance(value, str) and regex.fullmatch(value) is not None,
-            f"invalid {name}", code=f"invalid_{safe_name}", field=safe_name,
-            hint=f"Use a valid {name} value.")
+            f"invalid {name}", code=f"invalid_{safe_name}", field=safe_name, hint=hint)
     return value
 
 
@@ -2571,8 +2585,13 @@ def parser():
     p.add_argument("--platform", required=True)
     p.add_argument("--session", required=True, help="non-secret conversation reference")
     p.add_argument("--takeover", action="store_true")
+    command_help = {
+        "artifact": "publish a file as an immutable artifact and print its SHA-256; "
+                    "read it back with show-artifact DIGEST",
+    }
     for command in ("send", "inbox", "ack", "wait", "artifact"):
-        p = sub.add_parser(command)
+        p = sub.add_parser(command, help=command_help.get(command),
+                           description=command_help.get(command))
         p.add_argument("--as", dest="actor", required=True)
         p.add_argument("--session", required=True)
         if command == "send":
@@ -2602,9 +2621,10 @@ def parser():
                    help="optional current channel for a protocol migration plan")
     p.add_argument("--participant", action="append", default=[], metavar="HANDLE=STATUS",
                    help="explicit channel participant status (repeat for each handle)")
-    p = sub.add_parser("show")
+    p = sub.add_parser("show", help="print one committed message", description="print one committed message")
     p.add_argument("id")
-    p = sub.add_parser("show-artifact")
+    p = sub.add_parser("show-artifact", help="print a published artifact's exact bytes",
+                       description="print a published artifact's exact bytes; read it before ACCEPT")
     p.add_argument("digest")
     p = sub.add_parser("log")
     p.add_argument("--after", type=int, default=0)

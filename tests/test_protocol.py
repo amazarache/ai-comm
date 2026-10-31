@@ -1436,5 +1436,75 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual([], self.channel.snapshot().messages)
 
 
+class FormatHintTests(unittest.TestCase):
+    """Rejections state the expected format without reflecting the rejected value."""
+
+    CASES = [
+        (ac.IDENT, "topic", "002-requirements", ["a", "a" * 64, "z9_.-"], ["", "A", "a" * 65, "-a", "1a"]),
+        (ac.HANDLE, "handle", "Claude", ["a", "a" * 32, "codex-2"], ["", "a_b", "a" * 33, "9a"]),
+        (ac.KEY, "retry key", "has space", ["k", "A:b.c_d-9", "k" * 96], ["", "k" * 97, "a/b"]),
+        (ac.HEX, "artifact digest", "ABC", ["0" * 64, "f" * 64], ["0" * 63, "F" * 64, "g" * 64]),
+        (ac.NONCE, "control nonce", "xyz", ["0" * 32], ["0" * 31, "0" * 33, "A" * 32]),
+        (ac.MID, "message id", "12-claude", ["00000012-claude"], ["0000012-claude", "00000012-Claude", "00000012"]),
+    ]
+
+    def test_every_rule_names_its_format_and_keeps_code_and_field(self):
+        for regex, name, bad, _, _ in self.CASES:
+            with self.subTest(name=name), self.assertRaises(ac.ProtocolError) as caught:
+                ac.pattern(bad, regex, name)
+            details = caught.exception.details
+            safe = re.sub(r"[^a-z0-9]+", "_", name).strip("_")
+            self.assertEqual(f"invalid_{safe}", details["code"])
+            self.assertEqual(f"invalid {name}", details["error"])
+            self.assertIn(ac.PATTERN_RULES[regex], details["hint"])
+            self.assertTrue(details["hint"].startswith(f"Use a valid {name}: "))
+
+    def test_boundaries_accept_and_reject_as_before(self):
+        for regex, name, _, good, bad in self.CASES:
+            for value in good:
+                with self.subTest(name=name, value=value):
+                    self.assertEqual(value, ac.pattern(value, regex, name))
+            for value in bad:
+                with self.subTest(name=name, value=value), self.assertRaises(ac.ProtocolError):
+                    ac.pattern(value, regex, name)
+
+    def test_rejected_value_is_never_echoed(self):
+        hostile = "SECRET-PAYLOAD\x1b[31m<script>secret-payload</script>\u202e"
+        for regex, name, _, _, _ in self.CASES:
+            with self.subTest(name=name), self.assertRaises(ac.ProtocolError) as caught:
+                ac.pattern(hostile, regex, name)
+            rendered = json.dumps(caught.exception.details, ensure_ascii=False)
+            self.assertNotIn("secret-payload", rendered.lower())
+            self.assertNotIn("<script>", rendered)
+            self.assertNotIn("\x1b", rendered)
+        with self.assertRaises(ac.ProtocolError) as caught:
+            ac.pattern(None, ac.IDENT, "topic")
+        self.assertIn(ac.PATTERN_RULES[ac.IDENT], caught.exception.details["hint"])
+
+    def test_every_pattern_call_site_uses_a_documented_rule(self):
+        tree = ast.parse(SCRIPT.read_text(encoding="utf-8"))
+        used = {node.args[1].id for node in ast.walk(tree)
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "pattern" and len(node.args) > 1
+                and isinstance(node.args[1], ast.Name)}
+        self.assertTrue(used)
+        for regex_name in used:
+            with self.subTest(regex=regex_name):
+                self.assertIn(getattr(ac, regex_name), ac.PATTERN_RULES,
+                              "add a human-readable rule to PATTERN_RULES for every pattern() regex")
+
+    def test_cli_help_points_from_artifact_to_show_artifact(self):
+        def help_text(*args):
+            result = subprocess.run([sys.executable, str(SCRIPT), *args, "--help"],
+                                    capture_output=True, text=True, timeout=30)
+            self.assertEqual(0, result.returncode, result.stderr)
+            return result.stdout
+        self.assertIn("show-artifact", help_text("artifact"))
+        self.assertIn("exact bytes", help_text("show-artifact"))
+        self.assertIn("committed message", help_text("show"))
+        top = help_text()
+        self.assertIn("show-artifact", top)
+
+
 if __name__ == "__main__":
     unittest.main()

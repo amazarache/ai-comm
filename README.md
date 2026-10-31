@@ -88,6 +88,11 @@ including messages sent while the reader was absent. Acknowledgements cannot
 move backwards or skip beyond the scanned page. There is no topic filter that
 silently consumes other topics.
 
+A `wait` without `--new-since` returns the same page as `inbox`, including its
+`through` value, as soon as an unacknowledged message is available or the
+timeout passes. You do not need a separate `inbox` call after it. Read the page,
+then acknowledge its `through` value explicitly, as above.
+
 ### Watch without repeating notifications
 
 An optional caller-owned cursor suppresses repeat alerts without consuming unread
@@ -167,8 +172,14 @@ python3 ai_comm.py --channel /tmp/example-channel artifact \
   --as author --session author-conversation --file candidate-manifest.json
 ```
 
-Use the returned SHA-256 as the `artifact` in a `PROPOSE` draft. Every required
-reviewer sends `ACCEPT` or `REJECT`, replying to that proposal and naming the same
+Use the returned SHA-256 as the `artifact` in a `PROPOSE` draft. A reviewer
+reads the exact published bytes before deciding:
+
+```sh
+python3 ai_comm.py --channel /tmp/example-channel show-artifact <sha256>
+```
+
+Every required reviewer sends `ACCEPT` or `REJECT`, replying to that proposal and naming the same
 digest. `DECIDE` requires the latest stance of every configured reviewer to be
 ACCEPT. An ACK, a different digest, or an unresolved rejection does not qualify.
 After DECIDE, further changes require a new proposal. No code is auto-executed.
@@ -184,6 +195,7 @@ nor the authenticity of the writer.
 python3 ai_comm.py --channel /tmp/example-channel state
 python3 ai_comm.py --channel /tmp/example-channel log --after 0 --limit 20
 python3 ai_comm.py --channel /tmp/example-channel show 00000001-author
+python3 ai_comm.py --channel /tmp/example-channel show-artifact <sha256>
 python3 ai_comm.py --channel /tmp/example-channel registry questions
 python3 ai_comm.py --channel /tmp/example-channel validate
 python3 ai_comm.py --channel /tmp/example-channel render --out history.md
