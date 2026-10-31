@@ -860,6 +860,22 @@ class ControllerTests(unittest.TestCase):
         state = json.loads((self.fx.project / "own.state.json").read_text())
         self.assertEqual((state["paused"], state["bound"]), (False, sha((self.fx.pin / "ai_comm.py").read_bytes())))
 
+    def test_changed_hook_code_blocks_recover_and_rollback_probes(self):
+        consent, out = self.prepared()
+        os.environ["UC_WRITE_THEN_FAIL"] = "own:install_source"
+        self.run_uc("apply", "--as", "claude", "--session", "s-claude")
+        os.environ.pop("UC_WRITE_THEN_FAIL")
+        journal = self.journal(out["txn"])
+        with open(self.fx.project / "listener.py", "a") as stream:
+            stream.write("\nopen('SENTINEL', 'w').write('ran')\n")
+        before = journal.path.read_bytes()
+        for cmd in ("recover", "rollback"):
+            with self.subTest(cmd=cmd):
+                code, res = self.run_uc(cmd, "--as", "claude", "--session", "s-claude")
+                self.assertEqual((res["code"], res.get("what")), ("upgrade_identity_changed", "integration_code"))
+                self.assertFalse((self.fx.project / "SENTINEL").exists())
+                self.assertEqual(journal.path.read_bytes(), before)
+
     def test_r6_finalize_rejects_inconsistent_release_metadata(self):
         consent, out = self.prepared()
         args = self._complete(out)

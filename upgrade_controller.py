@@ -986,6 +986,33 @@ class Txn:
             need(source_hash(self.project, manifest_item) in allowed_sources,
                  "upgrade_identity_changed", what="integration_source", integration=item["id"])
 
+    def check_static(self):
+        """Frozen project, manifest and hook-code identities, checked before any probe runs.
+
+        The package commit is not checked here (recovery may find either side).
+        Each listener source may be its expected phase value or, for an unfinished
+        or failed install/restore in the active plan, that step's after-state.
+        """
+        need(self.project.project_id() == self.frozen["project"], "upgrade_identity_changed", what="project")
+        need(sha256_bytes(read_private(self.project.root / "project.json"))
+             == self.frozen["project_manifest_sha256"], "upgrade_identity_changed", what="project_manifest")
+        plan = self.current_plan()
+        progress = self.progress(plan["seq"]) if plan else {}
+        for item in self.frozen["integrations"]:
+            manifest_item = self.manifest_item(item["id"])
+            need(code_hashes(self.project, manifest_item) == item["code"],
+                 "upgrade_identity_changed", what="integration_code", integration=item["id"])
+            allowed = {self.expected_source(item["id"])}
+            if plan:
+                for index, action in enumerate(plan["data"]["actions"]):
+                    entry = progress.get(index, {})
+                    done = (entry.get("outcome") or {}).get("ok")
+                    if (not done and entry.get("intent") is not None and action.get("integration") == item["id"]
+                            and action["op"] in ("install_source", "restore_source")):
+                        allowed.add(action["expect_source"])
+            need(source_hash(self.project, manifest_item) in allowed,
+                 "upgrade_identity_changed", what="integration_source", integration=item["id"])
+
     def expected_source(self, integ_id):
         """Phase-specific source hash: the last confirmed install/restore, else the initial one."""
         expected = self.integration(integ_id)["initial_source"]
@@ -1205,6 +1232,7 @@ def cmd_rollback(project, args):
 
 def reconcile_outstanding(txn, plan, applier):
     """Resolve every intent without an outcome by probe before changing direction (R5)."""
+    txn.check_static()
     progress = txn.progress(plan["seq"])
     for index, action in enumerate(plan["data"]["actions"]):
         entry = progress.get(index, {})
@@ -1400,6 +1428,7 @@ def cmd_recover(project, args):
         txn = open_txn(project, args.txn)
         require_participant(project, txn, args)
         txn.repair()
+        txn.check_static()
         observed = {}
         for item in txn.frozen["integrations"]:
             if item["owner"] == args.as_handle or item["run_by"] == "any":

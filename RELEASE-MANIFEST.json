@@ -132,8 +132,8 @@
     },
     {
       "path": "tests/test_upgrade_controller.py",
-      "bytes": 53662,
-      "sha256": "c6332318f005d45c9681205b663aa6330c72c7f87e896d359d30bce5e85b3607"
+      "bytes": 54605,
+      "sha256": "15190b3ab939f5f4adcc73827f758a2368432afe25a044b178285ff616b3806e"
     },
     {
       "path": "tests/test_upgrade_plan.py",
@@ -147,8 +147,8 @@
     },
     {
       "path": "upgrade_controller.py",
-      "bytes": 70126,
-      "sha256": "4ac9bd3935c9f39bd1193a6712f138864d70076d2ffef20e86d534b56e57b612"
+      "bytes": 71918,
+      "sha256": "6c1c3d3dc2f1ae5b704f3775323a3e70e69640c884a12bacb8c32e723e76877c"
     }
   ],
   "format": "ai-comm-review-manifest/1",
