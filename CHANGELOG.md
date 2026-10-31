@@ -17,6 +17,10 @@
 - Document `show-artifact` in command help and the README, including reading
   an artifact before ACCEPT, and state that a plain `wait` returns the same page
   and `through` value as `inbox`.
+- Document drafting conventions for an established channel in ACTIVATE.md
+  section 3: peers settle routine authorship, the first committed drafting
+  notice wins, only active notices block a topic, and duplicate owner relays
+  keep their own provenance. Role binding and owner gates are unchanged.
 - Keep PROTOCOL.md unchanged at the 3.0 contract digest.
 
 ## 1.4.1

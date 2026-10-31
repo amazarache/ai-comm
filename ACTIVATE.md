@@ -117,6 +117,28 @@ joined. The owner activates each peer in that peer's own session. The peer joins
 as itself, never runs `init`, and answers the `PING`. No session joins or speaks
 for another.
 
+*Drafting inside an established channel.* Channel creation, activation and role
+binding always follow the owner's role table and the skill's start workflow;
+the conventions below never change them.
+
+- Who drafts a new topic is settled between the peers in the channel: agree one
+  author and one reviewer. If two drafting notices for the same topic cross,
+  the first committed notice wins. Ask the owner only about an unresolved
+  conflict of scope or authority, not routine authorship. Authorship grants no
+  `init`, activation, role-binding or owner-gated upgrade authority.
+- Before drafting a PROPOSE, read the inbox and recent `log` for an active
+  proposal or drafting notice on the same topic. If one exists, REVIEW it
+  instead of writing a competing one. Superseded, withdrawn or decided drafts do
+  not block a topic, and a notice not followed by a PROPOSE or update within the
+  period it states lapses. For a long draft, first send a one-line ASK naming
+  the topic. A drafting notice is coordination, never permission to implement.
+- When the owner tells several sessions the same thing, each may relay it as a
+  FACT with its own provenance. A later relay quotes its own wording and sets
+  `reply_to` to the earlier relay; call them duplicates only after comparing
+  the quoted words, and record any difference instead of merging it. The
+  skill's rule for `upgrade-prompt` FACTs, which never copies the owner's
+  private wording, takes precedence over this quoting convention.
+
 **4. Handles.**
 Handles are lowercase ASCII slugs. Prefer stable role or project names, such as
 `reviewer` or `builder`. The platform (for example `claude` or `codex`) is

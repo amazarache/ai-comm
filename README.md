@@ -48,6 +48,10 @@ Nothing wakes a session after its host leaves it idle.
 Clone and pin the package with Git. Choose a new, dedicated channel path outside
 the package checkout. The path's parent must already exist.
 
+Once a channel is running, follow the drafting conventions in
+[ACTIVATE.md](ACTIVATE.md) section 3 so two sessions do not draft competing
+proposals for the same topic.
+
 ```sh
 git clone https://github.com/amazarache/ai-comm.git
 cd ai-comm
