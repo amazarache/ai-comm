@@ -56,16 +56,27 @@ def run_checked(argv, cwd, code, timeout=600, env=None):
     return done
 
 
-def trusted_source():
-    """The running package must itself be a verified, unmodified release."""
-    try:
-        identity = uc.package_identity(ROOT)
-    except Stop as exc:
-        raise Stop("installer_package_unverified") from exc
-    need(not identity["dirty"] and identity["origin"], "installer_package_unverified")
-    run_checked([sys.executable, "-I", str(ROOT / "scripts" / "check_release_manifest.py")], ROOT,
+def trusted_source(root=ROOT):
+    """The running package must itself be a verified, unmodified release (design §8):
+    a clean Git checkout, or an extracted release archive (which the owner checked
+    against the release's SHA256SUMS) whose every manifest entry and protocol digest
+    verify. RELEASE_ORIGIN is read only from the manifest-verified ai_comm.py."""
+    run_checked([sys.executable, "-I", str(root / "scripts" / "check_release_manifest.py")], root,
                 "installer_package_unverified", timeout=120)
-    return identity["origin"]
+    if (root / ".git").exists():
+        try:
+            identity = uc.package_identity(root)
+        except Stop as exc:
+            raise Stop("installer_package_unverified") from exc
+        need(not identity["dirty"] and identity["origin"], "installer_package_unverified")
+        return identity["origin"]
+    manifest = uc.parse_json((root / "RELEASE-MANIFEST.json").read_bytes(), "installer_package_unverified")
+    cli = (root / "ai_comm.py").read_bytes()
+    entries = [e for e in manifest.get("files", []) if isinstance(e, dict) and e.get("path") == "ai_comm.py"]
+    need(len(entries) == 1 and entries[0].get("sha256") == uc.sha256_bytes(cli), "installer_package_unverified")
+    origin = re.findall(r'^RELEASE_ORIGIN = "([^"\r\n]+)"$', cli.decode("utf-8", "replace"), re.MULTILINE)
+    need(len(origin) == 1, "installer_package_unverified")
+    return origin[0]
 
 
 def check_project(project_dir):
@@ -128,6 +139,7 @@ def verify_staging(repo, version, record, run_suite):
     for argv in (["scripts/check_tag.py", tag["tag"]], ["scripts/check_release_manifest.py"]):
         run_checked([sys.executable, "-I", *argv], repo, "verify_failed", timeout=300)
     tests = run_suite(repo)
+    require_staged_identity(repo, tag)
     status = uc.release_status(repo)
     awareness = "complete"
     if status.get("status") == "index_tags_missing":
@@ -136,6 +148,17 @@ def verify_staging(repo, version, record, run_suite):
         need(status.get("status") == "ok", "verify_failed", check="release_status")
     need(status.get("pinned_version") == version, "verify_failed", check="release_status")
     return {"tag": tag, "tests_ran": tests, "release_awareness": awareness}
+
+
+def require_staged_identity(repo, tag):
+    """After code ran in the staging repository: remove build debris, then require the
+    exact tag commit with no tracked, untracked or ignored changes (I2)."""
+    git(repo, "clean", "-fdxq")
+    need(git(repo, "rev-parse", "HEAD").strip() == tag["commit"], "staged_identity_changed", what="commit")
+    need(git(repo, "status", "--porcelain", "--untracked-files=all", "--ignored").strip() == "",
+         "staged_identity_changed", what="worktree")
+    need(git(repo, "rev-parse", f"refs/tags/{tag['tag']}").strip() == tag["tag_object"],
+         "staged_identity_changed", what="tag")
 
 
 def real_suite(repo):
@@ -157,6 +180,46 @@ def real_fetch(repo, origin, version, use_helper):
         cfr._fetch_isolated(repo, origin, helpers, refspecs=refspecs)
     except cfr.CheckError as exc:
         raise Stop("fetch_failed", helper_error=exc.code) from exc
+
+
+def open_dir_nofollow(name, dir_fd=None):
+    try:
+        return os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dir_fd)
+    except OSError as exc:
+        raise Stop("unsafe_path", path=str(name)) from exc
+
+
+def publish(project, staging):
+    """Atomically move staging/repo to project/.tools/ai-comm using directory file
+    descriptors opened without following symlinks, so a path swapped during
+    verification cannot redirect the publish (I3)."""
+    uc.check_ancestry(project)
+    proj_fd = open_dir_nofollow(str(project))
+    try:
+        local_fd = open_dir_nofollow(".ai-comm-local", proj_fd)
+        stage_fd = open_dir_nofollow(staging.name, local_fd)
+        try:
+            os.mkdir(".tools", 0o755, dir_fd=proj_fd)
+        except FileExistsError:
+            pass
+        tools_fd = open_dir_nofollow(".tools", proj_fd)
+        try:
+            st = os.fstat(tools_fd)
+            need(st.st_uid == os.getuid() and not st.st_mode & 0o022, "unsafe_path", path=".tools")
+            try:
+                os.lstat("ai-comm", dir_fd=tools_fd)
+                raise Stop("pin_exists")
+            except FileNotFoundError:
+                pass
+            os.rename("repo", "ai-comm", src_dir_fd=stage_fd, dst_dir_fd=tools_fd)
+            os.fsync(tools_fd)
+            os.fsync(stage_fd)
+        finally:
+            os.close(tools_fd)
+            os.close(stage_fd)
+            os.close(local_fd)
+    finally:
+        os.close(proj_fd)
 
 
 def update_gitignore(project):
@@ -184,7 +247,10 @@ def update_gitignore(project):
 
 def finish(project, staging, journal, record):
     """Steps after publish: unintegrated project manifest and .gitignore (idempotent)."""
-    upgrade = uc.private_dir(project / ".ai-comm-local" / "upgrade")
+    uc.check_ancestry(project)
+    local = project / ".ai-comm-local"
+    need(not local.is_symlink() and uc._mode_ok_ancestor(os.lstat(local)), "unsafe_path", path=".ai-comm-local")
+    upgrade = uc.private_dir(local / "upgrade")
     for name in ("txn", "consents", "controller"):
         uc.private_dir(upgrade / name)
     manifest = upgrade / "project.json"
@@ -209,7 +275,8 @@ def install(project_dir, version, *, fetch_permitted, use_helper, fetch=None, or
     with install_lock(local):
         staging = uc.private_dir(local / f"install-{secrets.token_hex(6)}")
         journal = uc.Journal(staging)
-        journal.append("start", {"version": version, "project": str(project), "source": source})
+        journal.append("start", {"schema": INSTALL_SCHEMA, "version": version, "project": str(project),
+                                 "source": source})
         repo = staging / "repo"
         git(staging, "init", "--quiet", "--template=", str(repo))
         journal.append("intent", {"index": 0, "action": {"op": "fetch"}})
@@ -218,14 +285,11 @@ def install(project_dir, version, *, fetch_permitted, use_helper, fetch=None, or
         verified = verify_staging(repo, version, record, run_suite)
         journal.append("outcome", {"index": 0, "ok": True, "record": record,
                                    "tests_ran": verified["tests_ran"]})
-        tools = project / ".tools"
-        if not tools.exists():
-            os.mkdir(tools, 0o755)
-        need(not os.path.lexists(tools / "ai-comm"), "pin_exists")
+        require_staged_identity(repo, verified["tag"])
         journal.append("intent", {"index": 1, "action": {"op": "publish"}, "commit": record["commit"]})
-        os.rename(repo, tools / "ai-comm")
-        uc.fsync_dir(tools)
+        publish(project, staging)
         journal.append("outcome", {"index": 1, "ok": True})
+        tools = project / ".tools"
         added = finish(project, staging, journal, record)
         return {"status": "installed", "version": version, "commit": record["commit"],
                 "pin": str(tools / "ai-comm"), "tests_ran": verified["tests_ran"],
@@ -235,6 +299,31 @@ def install(project_dir, version, *, fetch_permitted, use_helper, fetch=None, or
                         ".ai-comm-local/upgrade/project.json declared before any guided upgrade."}
 
 
+STAGING_RE = re.compile(r"install-[0-9a-f]{12}\Z")
+
+
+def recognized_journal(project, staging):
+    """A staging directory is touched only if it is private, named by the installer,
+    and holds a valid install journal whose start record names this project (I1)."""
+    if not STAGING_RE.fullmatch(staging.name) or staging.is_symlink():
+        return None
+    try:
+        uc.private_dir(staging, create=False)
+        if not (staging / "journal.jsonl").is_file():
+            return None
+        journal = uc.Journal(staging)
+        journal.repair_torn_tail()
+        records, _ = journal.read()
+    except Stop:
+        return None
+    if not records or records[0]["kind"] != "start":
+        return None
+    start = records[0]["data"]
+    if start.get("schema") != INSTALL_SCHEMA or start.get("project") != str(project):
+        return None
+    return records
+
+
 def recover(project_dir):
     project = uc.check_ancestry(project_dir)
     local = project / ".ai-comm-local"
@@ -242,10 +331,11 @@ def recover(project_dir):
     results = []
     with install_lock(local):
         for staging in sorted(local.glob("install-*")):
-            uc.private_dir(staging, create=False)
+            records = recognized_journal(project, staging)
+            if records is None:
+                results.append({"staging": staging.name, "action": "skipped_unrecognized"})
+                continue
             journal = uc.Journal(staging)
-            journal.repair_torn_tail()
-            records, _ = journal.read()
             states = [r["data"].get("state") for r in records if r["kind"] == "state"]
             if "installed" in states:
                 continue

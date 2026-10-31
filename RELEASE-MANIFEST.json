@@ -67,8 +67,8 @@
     },
     {
       "path": "docs/RELEASES.md",
-      "bytes": 18356,
-      "sha256": "3ca47e5f3faa9169c4ea05eb480e7bcf657d6d7e5273b7b9b557569e74e09d11"
+      "bytes": 18724,
+      "sha256": "a2dbcac471871dea467bc71fbe6b4c853f78159f308bb00c3731fc11119139b2"
     },
     {
       "path": "examples/ask.json",
@@ -107,8 +107,8 @@
     },
     {
       "path": "scripts/install_project.py",
-      "bytes": 14259,
-      "sha256": "db2bac2541d3fe493fde1cd80fbde3cd1166f7f9644c55bee24e69abdce2ad36"
+      "bytes": 18341,
+      "sha256": "fbdacf19d6ebd68a44042457e844a9b9f9397a31d9d1a90c3a17302205882ec7"
     },
     {
       "path": "scripts/leak_scan.py",
@@ -127,8 +127,8 @@
     },
     {
       "path": "tests/test_install_project.py",
-      "bytes": 12194,
-      "sha256": "ea9b281a538329a97e38fcf5b9b030abd2f9e1d453fd942d4fd0ccf46400177e"
+      "bytes": 15199,
+      "sha256": "d9aa7e39ea618e378f584c7b643f4b83af2c510acbef362a658d63faf5a3c616"
     },
     {
       "path": "tests/test_protocol.py",

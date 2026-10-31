@@ -234,6 +234,63 @@ class InstallTests(unittest.TestCase):
                 rc = ip.main(argv)
             self.assertEqual((rc, json.loads(out.getvalue())["code"]), (2, code))
 
+    def test_i1_recover_never_touches_unrecognized_directories(self):
+        local = self.project / ".ai-comm-local"
+        os.mkdir(local, 0o700)
+        foreign = local / "install-0123456789ab"
+        os.mkdir(foreign, 0o700)
+        (foreign / "KEEP.txt").write_text("keep")
+        other = local / "install-abcdefabcdef"
+        os.mkdir(other, 0o700)
+        ip.uc.Journal(other).append("start", {"schema": ip.INSTALL_SCHEMA, "project": "/elsewhere", "version": "1.5.1"})
+        out = ip.recover(self.project)
+        self.assertEqual(sorted(r["action"] for r in out["results"]), ["skipped_unrecognized", "skipped_unrecognized"])
+        self.assertEqual((foreign / "KEEP.txt").read_text(), "keep")
+        self.assertTrue(other.exists())
+
+    def test_i2_staged_copy_modified_during_tests_is_not_published(self):
+        def tamper(repo):
+            with open(repo / "ai_comm.py", "a") as stream:
+                stream.write("\n# changed during verification\n")
+            return 7
+        err = self.stop(self.install, suite=tamper)
+        self.assertEqual((err.code, err.details.get("what")), ("staged_identity_changed", "worktree"))
+        self.assertFalse((self.project / ".tools" / "ai-comm").exists())
+
+    def test_i2_untracked_debris_cleaned_before_identity_check(self):
+        def add(repo):
+            (repo / "scripts" / "extra.py").write_text("print('x')\n")
+            return 7
+        out = self.install(suite=add)  # untracked/ignored debris is removed, then the exact tree is required
+        self.assertFalse((self.project / ".tools" / "ai-comm" / "scripts" / "extra.py").exists())
+        self.assertEqual(out["status"], "installed")
+
+    def test_i3_tools_swapped_for_symlink_during_tests(self):
+        elsewhere = Path(self.temp.name) / "elsewhere"
+        elsewhere.mkdir()
+
+        def swap(repo):
+            (self.project / ".tools").symlink_to(elsewhere)
+            return 7
+        err = self.stop(self.install, suite=swap)
+        self.assertEqual(err.code, "unsafe_path")
+        self.assertEqual(list(elsewhere.iterdir()), [])
+        self.assertFalse((self.project / ".ai-comm-local" / "upgrade").exists())
+
+    def test_archive_trust_source_verified_and_tamper_refused(self):
+        archive = Path(self.temp.name) / "archive"
+        tracked = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-z"], capture_output=True,
+                                 check=True).stdout.decode().split("\0")
+        for name in [t for t in tracked if t]:
+            dest = archive / name
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ROOT / name, dest)
+        origin = re.findall(r'^RELEASE_ORIGIN = "([^"]+)"$', (archive / "ai_comm.py").read_text(), re.M)[0]
+        self.assertEqual(ip.trusted_source(archive), origin)
+        with open(archive / "ai_comm.py", "a") as stream:
+            stream.write("\n# tampered\n")
+        self.assertEqual(self.stop(ip.trusted_source, archive).code, "installer_package_unverified")
+
     @unittest.skipIf(os.environ.get(GUARD) == "1", "inside a target verification")
     def test_real_suite_install_end_to_end(self):
         out = self.install(suite=ip.real_suite)
