@@ -687,6 +687,13 @@ def _check(project):
     return result
 
 
+def fetch_result_ok(returncode, value):
+    """check_for_release.py contract: 0 up_to_date, 10 update_available, 11 advisory_applies."""
+    return (returncode in (0, 10, 11) and isinstance(value, dict)
+            and value.get("schema") == RELEASE_CHECK_SCHEMA and value.get("status") == "ok"
+            and value.get("fetched") is True)
+
+
 def cmd_fetch(project, args):
     with project.lock():
         pin = package_identity(project.pin)
@@ -703,9 +710,7 @@ def cmd_fetch(project, args):
         value = parse_json(result.stdout, "fetch_failed")
         need(isinstance(value, dict), "fetch_failed")
         helper_error = value.get("fetch_error")
-        # 0 up_to_date, 10 update_available, 11 advisory_applies are successful checks.
-        need(result.returncode in (0, 10, 11) and value.get("schema") == RELEASE_CHECK_SCHEMA
-             and value.get("status") == "ok" and value.get("fetched") is True, "fetch_failed",
+        need(fetch_result_ok(result.returncode, value), "fetch_failed",
              helper_error=helper_error if isinstance(helper_error, str) and len(helper_error) <= 64 else None)
         tag = tag_identity(project.pin, args.target)
         return {"status": "fetched", "target": args.target, "tag_object": tag["tag_object"],
@@ -889,23 +894,28 @@ def rollback_plan(frozen, package_switched):
 
 
 class Txn:
-    def __init__(self, project, txn, repair=True):
-        """Open a transaction. Torn-tail repair writes, so callers must hold the lock;
-        read-only callers pass repair=False and get `journal_torn_tail` instead."""
+    def __init__(self, project, txn):
+        """Open a transaction without writing anything.
+
+        The frozen start record is read from the complete, chain-verified prefix,
+        so the actor can be validated before any repair (R3b). A torn tail is
+        repaired only by `repair()`, after validation, under the lock.
+        """
         need(TXN_RE.fullmatch(txn or ""), "txn_missing")
         self.project = project
         self.id = txn
         self.dir = private_dir(project.root / "txn" / txn, create=False)
         self.journal = Journal(self.dir)
-        if repair:
-            records = self.journal.repair_torn_tail()
-        else:
-            records, torn = self.journal.read()
-            need(torn is None, "journal_torn_tail")
+        records, self.torn = self.journal.read()
         need(records and records[0]["kind"] == "start", "journal_corrupt")
         self.frozen = records[0]["data"]
         need(self.frozen.get("txn") == txn, "journal_corrupt")
         self.manifest = None
+
+    def repair(self):
+        """Preserve and chain a torn tail; call only after the actor was validated."""
+        self.journal.repair_torn_tail()
+        self.torn = None
 
     def records(self):
         records, torn = self.journal.read()
@@ -1090,10 +1100,7 @@ def advance(txn, applier):
     if final == "integrated_pending_liveness":
         live = package_identity(txn.project.pin)
         need(live["commit"] == txn.frozen["to"]["commit"], "postcondition_failed")
-        status = release_status(txn.project.pin)
-        need(status.get("status") in {"ok", "index_tags_missing"}
-             and status.get("pinned_version") == txn.frozen["to"]["version"], "postcondition_failed",
-             what="release_status")
+        require_release_status(txn.project.pin, txn.frozen["to"]["version"])
     txn.journal.append("state", {"state": final})
     return {"status": final, "txn": txn.id}
 
@@ -1116,20 +1123,36 @@ def ensure_consent(txn):
 
 
 def require_applier(project, txn, args):
-    """The applier handle and its current channel session (R3).
+    """The applier handle and the session frozen at prepare, still current (R3a).
 
-    The session frozen at prepare is the starting point. A legitimate channel
-    takeover by the same handle is journaled and becomes the effective session;
-    the replaced (stale) session and any non-current session are refused.
+    Checked before any journal write or effect. A same-handle takeover is not a
+    transfer of this transaction's approval: it stops with
+    `applier_session_changed`, and the transaction and pin stay unchanged.
     """
     need(args.as_handle == txn.frozen["applier"], "not_applier")
+    need(args.session == txn.frozen["applier_session"], "applier_session_changed")
     verify_session(project, args.as_handle, args.session)
-    effective = txn.frozen["applier_session"]
-    for record in txn.records():
-        if record["kind"] == "note" and "applier_takeover" in record["data"]:
-            effective = record["data"]["applier_takeover"]["to"]
-    if args.session != effective:
-        txn.journal.append("note", {"applier_takeover": {"from": effective, "to": args.session}})
+
+
+def require_participant(project, txn, args):
+    """The applier (frozen session) or a declared integration owner (current session)."""
+    if args.as_handle == txn.frozen["applier"]:
+        require_applier(project, txn, args)
+        return
+    need(any(i["owner"] == args.as_handle for i in txn.frozen["integrations"]), "not_participant")
+    need(args.session, "session_required")
+    verify_session(project, args.as_handle, args.session)
+
+
+def require_release_status(pin, version):
+    """One status policy for apply and finalize: verified metadata naming the target as pinned.
+
+    `index_tags_missing` is accepted only because newer unrelated tags may be absent
+    locally; missing, invalid or inconsistent metadata is refused (R6.1).
+    """
+    status = release_status(pin)
+    need(status.get("status") in {"ok", "index_tags_missing"}
+         and status.get("pinned_version") == version, "postcondition_failed", what="release_status")
 
 
 def open_txn(project, txn_id):
@@ -1142,8 +1165,10 @@ def cmd_apply(project, args):
     with project.lock():
         txn = open_txn(project, args.txn)
         require_applier(project, txn, args)
+        txn.repair()
         state = txn.state()
-        need(state not in {"completed", "rolled_back", "integrated_pending_liveness"}, "transaction_finished")
+        need(state not in {"completed", "rolled_back", "integrated_pending_liveness", "awaiting_attestation"},
+             "transaction_finished")
         if txn.current_plan() is None:
             txn.journal.append("plan", {"direction": "forward", "start_commit": txn.frozen["from"]["commit"],
                                         "actions": forward_plan(txn.frozen)})
@@ -1158,6 +1183,7 @@ def cmd_rollback(project, args):
     with project.lock():
         txn = open_txn(project, args.txn)
         require_applier(project, txn, args)
+        txn.repair()
         state = txn.state()
         need(state != "rolled_back", "transaction_finished")
         if state == "completed":
@@ -1182,7 +1208,10 @@ def reconcile_outstanding(txn, plan, applier):
     progress = txn.progress(plan["seq"])
     for index, action in enumerate(plan["data"]["actions"]):
         entry = progress.get(index, {})
-        if entry.get("intent") is None or entry.get("outcome") is not None:
+        outcome = entry.get("outcome")
+        # Unfinished or failed steps may still have taken effect (a hook can write
+        # and then exit non-zero): resolve both by probe, never by exit code (R5).
+        if entry.get("intent") is None or (outcome is not None and outcome.get("ok")):
             continue
         if action["op"] == "checkout":
             ok = action_satisfied(txn, action, None)
@@ -1203,6 +1232,9 @@ def cmd_report(project, args):
         txn = open_txn(project, args.txn)
         need(HANDLE.fullmatch(args.as_handle or ""), "invalid_handle")
         verify_session(project, args.as_handle, args.session)
+        need(any(i["id"] == args.integration and i["owner"] == args.as_handle
+                 for i in txn.frozen["integrations"]), "not_integration_owner")
+        txn.repair()
         if args.phase == "attest":
             return report_attestation(project, txn, args)
         plan = txn.current_plan()
@@ -1274,12 +1306,12 @@ def integration_final_ok(txn, item_id, observed):
 
 def attestations(txn):
     """Latest peer attestation intents/outcomes since the transaction became ready."""
-    ready_seq = 0
     out = {}
     for record in txn.records():
         if record["kind"] == "state" and record["data"]["state"] == "integrated_pending_liveness":
-            ready_seq = record["seq"]
-        if record["seq"] > ready_seq and "attest" in record.get("data", {}):
+            out = {}  # a new readiness epoch invalidates earlier evidence
+            continue
+        if "attest" in record.get("data", {}):
             out.setdefault(record["data"]["attest"], {})[record["kind"]] = dict(record["data"], ts=record["ts"])
     return out
 
@@ -1304,12 +1336,11 @@ def cmd_finalize(project, args):
     with project.lock():
         txn = open_txn(project, args.txn)
         require_applier(project, txn, args)
+        txn.repair()
         need(txn.state() in {"integrated_pending_liveness", "awaiting_attestation"}, "not_ready_to_finalize")
         # Re-verify the live state under the lock (R6): a decision is not a substitute.
         txn.check_identities(txn.frozen["to"]["commit"])
-        status = release_status(project.pin)
-        need(status.get("pinned_version") == txn.frozen["to"]["version"], "postcondition_failed",
-             what="release_status")
+        require_release_status(project.pin, txn.frozen["to"]["version"])
         pending = []
         current = attestations(txn)
         for item in txn.frozen["integrations"]:
@@ -1351,7 +1382,8 @@ def cmd_status(project, args):
     current = read_private(project.root / "current", missing=b"").decode() or None
     out = {"status": "ok", "current_txn": current, "pin": package_identity(project.pin)}
     if current:
-        txn = Txn(project, current, repair=False)
+        txn = Txn(project, current)
+        need(txn.torn is None, "journal_torn_tail")
         out["state"] = txn.state()
         out["invocation"] = txn.frozen["invocation"]
         out["from"] = txn.frozen["from"]["version"]
@@ -1360,9 +1392,14 @@ def cmd_status(project, args):
 
 
 def cmd_recover(project, args):
-    """Repair a torn tail, then report observed per-integration state honestly."""
+    """Validate the actor, repair a torn tail, then report observed state honestly.
+
+    Owner-only probes run only for the validated owner's own integrations.
+    """
     with project.lock():
         txn = open_txn(project, args.txn)
+        require_participant(project, txn, args)
+        txn.repair()
         observed = {}
         for item in txn.frozen["integrations"]:
             if item["owner"] == args.as_handle or item["run_by"] == "any":
@@ -1417,7 +1454,7 @@ def build_parser():
         p = sub.add_parser(name)
         p.add_argument("--txn")
         p.add_argument("--as", dest="as_handle", required=True)
-        p.add_argument("--session", required=name != "recover")
+        p.add_argument("--session", required=True)
     p = sub.add_parser("report")
     p.add_argument("--txn")
     p.add_argument("--integration", required=True)

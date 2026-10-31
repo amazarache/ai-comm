@@ -70,6 +70,8 @@ elif cmd == "rebind": st["bound"] = sha(cli)
 elif cmd in ("install_source", "restore_source"):
     which = sys.argv[3]
     open(src, "wb").write(open(os.path.join(root, "staged", name + "-" + which + ".py"), "rb").read())
+    if os.environ.get("UC_WRITE_THEN_FAIL") == name + ":" + cmd:
+        sys.exit(3)
 elif cmd == "check": pass
 elif cmd == "big": print("x" * 70000); sys.exit(0)
 json.dump(st, open(state_path, "w"))
@@ -189,6 +191,7 @@ class ControllerTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.addCleanup(os.environ.pop, "UC_FAIL_STEP", None)
         self.addCleanup(os.environ.pop, "UC_ADVISORY", None)
+        self.addCleanup(os.environ.pop, "UC_WRITE_THEN_FAIL", None)
 
     def run_uc(self, *args, controller=None):
         if controller is None:
@@ -607,10 +610,10 @@ class ControllerTests(unittest.TestCase):
         self.assertTrue((self.fx.project / "own.state.json").exists())
         self.assertFalse((self.fx.project / "peer.state.json").exists())
 
-    def test_r3_applier_session_current_stale_refused_takeover_journaled(self):
+    def test_r3_applier_session_frozen_takeover_stops(self):
         consent, out = self.prepared()
         code, res = self.run_uc("apply", "--as", "claude", "--session", "other")
-        self.assertEqual(res["code"], "session_not_current")
+        self.assertEqual(res["code"], "applier_session_changed")
         code, res = self.run_uc("apply", "--as", "codex", "--session", "s-codex")
         self.assertEqual(res["code"], "not_applier")
         state = json.loads((self.fx.fake / "state.json").read_text())
@@ -619,10 +622,11 @@ class ControllerTests(unittest.TestCase):
         code, res = self.run_uc("apply", "--as", "claude", "--session", "s-claude")
         self.assertEqual(res["code"], "session_not_current")
         self.assertEqual(self.pin_commit(), self.fx.from_commit)
+        before = self.journal(out["txn"]).path.read_bytes()
         code, res = self.run_uc("apply", "--as", "claude", "--session", "s-claude-takeover")
-        self.assertEqual(res["status"], "integrated_pending_liveness", res)
-        notes = [r["data"] for r in self.journal(out["txn"]).read()[0] if r["kind"] == "note"]
-        self.assertIn({"applier_takeover": {"from": "s-claude", "to": "s-claude-takeover"}}, notes)
+        self.assertEqual(res["code"], "applier_session_changed")
+        self.assertEqual(self.journal(out["txn"]).path.read_bytes(), before)
+        self.assertEqual(self.pin_commit(), self.fx.from_commit)
 
     def _complete(self, out):
         txn = out["txn"]
@@ -807,6 +811,96 @@ class ControllerTests(unittest.TestCase):
         self.assertIn(f"ai-comm-upgrade-txn: {out['txn']}", text)
         self.assertIn("GUIDE.md:2: Transport: ai-comm v1.0.0 pinned", text)
         self.assertIn("ai-comm-upgrade-guidance-sha256:", text)
+
+    def test_r3b_unauthorized_recover_neither_repairs_nor_probes(self):
+        consent, out = self.prepared([self.fx.integration("peer", "codex")])
+        journal = self.journal(out["txn"])
+        with open(journal.path, "ab") as stream:
+            stream.write(b'{"torn":')
+        before = journal.path.read_bytes()
+        for args in (["--as", "codex", "--session", "stale"], ["--as", "intruder", "--session", "s-codex"],
+                     ["--as", "claude", "--session", "s-other"]):
+            with self.subTest(args=args):
+                code, res = self.run_uc("recover", *args)
+                self.assertEqual(code, 2, res)
+                self.assertEqual(journal.path.read_bytes(), before)
+                self.assertFalse(list(journal.dir.glob("torn-*.bin")))
+                self.assertFalse((self.fx.project / "peer.state.json").exists())
+        code, res = self.run_uc("recover", "--as", "codex")
+        self.assertEqual(res["code"], "invalid_arguments")
+        code, res = self.run_uc("recover", "--as", "codex", "--session", "s-codex")
+        self.assertEqual(res["integrations"]["peer"], "running_from", res)
+        self.assertTrue(list(journal.dir.glob("torn-*.bin")))
+
+    def test_r3b_unauthorized_report_does_not_repair(self):
+        consent, out = self.prepared([self.fx.integration("peer", "codex")])
+        res = self.run_uc("apply", "--as", "claude", "--session", "s-claude")[1]
+        journal = self.journal(out["txn"])
+        with open(journal.path, "ab") as stream:
+            stream.write(b'{"torn":')
+        before = journal.path.read_bytes()
+        code, bad = self.run_uc("report", "--integration", "peer", "--phase", "pause", "--nonce", res["nonce"],
+                                "--as", "claude", "--session", "s-claude")
+        self.assertEqual(bad["code"], "not_integration_owner")
+        self.assertEqual(journal.path.read_bytes(), before)
+
+    def test_r5_hook_writes_target_then_fails_rollback_restores(self):
+        consent, out = self.prepared()
+        os.environ["UC_WRITE_THEN_FAIL"] = "own:install_source"
+        code, res = self.run_uc("apply", "--as", "claude", "--session", "s-claude")
+        self.assertEqual(res["code"], "hook_failed")
+        self.assertEqual((self.fx.project / "own_src.py").read_bytes(),
+                         (self.fx.project / "staged" / "own-to.py").read_bytes())
+        os.environ.pop("UC_WRITE_THEN_FAIL")
+        code, res = self.run_uc("rollback", "--as", "claude", "--session", "s-claude")
+        self.assertEqual(res["status"], "rolled_back", res)
+        self.assertEqual(self.pin_commit(), self.fx.from_commit)
+        self.assertEqual((self.fx.project / "own_src.py").read_bytes(),
+                         (self.fx.project / "staged" / "own-from.py").read_bytes())
+        state = json.loads((self.fx.project / "own.state.json").read_text())
+        self.assertEqual((state["paused"], state["bound"]), (False, sha((self.fx.pin / "ai_comm.py").read_bytes())))
+
+    def test_r6_finalize_rejects_inconsistent_release_metadata(self):
+        consent, out = self.prepared()
+        args = self._complete(out)
+        with mock.patch.object(uc, "release_status",
+                               return_value={"status": "index_inconsistent", "pinned_version": "1.1.0"}):
+            code, res = self.run_uc(*args)
+        self.assertEqual((res["code"], res.get("what")), ("postcondition_failed", "release_status"))
+
+    def test_r6_attestation_does_not_survive_new_readiness(self):
+        consent, out = self.prepared([self.fx.integration("peer", "codex")])
+        res = self.run_uc("apply", "--as", "claude", "--session", "s-claude")[1]
+        while res.get("status") == "awaiting_peer":
+            self.run_uc("report", "--integration", "peer", "--phase", res["phase"], "--nonce", res["nonce"],
+                        "--as", "codex", "--session", "s-codex")
+            res = self.run_uc("continue", "--as", "claude", "--session", "s-claude")[1]
+        args = self._complete(out)
+        att = self.run_uc(*args)[1]["attestations"][0]
+        self.run_uc("report", "--integration", "peer", "--phase", "attest", "--nonce", att["nonce"],
+                    "--as", "codex", "--session", "s-codex")
+        code, res = self.run_uc("continue", "--as", "claude", "--session", "s-claude")
+        self.assertEqual(res["code"], "transaction_finished")
+        txn = uc.Txn(uc.Project(self.fx.project), out["txn"])
+        txn.journal.append("state", {"state": "integrated_pending_liveness"})
+        self.assertEqual(uc.attestations(txn), {})
+        code, res = self.run_uc(*args)
+        self.assertEqual(res["status"], "awaiting_peer", res)
+
+    def test_real_release_check_result_shapes_accepted(self):
+        """The fetch predicate against the real helper's own _result() output."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("cfr", ROOT / "scripts" / "check_for_release.py")
+        cfr = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cfr)
+        ok = [(cfr._result("ok", result=r, fetched=True, pinned="1.4.2", latest="1.5.0"), rc)
+              for r, rc in (("up_to_date", 0), ("update_available", 10), ("advisory_applies", 11))]
+        for value, rc in ok:
+            self.assertTrue(uc.fetch_result_ok(rc, value), value)
+        err = cfr._result("error", fetched=False, fetch_error="origin_redirect_refused", pinned="1.4.2", latest=None)
+        self.assertFalse(uc.fetch_result_ok(2, err))
+        self.assertFalse(uc.fetch_result_ok(0, cfr._result("ok", result="up_to_date", fetched=False,
+                                                           pinned="1.4.2", latest="1.4.2")))
 
     # ---- paths and hooks
 

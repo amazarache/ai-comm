@@ -233,7 +233,10 @@ arguments. Commands, all JSON with non-zero exit on any stop:
 - `prepare`: refuses a protocol change, an unintegrated project or an
   unsupported integration; verifies the target in a private clone (tag, manifest,
   full suite); copies the target's controller to
-  `.ai-comm-local/upgrade/controller/<sha256>/`; freezes identities.
+  `.ai-comm-local/upgrade/controller/<sha256>/`; freezes identities; writes a
+  guidance proposal listing exact references to lines in declared guidance files
+  that name the old pin, plus the transaction and hash marker lines (not an
+  applicable diff; it edits no guidance).
 - `apply`, `continue`, `rollback`, `recover`, `report`, `finalize`, `status`.
 
 The pin location is fixed at the project's `.tools/ai-comm`; consent and each

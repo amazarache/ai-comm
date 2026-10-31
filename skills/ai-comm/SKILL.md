@@ -355,7 +355,8 @@ in each direction where wake helpers exist, record it in an artifact containing
 the line `ai-comm-upgrade-txn: <txn>`, and DECIDE it. Publish the activation
 guidance change with the same line plus
 `ai-comm-upgrade-guidance-sha256: <hash>` (start from the `guidance_proposal`
-file that `prepare` writes), DECIDE it, install it, then run `upgrade finalize`.
+file that `prepare` writes: exact references to lines naming the old pin plus the
+marker lines, not an applicable diff; it edits nothing), DECIDE it, install it, then run `upgrade finalize`.
 Finalize re-checks the live package and listeners; for each peer-owned listener
 it returns `awaiting_peer` with an `attest` nonce, and that peer runs
 `upgrade report --phase attest` before finalize can complete. A completed
