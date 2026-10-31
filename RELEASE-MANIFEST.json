@@ -27,8 +27,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 10843,
-      "sha256": "08d0773b2cd91ca92590efcafa46c2036627be1218045892e01abea39e2bfe44"
+      "bytes": 11161,
+      "sha256": "0c9209e649ab07a2bcb412316c9fd141e46d178e238299c8743b2b98b336488b"
     },
     {
       "path": "PROTOCOL.md",
@@ -42,8 +42,8 @@
     },
     {
       "path": "SECURITY.md",
-      "bytes": 6303,
-      "sha256": "004380a043c2e26ec62a930d35667bc005308d73ffd0a5900158c83bd74f3b2d"
+      "bytes": 6591,
+      "sha256": "419a3119c5424c7314f2e723a023808d122aaf9076722a7df680be1e39e1585b"
     },
     {
       "path": "ai_comm.py",
@@ -67,13 +67,18 @@
     },
     {
       "path": "docs/RELEASES.md",
-      "bytes": 16957,
-      "sha256": "b3319e28e8e0bb2dc768e6bb2c44ef024403f1b45ffb530c918a80c0f6fd5236"
+      "bytes": 18356,
+      "sha256": "3ca47e5f3faa9169c4ea05eb480e7bcf657d6d7e5273b7b9b557569e74e09d11"
     },
     {
       "path": "examples/ask.json",
       "bytes": 317,
       "sha256": "5c4c7e06350e0dddb10fb624e3a6d1cfa95b53bed182973858461cf2fb7392e2"
+    },
+    {
+      "path": "install.sh",
+      "bytes": 204,
+      "sha256": "c7aca266e11075f0a3280cdc1f42be8dff041e27ef6738e92e10bc3fe48168cf"
     },
     {
       "path": "scripts/benchmark_snapshot.py",
@@ -82,8 +87,8 @@
     },
     {
       "path": "scripts/check_for_release.py",
-      "bytes": 21422,
-      "sha256": "9a22c2b3eaf9934d7f22963781f20f4c67a060824273568adaec716353953772"
+      "bytes": 21602,
+      "sha256": "584a64814f3f75f727d1232fa14f10f9eed9f523d1b72effd12e5d9c75841edd"
     },
     {
       "path": "scripts/check_release_manifest.py",
@@ -101,6 +106,11 @@
       "sha256": "b57d32bc6533c8cf157b0bc6d2f9634188bdbd201d1d607dc2d2f4f6be6dc250"
     },
     {
+      "path": "scripts/install_project.py",
+      "bytes": 14259,
+      "sha256": "db2bac2541d3fe493fde1cd80fbde3cd1166f7f9644c55bee24e69abdce2ad36"
+    },
+    {
       "path": "scripts/leak_scan.py",
       "bytes": 2260,
       "sha256": "622fe13b1e67b6715b40cbcb3b4861c53da2e6b6f99e7fb5d886a363af44f2af"
@@ -114,6 +124,11 @@
       "path": "skills/ai-comm/SKILL.md",
       "bytes": 21159,
       "sha256": "c32b0062c6155377fb624c761dc3e56c9e962292a96eac355e39f33bf7513a3e"
+    },
+    {
+      "path": "tests/test_install_project.py",
+      "bytes": 12194,
+      "sha256": "ea9b281a538329a97e38fcf5b9b030abd2f9e1d453fd942d4fd0ccf46400177e"
     },
     {
       "path": "tests/test_protocol.py",

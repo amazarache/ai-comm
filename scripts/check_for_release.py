@@ -252,8 +252,12 @@ def _publish_release_refs(repo, refs, *, runner, env):
         raise CheckError("fetch_failed")
 
 
-def _fetch_isolated(repo, origin, helpers, *, runner=subprocess.run):
-    """Fetch through a fresh Git directory, sharing only the target object store."""
+def _fetch_isolated(repo, origin, helpers, *, runner=subprocess.run, refspecs=REFSPECS):
+    """Fetch through a fresh Git directory, sharing only the target object store.
+
+    `refspecs` defaults to the release-check set; the new-project installer passes
+    one exact tag plus the release index (it never fetches other tags).
+    """
     clean_env = ac.git_env({"GIT_CONFIG_GLOBAL": os.devnull,
                             "GIT_CONFIG_NOSYSTEM": "1",
                             "GIT_NO_LAZY_FETCH": "1"})
@@ -290,7 +294,7 @@ def _fetch_isolated(repo, origin, helpers, *, runner=subprocess.run):
             _git_result(["git", f"--git-dir={git_dir}", "update-ref", name, oid],
                         runner=runner, env=fetch_env)
         fetch_args = ["git", f"--git-dir={git_dir}", "fetch", "--refmap=", "--no-tags",
-                      "--no-recurse-submodules", origin, *REFSPECS]
+                      "--no-recurse-submodules", origin, *refspecs]
         proc = _run(fetch_args, runner=runner, env=fetch_env)
         if proc.returncode != 0:
             raise CheckError(_fetch_error(proc.stderr))

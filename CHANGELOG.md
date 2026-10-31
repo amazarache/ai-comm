@@ -13,6 +13,10 @@
   unsupported integrations before any change; peer phases are reported by their
   owner with a one-time nonce; completion requires live-validation and guidance
   DECIDEs.
+- Add `install.sh` for new projects: consent-gated fetch of exactly one tag and
+  the release index, verification of the selected index record and full suite in
+  private staging, atomic publish, `unintegrated` project manifest, `.gitignore`
+  preservation and journaled recovery. It never creates or joins a channel.
 - No auto-apply option. Older pins keep separate Gate 1 and Gate 2 questions.
 - Keep PROTOCOL.md unchanged at the 3.0 contract digest.
 

@@ -256,6 +256,27 @@ effect is preceded by an intent and followed by an outcome; an intent without
 an outcome is resolved only by a read-only probe. A project lock admits one
 applier.
 
+## New-project installer (1.5.0)
+
+`install.sh --project DIR --version X.Y.Z --fetch-permitted
+[--use-git-credential-helper]` runs `scripts/install_project.py` from an already
+verified package (clean checkout whose release manifest checks). With the owner's
+direct consent (`--fetch-permitted`) it fetches exactly `refs/tags/vX.Y.Z` and the
+release index from that package's manifest-bound `RELEASE_ORIGIN`, through the
+same isolated, redirect-refusing fetch as `check_for_release.py`, into a private
+staging repository under `DIR/.ai-comm-local/install-<id>/`. It verifies the
+selected index record against the annotated tag (commit, manifest, protocol),
+runs `check_tag`, `check_release_manifest` and the full suite, then publishes the
+staging repository atomically as `DIR/.tools/ai-comm`. Installing a version older
+than the newest indexed one reports partial release awareness instead of fetching
+more tags. It writes `.ai-comm-local/upgrade/project.json` as `unintegrated`,
+appends only missing `.tools/` and `.ai-comm-local/` lines to `.gitignore`, and
+never initializes, joins or sends to a channel. It refuses an existing pin or
+upgrade state, a symlinked path, unsafe ancestry and a project inside `.tools/`.
+After an interruption, `install.sh --project DIR --recover` removes unpublished
+staging, completes an install whose verified pin was already published, and
+otherwise only reports.
+
 ## Automation
 
 `ci.yml` runs on main, candidate branches, and pull requests against Linux and

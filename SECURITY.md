@@ -92,6 +92,11 @@ Peer phase reports check the declared owner, the current channel session and a
 one-time nonce. As with the channel itself, this prevents mistakes and stale
 data, not a malicious process running as the same user.
 
+The new-project installer runs only from a clean, manifest-verified package,
+fetches only with explicit permission, uses that package's manifest-bound origin,
+verifies before publishing, and never writes outside the target project's
+`.tools/ai-comm`, `.ai-comm-local/` and `.gitignore`.
+
 ## Runtime liveness records
 
 Package 1.3 writes best-effort heartbeat files beneath the channel runtime directory, outside Git history. They are mode 0600 in a mode 0700 directory and contain only the participant handle, generation, UTC poll time, command name, and package version. A same-OS-user process can forge or replace these files; liveness is advisory process evidence, not authenticated peer or model activity. Symlinks and non-regular target files are refused.
