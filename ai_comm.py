@@ -21,7 +21,7 @@ import time
 import unicodedata
 from datetime import datetime, timedelta, timezone
 
-VERSION = "1.4.2"
+VERSION = "1.5.0"
 RELEASE_ORIGIN = "https://github.com/amazarache/ai-comm.git"
 PROTOCOL_VERSION = "3.0"
 PREVIOUS_PROTOCOLS = (("2.0", "709af4b00ffcabeeca1b175d7d7d6db5103df829dabba1e529eef26dce23a000", "0.2.0"),)
@@ -2621,6 +2621,10 @@ def parser():
                    help="optional current channel for a protocol migration plan")
     p.add_argument("--participant", action="append", default=[], metavar="HANDLE=STATUS",
                    help="explicit channel participant status (repeat for each handle)")
+    p = sub.add_parser("upgrade", help="guided, owner-consented upgrade (runs upgrade_controller.py; see docs/RELEASES.md)",
+                       description="Convenience wrapper: runs this package's upgrade_controller.py with the remaining "
+                                   "arguments. For recovery always use the frozen controller path that `upgrade status` prints.")
+    p.add_argument("controller_args", nargs=argparse.REMAINDER)
     p = sub.add_parser("show", help="print one committed message", description="print one committed message")
     p.add_argument("id")
     p = sub.add_parser("show-artifact", help="print a published artifact's exact bytes",
@@ -2639,8 +2643,20 @@ def parser():
     return result
 
 
+def run_upgrade_controller(controller_args):
+    """Exec the package's standalone controller; it never imports this module."""
+    controller = Path(__file__).resolve().parent / "upgrade_controller.py"
+    require(controller.is_file() and not controller.is_symlink(), "upgrade controller is missing",
+            code="upgrade_controller_missing", field="input",
+            hint="Use the frozen controller path printed by `upgrade status`.")
+    os.execv(sys.executable, [sys.executable, "-I", str(controller), *controller_args])
+
+
 def main(argv=None):
     try:
+        raw = list(sys.argv[1:] if argv is None else argv)
+        if raw[:1] == ["upgrade"] and not {"-h", "--help"} & set(raw[1:2]):
+            run_upgrade_controller(raw[1:])
         args = parser().parse_args(argv)
         if args.command not in {"release-status", "upgrade-plan"}:
             require(args.channel is not None, "--channel is required for this command",

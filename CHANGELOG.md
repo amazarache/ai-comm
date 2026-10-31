@@ -1,5 +1,21 @@
 # Changes
 
+## 1.5.0
+
+- Add `upgrade_controller.py` and `ai_comm.py upgrade`: a guided, owner-consented
+  upgrade with one scoped question (yes, fetch only, not now, skip, never),
+  single-use consent bound to project, source, from-commit and target, private
+  verification of the target, and a frozen controller copy outside the pin so
+  that rollback and recovery keep working after the pin changes.
+- Journal each transaction as hash-chained JSON Lines with intent and outcome
+  records, probe-resolved recovery, torn-tail preservation and a project lock.
+- Declare project listeners in `.ai-comm-local/upgrade/project.json`; refuse
+  unsupported integrations before any change; peer phases are reported by their
+  owner with a one-time nonce; completion requires live-validation and guidance
+  DECIDEs.
+- No auto-apply option. Older pins keep separate Gate 1 and Gate 2 questions.
+- Keep PROTOCOL.md unchanged at the 3.0 contract digest.
+
 ## 1.4.2
 
 - Add skill-guided start A/B, status, and stop workflows with a role table,

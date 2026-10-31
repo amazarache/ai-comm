@@ -305,6 +305,57 @@ change requires a migration plan and joint decision, never a silent re-pin.
 verified tag and repeat the same tag, manifest, protocol, test, state, and
 liveness checks and after-steps. Stop on any failure.
 
+## Guided upgrades (package 1.5.0 and newer)
+
+From 1.5.0 the pin ships `upgrade_controller.py`, a standalone controller that
+runs fetch, verification, re-pin, project-listener rebinding and rollback as one
+journaled transaction. It never asks the owner anything and never applies
+without a recorded consent. The rules above stay in force for pins older than
+1.5.0 and for any project that has not adopted 1.5.0.
+
+**One scoped question.** The notifier runs `ai_comm.py upgrade --project DIR
+check` (offline) and, when `prompt.should_ask` is true, asks one question that
+names the target version and commit, the pinned version and commit, the project
+and channel, the release source URL, and the advisory. It asks permission to
+fetch from that source and, only if the tag, manifest, unchanged protocol and full
+tests verify, to switch this project's pin for this one upgrade. When the origin
+needs the git credential helper, the same question must carry the full helper
+disclosure above and the explicit clause "using your configured git credential
+helper for that fetch only". The answers are yes, fetch only, not now, skip this
+version, or never for this project. Record the direct answer with
+`upgrade record-answer` (evidence describes the direct answer without quoting
+it). A yes is single-use: it binds the project, source, from-commit and target
+commit, expires after 24 hours, is consumed at the first live change, and is
+spent after completion, rollback or failure.
+
+**Transaction.** `upgrade fetch`, then `upgrade prepare` (verifies the target in a
+private clone and freezes every identity), then `upgrade apply`. `prepare`
+prints the frozen controller invocation under `.ai-comm-local/upgrade/controller/`;
+use that path for `continue`, `rollback`, `recover` and `status`, because it keeps
+working after the pin changes. Stop at the first non-zero exit and report the
+JSON code; never improvise around it.
+
+**Project integrations.** Every project declares its CLI-bound listeners in
+`.ai-comm-local/upgrade/project.json`. A fresh install is `unintegrated` and
+cannot be upgraded until the agents review it and mark it `declared` (an empty
+list is a valid declaration). `prepare` refuses any integration that does not
+support the exact from/target pair, before anything changes.
+
+**Peers.** Never run another agent's integration step. When `apply` returns
+`awaiting_peer`, send the owning agent the transaction id, integration, phase
+and nonce. That agent runs `upgrade report` in its own session as itself, then
+posts a FACT. Continue with `upgrade continue`.
+
+**Completion.** A switched checkout is not completion. After
+`integrated_pending_liveness`, run the live PING exchange and a genuine idle wake
+in each direction where wake helpers exist, record it in an artifact containing
+the line `ai-comm-upgrade-txn: <txn>`, and DECIDE it. Publish the activation
+guidance change with the same line plus
+`ai-comm-upgrade-guidance-sha256: <hash>`, DECIDE it, install it, then run
+`upgrade finalize`. After any interruption run `upgrade recover`: it reports what
+it can actually observe for each integration and never claims a peer listener is
+paused without that peer's probe.
+
 ## Hard boundaries
 
 Do not widen network access, change permissions, disable a sandbox, install, or

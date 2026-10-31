@@ -217,6 +217,33 @@ reviews the handoff and obtains the old channel's required unanimous ACCEPTs and
 final DECIDE before initializing a linked channel. Plan output is not approval
 or consent.
 
+## Guided upgrade controller (1.5.0)
+
+`upgrade_controller.py` is stdlib-only, listed in the release manifest, and
+never imports the pinned CLI. `ai_comm.py upgrade ...` runs it with the remaining
+arguments. Commands, all JSON with non-zero exit on any stop:
+
+- `check`: offline `release-status` and `upgrade-plan` plus per-project prompt
+  state (`not now` snoozes 24 h, 48 h, then 7 days; `skip` and `never` stop
+  prompts; a `required` advisory is still shown).
+- `record-answer`: stores the owner's direct answer; `yes` and `fetch only`
+  create a consent bound to project, channel, source, from-commit and target.
+- `fetch`: runs `scripts/check_for_release.py --fetch-permitted` only under a
+  matching consent.
+- `prepare`: refuses a protocol change, an unintegrated project or an
+  unsupported integration; verifies the target in a private clone (tag, manifest,
+  full suite); copies the target's controller to
+  `.ai-comm-local/upgrade/controller/<sha256>/`; freezes identities.
+- `apply`, `continue`, `rollback`, `recover`, `report`, `finalize`, `status`.
+
+State lives only in the project's `.ai-comm-local/upgrade/`: private (0700/0600)
+and user-owned. The journal is hash-chained JSON Lines with fsync. An
+unterminated final line is preserved in `torn-<seq>.bin` and chained by a note;
+any complete invalid line is `journal_corrupt` and is never repaired. Each side
+effect is preceded by an intent and followed by an outcome; an intent without
+an outcome is resolved only by a read-only probe. A project lock admits one
+applier.
+
 ## Automation
 
 `ci.yml` runs on main, candidate branches, and pull requests against Linux and

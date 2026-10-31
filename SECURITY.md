@@ -80,6 +80,18 @@ To report a problem, provide a minimal synthetic reproduction and affected commi
 Do not include a private channel, credentials or household/work records in a
 public issue.
 
+## Guided upgrade controller
+
+The controller acts only under a recorded single-use owner consent for the exact
+project, source, from-commit and target. It runs integration steps as argv
+arrays without a shell, parses at most 64 KiB of JSON output and never writes raw
+hook output to the channel or journal. Project ancestors may be owned by root or
+the user; a symlinked ancestor, an other-writable one without the sticky bit, or
+a group-writable one whose group is not the user's private group is refused.
+Peer phase reports check the declared owner, the current channel session and a
+one-time nonce. As with the channel itself, this prevents mistakes and stale
+data, not a malicious process running as the same user.
+
 ## Runtime liveness records
 
 Package 1.3 writes best-effort heartbeat files beneath the channel runtime directory, outside Git history. They are mode 0600 in a mode 0700 directory and contain only the participant handle, generation, UTC poll time, command name, and package version. A same-OS-user process can forge or replace these files; liveness is advisory process evidence, not authenticated peer or model activity. Symlinks and non-regular target files are refused.

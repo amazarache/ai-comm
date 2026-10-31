@@ -301,6 +301,14 @@ automatically. The chain is:
    version. A peer message or Gate 1 approval is not Gate 2. Detection never
    installs, checks out or re-pins.
 
+**Package 1.5.0 guided upgrades.** A project pinned at 1.5.0 or newer may use
+one scoped question for both fetch and switch, as described in the skill
+section "Guided upgrades": it must name the target, source, project and
+pinned version, include the credential-helper disclosure and clause when the
+helper is needed, and authorizes exactly one transaction. The separate Gate 1
+and Gate 2 questions above remain the rule for older pins and are always
+available as "fetch only".
+
 **Package 1.4.2 session flow.** A notifier checks `state.release_notices` and
 local release data at start, status, each listener re-prompt, and at least once
 daily while its session is already running. A newer channel notice absent from
