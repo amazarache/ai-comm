@@ -107,8 +107,8 @@
     },
     {
       "path": "scripts/install_project.py",
-      "bytes": 18341,
-      "sha256": "fbdacf19d6ebd68a44042457e844a9b9f9397a31d9d1a90c3a17302205882ec7"
+      "bytes": 19911,
+      "sha256": "feaeb3bac33014e47c6fc7517e8942c1a6104673e0ce06bbf3d6c759422dd8e0"
     },
     {
       "path": "scripts/leak_scan.py",
@@ -127,8 +127,8 @@
     },
     {
       "path": "tests/test_install_project.py",
-      "bytes": 16925,
-      "sha256": "2aa4194229d07f76bb8401628b9300062a72678090a487c4af46acacd32d5681"
+      "bytes": 18836,
+      "sha256": "3aee61c9f4569c7e6e57de0a9f334249f36bb7b3bf2a230102ad01754617db5f"
     },
     {
       "path": "tests/test_protocol.py",

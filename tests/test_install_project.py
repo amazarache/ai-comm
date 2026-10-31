@@ -322,6 +322,45 @@ class InstallTests(unittest.TestCase):
         self.assertEqual((err.code, err.details.get("what")), ("index_tag_mismatch", "manifest"))
         self.assertFalse((self.project / ".tools" / "ai-comm").exists())
 
+    def test_i1_foreign_torn_journal_untouched(self):
+        local = self.project / ".ai-comm-local"
+        os.mkdir(local, 0o700)
+        other = local / "install-abcdefabcdef"
+        os.mkdir(other, 0o700)
+        ip.uc.Journal(other).append("start", {"schema": ip.INSTALL_SCHEMA, "project": "/elsewhere", "version": "1.5.1"})
+        with open(other / "journal.jsonl", "ab") as stream:
+            stream.write(b'{"torn":')
+        before = (other / "journal.jsonl").read_bytes()
+        out = ip.recover(self.project)
+        self.assertEqual(out["results"][0]["action"], "skipped_unrecognized")
+        self.assertEqual((other / "journal.jsonl").read_bytes(), before)
+        self.assertFalse(list(other.glob("torn-*.bin")))
+
+    def test_i3_staging_repo_swapped_for_symlink_during_tests(self):
+        outside = Path(self.temp.name) / "outside"
+
+        def swap(repo):
+            shutil.copytree(repo, outside, symlinks=True)
+            (outside / "KEEP.txt").write_text("keep")
+            shutil.rmtree(repo)
+            repo.symlink_to(outside)
+            return 7
+        err = self.stop(self.install, suite=swap)
+        self.assertEqual(err.code, "unsafe_path")
+        self.assertEqual((outside / "KEEP.txt").read_text(), "keep")
+        self.assertFalse(os.path.lexists(self.project / ".tools" / "ai-comm"))
+
+    def test_i3_recover_refuses_symlinked_tools_after_publish(self):
+        with mock.patch.object(ip, "finish", side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                self.install()
+        moved = Path(self.temp.name) / "moved-tools"
+        shutil.move(str(self.project / ".tools"), str(moved))
+        (self.project / ".tools").symlink_to(moved)
+        err = self.stop(ip.recover, self.project)
+        self.assertEqual(err.code, "unsafe_path")
+        self.assertFalse((self.project / ".ai-comm-local" / "upgrade").exists())
+
     @unittest.skipIf(os.environ.get(GUARD) == "1", "inside a target verification")
     def test_real_suite_install_end_to_end(self):
         out = self.install(suite=ip.real_suite)

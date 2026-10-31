@@ -21,6 +21,7 @@ from pathlib import Path
 import re
 import secrets
 import shutil
+import stat
 import subprocess
 import sys
 
@@ -150,9 +151,24 @@ def verify_staging(repo, version, record, run_suite):
     return {"tag": tag, "tests_ran": tests, "release_awareness": awareness}
 
 
+def check_staged_repo(repo):
+    """The staging repository and every component up to the project are real,
+    user-owned directories, not symlinks (checked before cleanup and publish)."""
+    staging = repo.parent
+    local = staging.parent
+    project = local.parent
+    uc.check_ancestry(project)
+    need(not local.is_symlink() and uc._mode_ok_ancestor(os.lstat(local)), "unsafe_path", path=".ai-comm-local")
+    uc.private_dir(staging, create=False)
+    st = os.lstat(repo)
+    need(stat.S_ISDIR(st.st_mode) and not stat.S_ISLNK(st.st_mode) and st.st_uid == os.getuid(),
+         "unsafe_path", path="staging/repo")
+
+
 def require_staged_identity(repo, tag):
     """After code ran in the staging repository: remove build debris, then require the
     exact tag commit with no tracked, untracked or ignored changes (I2)."""
+    check_staged_repo(repo)
     git(repo, "clean", "-fdxq")
     need(git(repo, "rev-parse", "HEAD").strip() == tag["commit"], "staged_identity_changed", what="commit")
     need(git(repo, "status", "--porcelain", "--untracked-files=all", "--ignored").strip() == "",
@@ -211,6 +227,9 @@ def publish(project, staging):
                 raise Stop("pin_exists")
             except FileNotFoundError:
                 pass
+            src = os.lstat("repo", dir_fd=stage_fd)
+            need(stat.S_ISDIR(src.st_mode) and not stat.S_ISLNK(src.st_mode) and src.st_uid == os.getuid(),
+                 "unsafe_path", path="staging/repo")
             os.rename("repo", "ai-comm", src_dir_fd=stage_fd, dst_dir_fd=tools_fd)
             os.fsync(tools_fd)
             os.fsync(stage_fd)
@@ -312,8 +331,7 @@ def recognized_journal(project, staging):
         if not (staging / "journal.jsonl").is_file():
             return None
         journal = uc.Journal(staging)
-        journal.repair_torn_tail()
-        records, _ = journal.read()
+        records, torn = journal.read()  # read-only: complete, chain-verified prefix
     except Stop:
         return None
     if not records or records[0]["kind"] != "start":
@@ -321,7 +339,24 @@ def recognized_journal(project, staging):
     start = records[0]["data"]
     if start.get("schema") != INSTALL_SCHEMA or start.get("project") != str(project):
         return None
+    if torn is not None:
+        journal.repair_torn_tail()  # only after the binding to this project is verified
+        records, _ = journal.read()
     return records
+
+
+def real_pin_path(project):
+    """True only if .tools and .tools/ai-comm are real, user-owned directories."""
+    for path in (project / ".tools", project / ".tools" / "ai-comm"):
+        try:
+            st = os.lstat(path)
+        except FileNotFoundError:
+            return False
+        if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid():
+            if stat.S_ISLNK(st.st_mode):
+                raise Stop("unsafe_path", path=str(path.relative_to(project)))
+            return False
+    return True
 
 
 def recover(project_dir):
@@ -346,7 +381,7 @@ def recover(project_dir):
                 continue
             pin = project / ".tools" / "ai-comm"
             record = next(r["data"]["record"] for r in records if r["kind"] == "outcome" and r["data"]["index"] == 0)
-            if pin.is_dir() and not pin.is_symlink():
+            if real_pin_path(project):
                 identity = uc.package_identity(pin)
                 if identity["commit"] == record["commit"] and not identity["dirty"]:
                     if not [r for r in records if r["kind"] == "outcome" and r["data"]["index"] == 1]:
