@@ -275,9 +275,20 @@ class Project:
 
 
 def clean_env():
+    """Environment for every controller/installer Git and verification subprocess.
+
+    Global and system Git config are ignored and hooks are disabled, so user or
+    repository hooks (e.g. post-checkout) never run during staging, verification
+    or checkout. Only the consent-gated fetch helper passes approved credential
+    helpers, through its own isolated config.
+    """
     env = {k: v for k, v in os.environ.items() if k not in GIT_ENV_DROP}
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GIT_CONFIG_NOSYSTEM"] = "1"
+    env["GIT_CONFIG_GLOBAL"] = os.devnull
+    env["GIT_CONFIG_COUNT"] = "1"
+    env["GIT_CONFIG_KEY_0"] = "core.hooksPath"
+    env["GIT_CONFIG_VALUE_0"] = os.devnull
     env["LC_ALL"] = "C"
     return env
 

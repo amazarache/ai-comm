@@ -137,7 +137,7 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(self.stop(self.install, fetch_permitted=False).code, "fetch_not_permitted")
         self.assertFalse((self.project / ".ai-comm-local").exists())
 
-    def test_unknown_version_and_index_mismatch(self):
+    def test_unknown_version_refused(self):
         self.assertEqual(self.stop(self.install, "1.9.9").code, "fetch_failed")
         self.assertFalse((self.project / ".tools").exists())
 
@@ -290,6 +290,37 @@ class InstallTests(unittest.TestCase):
         with open(archive / "ai_comm.py", "a") as stream:
             stream.write("\n# tampered\n")
         self.assertEqual(self.stop(ip.trusted_source, archive).code, "installer_package_unverified")
+
+    def test_i4_global_git_hooks_never_run(self):
+        hooks = Path(self.temp.name) / "hooks"
+        hooks.mkdir()
+        sentinel = Path(self.temp.name) / "HOOK_RAN"
+        for name in ("post-checkout", "post-merge", "reference-transaction"):
+            hook = hooks / name
+            hook.write_text(f"#!/bin/sh\ntouch '{sentinel}'\n")
+            hook.chmod(0o755)
+        cfg = Path(self.temp.name) / "gitconfig"
+        cfg.write_text(f"[core]\n\thooksPath = {hooks}\n")
+        with mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(cfg)}):
+            out = self.install()
+        self.assertEqual(out["status"], "installed")
+        self.assertFalse(sentinel.exists())
+
+    def test_index_record_disagreeing_with_tag_is_refused(self):
+        bad = Path(self.temp.name) / "bad-origin"
+        subprocess.run(["git", "clone", "-q", "--mirror", str(self.source), str(bad / ".git")], check=True, env=ENV)
+        git(bad, "config", "--bool", "core.bare", "false")
+        git(bad, "checkout", "-q", "release-index")
+        index = json.loads((bad / "RELEASES.json").read_text())
+        for entry in index["releases"]:
+            if entry["package_version"] == "1.5.1":
+                entry["manifest_sha256"] = "0" * 64
+        (bad / "RELEASES.json").write_text(json.dumps(index, sort_keys=True, separators=(",", ":")) + "\n")
+        git(bad, "commit", "-qam", "tampered index")
+        err = self.stop(ip.install, self.project, "1.5.1", fetch_permitted=True, use_helper=False,
+                        origin=str(bad), run_suite=lambda r: 7)
+        self.assertEqual((err.code, err.details.get("what")), ("index_tag_mismatch", "manifest"))
+        self.assertFalse((self.project / ".tools" / "ai-comm").exists())
 
     @unittest.skipIf(os.environ.get(GUARD) == "1", "inside a target verification")
     def test_real_suite_install_end_to_end(self):

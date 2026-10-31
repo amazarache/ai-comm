@@ -904,6 +904,21 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual((rep["code"], rep.get("what")), ("upgrade_identity_changed", "integration_code"))
         self.assertFalse((self.fx.project / "SENTINEL").exists())
 
+    def test_global_git_hooks_never_run_during_checkout(self):
+        consent, out = self.prepared()
+        hooks = Path(self.temp.name) / "hooks"
+        hooks.mkdir()
+        sentinel = Path(self.temp.name) / "HOOK_RAN"
+        hook = hooks / "post-checkout"
+        hook.write_text(f"#!/bin/sh\ntouch '{sentinel}'\n")
+        hook.chmod(0o755)
+        cfg = Path(self.temp.name) / "gitconfig"
+        cfg.write_text(f"[core]\n\thooksPath = {hooks}\n")
+        with mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(cfg)}):
+            code, res = self.run_uc("apply", "--as", "claude", "--session", "s-claude")
+        self.assertEqual(res["status"], "integrated_pending_liveness", res)
+        self.assertFalse(sentinel.exists())
+
     def test_r6_finalize_rejects_inconsistent_release_metadata(self):
         consent, out = self.prepared()
         args = self._complete(out)
