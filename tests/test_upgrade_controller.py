@@ -876,6 +876,34 @@ class ControllerTests(unittest.TestCase):
                 self.assertFalse((self.fx.project / "SENTINEL").exists())
                 self.assertEqual(journal.path.read_bytes(), before)
 
+    def test_r8_modified_pin_cli_never_runs(self):
+        consent, out = self.prepared([self.fx.integration("own", "claude"), self.fx.integration("peer", "codex")])
+        journal = self.journal(out["txn"])
+        cli = self.fx.pin / "ai_comm.py"
+        cli.write_text(cli.read_text() + "\nopen(%r, 'w').write('ran')\n" % str(self.fx.project / "SENTINEL"))
+        before = journal.path.read_bytes()
+        calls = [("apply", "--as", "claude", "--session", "s-claude"),
+                 ("rollback", "--as", "claude", "--session", "s-claude"),
+                 ("recover", "--as", "codex", "--session", "s-codex"),
+                 ("report", "--integration", "peer", "--phase", "pause", "--nonce", "0" * 32,
+                  "--as", "codex", "--session", "s-codex")]
+        for call in calls:
+            with self.subTest(call=call[0]):
+                code, res = self.run_uc(*call)
+                self.assertEqual((res["code"], res.get("what")), ("upgrade_identity_changed", "pin_dirty"))
+                self.assertFalse((self.fx.project / "SENTINEL").exists())
+                self.assertEqual(journal.path.read_bytes(), before)
+
+    def test_r8_modified_peer_probe_blocks_report(self):
+        consent, out = self.prepared([self.fx.integration("peer", "codex")])
+        res = self.run_uc("apply", "--as", "claude", "--session", "s-claude")[1]
+        with open(self.fx.project / "listener.py", "a") as stream:
+            stream.write("\nopen('SENTINEL', 'w').write('ran')\n")
+        code, rep = self.run_uc("report", "--integration", "peer", "--phase", "pause", "--nonce", res["nonce"],
+                                "--as", "codex", "--session", "s-codex")
+        self.assertEqual((rep["code"], rep.get("what")), ("upgrade_identity_changed", "integration_code"))
+        self.assertFalse((self.fx.project / "SENTINEL").exists())
+
     def test_r6_finalize_rejects_inconsistent_release_metadata(self):
         consent, out = self.prepared()
         args = self._complete(out)

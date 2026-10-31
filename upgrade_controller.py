@@ -760,9 +760,9 @@ def verify_target(project, tag, workdir):
 def cmd_prepare(project, args):
     with project.lock():
         need(HANDLE.fullmatch(args.as_handle or ""), "invalid_handle")
-        verify_session(project, args.as_handle, args.session)
         pin = package_identity(project.pin)
         need(not pin["dirty"], "pin_dirty")
+        verify_session(project, args.as_handle, args.session)
         consent = load_consent(project, args.consent)
         tag = tag_identity(project.pin, args.target)
         check_consent(project, consent, scope="upgrade", target=args.target, pin=pin, tag=tag)
@@ -1149,6 +1149,19 @@ def ensure_consent(txn):
     need(consent["consumed_by"] == txn.id, "consent_spent")
 
 
+def check_pin_static(project, allowed_commits):
+    """Before running any pin code (e.g. the CLI for session checks): the pin is a
+    clean checkout at an expected commit. Uses Git only, never the pin's Python (R8)."""
+    live = package_identity(project.pin)
+    need(not live["dirty"], "upgrade_identity_changed", what="pin_dirty")
+    need(live["commit"] in allowed_commits, "upgrade_identity_changed", what="pin_commit")
+    return live
+
+
+def txn_pin_commits(txn):
+    return {txn.frozen["from"]["commit"], txn.frozen["to"]["commit"]}
+
+
 def require_applier(project, txn, args):
     """The applier handle and the session frozen at prepare, still current (R3a).
 
@@ -1158,6 +1171,7 @@ def require_applier(project, txn, args):
     """
     need(args.as_handle == txn.frozen["applier"], "not_applier")
     need(args.session == txn.frozen["applier_session"], "applier_session_changed")
+    check_pin_static(project, txn_pin_commits(txn))
     verify_session(project, args.as_handle, args.session)
 
 
@@ -1168,6 +1182,7 @@ def require_participant(project, txn, args):
         return
     need(any(i["owner"] == args.as_handle for i in txn.frozen["integrations"]), "not_participant")
     need(args.session, "session_required")
+    check_pin_static(project, txn_pin_commits(txn))
     verify_session(project, args.as_handle, args.session)
 
 
@@ -1259,10 +1274,12 @@ def cmd_report(project, args):
     with project.lock():
         txn = open_txn(project, args.txn)
         need(HANDLE.fullmatch(args.as_handle or ""), "invalid_handle")
+        check_pin_static(project, txn_pin_commits(txn))
         verify_session(project, args.as_handle, args.session)
         need(any(i["id"] == args.integration and i["owner"] == args.as_handle
                  for i in txn.frozen["integrations"]), "not_integration_owner")
         txn.repair()
+        txn.check_static()
         if args.phase == "attest":
             return report_attestation(project, txn, args)
         plan = txn.current_plan()
