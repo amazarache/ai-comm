@@ -257,6 +257,10 @@ class ControllerTests(unittest.TestCase):
                result(err=json.dumps({"code": "upgrade_plan_unavailable"}).encode()),
                result(err=b'{"code": "upgrade_target_not_newer", "code": "x"}'),
                result(err=b'{"code": "upgrade_target_not_newer", "n": NaN}'),
+               result(err=b'{"code": "upgrade_target_not_newer", "n": 1e999}'),
+               result(err=b'{"code": "upgrade_target_not_newer", "n": -1e999}'),
+               result(err=b'{"code": "upgrade_target_not_newer", "n": Infinity}'),
+               result(err=b'{"code": "upgrade_target_not_newer", "x": {"y": [1e999]}}'),
                result(err=b'["upgrade_target_not_newer"]'), result(err=b'{"code": 1}'),
                result(err=b"\xff\xfe"), result(err=b""), result(err=b" " * (uc.MAX_JSON + 1))]
         for item in bad:

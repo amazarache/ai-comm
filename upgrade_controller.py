@@ -19,6 +19,7 @@ import grp
 import pwd
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -401,6 +402,13 @@ def _no_constant(name):
     raise ValueError("non-finite number")
 
 
+def _finite_float(text):
+    value = float(text)
+    if not math.isfinite(value):
+        raise ValueError("non-finite number")  # e.g. 1e999 overflows to infinity
+    return value
+
+
 def no_newer_release(result):
     """True only for the core plan's expected "no newer verified release" result:
     exit 2, empty stdout, and bounded strict JSON on stderr naming that code."""
@@ -408,7 +416,7 @@ def no_newer_release(result):
         return False
     try:
         value = json.loads(bytes(result.stderr).decode("utf-8"), object_pairs_hook=_unique_pairs,
-                           parse_constant=_no_constant)
+                           parse_constant=_no_constant, parse_float=_finite_float)
     except (UnicodeError, ValueError):
         return False
     return isinstance(value, dict) and value.get("code") == "upgrade_target_not_newer"
