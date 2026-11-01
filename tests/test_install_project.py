@@ -23,6 +23,12 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import install_project as ip  # noqa: E402
 
 
+def package_files(root):
+    """Files of a release package, from its manifest (works without Git metadata)."""
+    manifest = json.loads((root / "RELEASE-MANIFEST.json").read_text())
+    return [entry["path"] for entry in manifest["files"]] + ["RELEASE-MANIFEST.json"]
+
+
 def git(cwd, *args):
     return subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True, env=ENV).stdout.decode()
 
@@ -36,9 +42,7 @@ def build_source(base):
     src = base / "origin"
     src.mkdir()
     git(src, "init", "-q", "--initial-branch=main")
-    tracked = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-z"], capture_output=True,
-                             check=True).stdout.decode().split("\0")
-    for name in [t for t in tracked if t]:
+    for name in package_files(ROOT):
         dest = src / name
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / name, dest)
@@ -279,9 +283,7 @@ class InstallTests(unittest.TestCase):
 
     def test_archive_trust_source_verified_and_tamper_refused(self):
         archive = Path(self.temp.name) / "archive"
-        tracked = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-z"], capture_output=True,
-                                 check=True).stdout.decode().split("\0")
-        for name in [t for t in tracked if t]:
+        for name in package_files(ROOT):
             dest = archive / name
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / name, dest)

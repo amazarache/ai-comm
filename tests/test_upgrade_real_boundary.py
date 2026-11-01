@@ -22,6 +22,12 @@ ENV = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_AUTHOR_NAME": "t", "GIT_AU
        "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid", "HOME": "/nonexistent", GUARD: "1"}
 
 
+def package_files(root):
+    """Files of a release package, from its manifest (works without Git metadata)."""
+    manifest = json.loads((root / "RELEASE-MANIFEST.json").read_text())
+    return [entry["path"] for entry in manifest["files"]] + ["RELEASE-MANIFEST.json"]
+
+
 def git(cwd, *args):
     return subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True, env=ENV).stdout.decode()
 
@@ -46,9 +52,7 @@ class RealBoundaryTests(unittest.TestCase):
         subprocess.run(["git", "clone", "-q", "--no-hardlinks", str(ROOT), str(pkg)], check=True, env=ENV)
         git(pkg, "checkout", "-q", "--detach", "v1.4.2^{commit}")
         self.from_commit = git(pkg, "rev-parse", "HEAD").strip()
-        tracked = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-z"], capture_output=True,
-                                 check=True).stdout.decode().split("\0")
-        for name in [t for t in tracked if t]:
+        for name in package_files(ROOT):
             dest = pkg / name
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / name, dest)

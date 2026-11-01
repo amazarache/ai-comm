@@ -127,8 +127,8 @@
     },
     {
       "path": "tests/test_install_project.py",
-      "bytes": 18836,
-      "sha256": "3aee61c9f4569c7e6e57de0a9f334249f36bb7b3bf2a230102ad01754617db5f"
+      "bytes": 18761,
+      "sha256": "af7a1813f32ef136acaf0b8755d1caeb45d9b2b975dd5fe8dbf478f3547c6f26"
     },
     {
       "path": "tests/test_protocol.py",
@@ -157,8 +157,8 @@
     },
     {
       "path": "tests/test_upgrade_real_boundary.py",
-      "bytes": 7475,
-      "sha256": "63176fd000ad7cd875b227660651103e201eaa99083b0c019ec46c95f70f2da8"
+      "bytes": 7569,
+      "sha256": "66f0a071aa5897f8a50fa8bda36fce0f0dfd9655b95537505030dbb16bd38add"
     },
     {
       "path": "upgrade_controller.py",
