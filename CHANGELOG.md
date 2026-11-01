@@ -1,5 +1,15 @@
 # Changes
 
+## 1.5.1
+
+- Fix a test-only defect that stopped the 1.5.0 release workflow: the
+  end-to-end upgrade test created a fixed `v1.5.0` tag in a clone of the
+  repository, which collides once that real tag exists. The test now uses the
+  tree's own version and replaces a same-named tag only inside its throwaway
+  clone. No change to the package code, protocol or upgrade behaviour.
+- The `v1.5.0` tag remains in the repository but is not a published release and
+  is not listed in the release index.
+
 ## 1.5.0
 
 - Add `upgrade_controller.py` and `ai_comm.py upgrade`: a guided, owner-consented

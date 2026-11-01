@@ -27,8 +27,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 11161,
-      "sha256": "0c9209e649ab07a2bcb412316c9fd141e46d178e238299c8743b2b98b336488b"
+      "bytes": 11659,
+      "sha256": "a36116c1bd7f11b5d6e97626ca3fdbf080a0748a29b444f628c97eb5d4ebaae9"
     },
     {
       "path": "PROTOCOL.md",
@@ -48,7 +48,7 @@
     {
       "path": "ai_comm.py",
       "bytes": 155549,
-      "sha256": "48989deffc540022561951ef09688ede78b436d8ffed5bbbe629a2e047ed5643"
+      "sha256": "521fff85353e9da3e71f3d74fa5fbb4b3727237ec7e9b65b6b1cfd524dd0a6b9"
     },
     {
       "path": "docs/ERRORS.md",
@@ -157,8 +157,8 @@
     },
     {
       "path": "tests/test_upgrade_real_boundary.py",
-      "bytes": 7569,
-      "sha256": "66f0a071aa5897f8a50fa8bda36fce0f0dfd9655b95537505030dbb16bd38add"
+      "bytes": 8203,
+      "sha256": "245bca81260f81e37b4b65124662b74e9d06c2bf6fdd873d9c3dadeaa46b73f6"
     },
     {
       "path": "upgrade_controller.py",

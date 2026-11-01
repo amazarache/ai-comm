@@ -1,7 +1,7 @@
 """End-to-end controller run against the real CLI, scripts and suite (no network, no fakes).
 
 Builds a throwaway release repository from the real v1.4.2 tag plus the current
-tree as v1.5.0, a real channel, and runs check, record-answer, prepare (real
+tree as its own VERSION, a real channel, and runs check, record-answer, prepare (real
 check_tag, check_release_manifest and full suite), apply and rollback. Skipped
 when v1.4.2 is not available locally (shallow CI checkout) and inside its own
 target verification, so it never recurses.
@@ -9,6 +9,7 @@ target verification, so it never recurses.
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -30,6 +31,12 @@ def package_files(root):
 
 def git(cwd, *args):
     return subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True, env=ENV).stdout.decode()
+
+
+def tree_version():
+    """The version of the tree under test, so the fixture tag never assumes a release number."""
+    text = (ROOT / "ai_comm.py").read_text(encoding="utf-8")
+    return re.findall(r'^VERSION = "([^"]+)"$', text, re.MULTILINE)[0]
 
 
 def have_base():
@@ -56,10 +63,16 @@ class RealBoundaryTests(unittest.TestCase):
             dest = pkg / name
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / name, dest)
+        self.version = tree_version()
+        tag = f"v{self.version}"
         git(pkg, "add", "-A")
-        git(pkg, "commit", "-q", "-m", "candidate 1.5.0")
+        git(pkg, "commit", "-q", "-m", f"candidate {self.version}")
         manifest = hashlib.sha256((pkg / "RELEASE-MANIFEST.json").read_bytes()).hexdigest()
-        git(pkg, "tag", "-a", "v1.5.0", "-m", f"ai-comm 1.5.0 (protocol 3.0); manifest sha256 {manifest}")
+        # The throwaway clone may already hold a real tag of this name (e.g. when the
+        # release workflow verifies the tagged commit); replace it only in this clone.
+        if git(pkg, "tag", "-l", tag).strip():
+            git(pkg, "tag", "-d", tag)
+        git(pkg, "tag", "-a", tag, "-m", f"ai-comm {self.version} (protocol 3.0); manifest sha256 {manifest}")
         self.to_commit = git(pkg, "rev-parse", "HEAD").strip()
         protocol = hashlib.sha256((pkg / "PROTOCOL.md").read_bytes()).hexdigest()
         old_manifest = hashlib.sha256(git(pkg, "show", "v1.4.2:RELEASE-MANIFEST.json").encode()).hexdigest()
@@ -67,7 +80,7 @@ class RealBoundaryTests(unittest.TestCase):
                  "protocol_sha256": protocol}
         index = {"format": "ai-comm-releases/1", "releases": [
             dict(entry, package_version="1.4.2", commit=self.from_commit, tag="v1.4.2", manifest_sha256=old_manifest),
-            dict(entry, package_version="1.5.0", commit=self.to_commit, tag="v1.5.0", manifest_sha256=manifest)]}
+            dict(entry, package_version=self.version, commit=self.to_commit, tag=tag, manifest_sha256=manifest)]}
         git(pkg, "switch", "-q", "--orphan", "release-index")
         for child in pkg.iterdir():
             if child.name != ".git":
@@ -106,13 +119,13 @@ class RealBoundaryTests(unittest.TestCase):
         here = ROOT / "upgrade_controller.py"
         code, out = self.ctl(here, "check")
         self.assertEqual(code, 0, out)
-        self.assertEqual((out["release_status"], out["prompt"]["target"]), ("ok", "1.5.0"), out)
+        self.assertEqual((out["release_status"], out["prompt"]["target"]), ("ok", self.version), out)
         self.assertTrue(out["prompt"]["should_ask"])
-        code, ans = self.ctl(here, "record-answer", "--answer", "yes", "--target", "1.5.0",
+        code, ans = self.ctl(here, "record-answer", "--answer", "yes", "--target", self.version,
                              "--target-commit", out["prompt"]["target_commit"], "--source", out["prompt"]["source"],
                              "--evidence", "direct owner yes (test)")
         self.assertEqual(code, 0, ans)
-        code, prep = self.ctl(here, "prepare", "--target", "1.5.0", "--consent", ans["consent"],
+        code, prep = self.ctl(here, "prepare", "--target", self.version, "--consent", ans["consent"],
                               "--as", "claude", "--session", "s-claude")
         self.assertEqual(code, 0, prep)
         self.assertTrue(prep["verification"]["checks"]["tests"])
@@ -123,7 +136,7 @@ class RealBoundaryTests(unittest.TestCase):
         self.assertEqual(git(self.pin, "rev-parse", "HEAD").strip(), self.to_commit)
         status = json.loads(subprocess.run([sys.executable, "-I", str(self.pin / "ai_comm.py"), "release-status"],
                                            capture_output=True, env=ENV).stdout)
-        self.assertEqual((status["status"], status["pinned_version"]), ("ok", "1.5.0"))
+        self.assertEqual((status["status"], status["pinned_version"]), ("ok", self.version))
         code, res = self.ctl(frozen, "rollback", "--as", "claude", "--session", "s-claude")
         self.assertEqual(res["status"], "rolled_back", res)
         self.assertEqual(git(self.pin, "rev-parse", "HEAD").strip(), self.from_commit)
