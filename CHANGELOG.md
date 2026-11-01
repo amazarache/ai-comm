@@ -1,5 +1,15 @@
 # Changes
 
+## 1.5.2
+
+- Fix `ai_comm.py upgrade check` on a pin that is already at the newest verified
+  release: it now reports `status: ok` with no prompt instead of stopping with
+  `upgrade_plan_invalid`. The controller reads the core plan's expected
+  `upgrade_target_not_newer` result from stderr (exit 2, empty stdout, strict
+  bounded JSON); every other error, malformed output or explicit target still
+  stops. The controller test fixture now follows the real CLI error contract,
+  and a contract test checks the real CLI's output. No protocol change.
+
 ## 1.5.1
 
 - Fix a test-only defect that stopped the 1.5.0 release workflow: the

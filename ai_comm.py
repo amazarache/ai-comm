@@ -21,7 +21,7 @@ import time
 import unicodedata
 from datetime import datetime, timedelta, timezone
 
-VERSION = "1.5.1"
+VERSION = "1.5.2"
 RELEASE_ORIGIN = "https://github.com/amazarache/ai-comm.git"
 PROTOCOL_VERSION = "3.0"
 PREVIOUS_PROTOCOLS = (("2.0", "709af4b00ffcabeeca1b175d7d7d6db5103df829dabba1e529eef26dce23a000", "0.2.0"),)

@@ -33,7 +33,8 @@ if args[:1] == ["release-status"]:
     print(json.dumps({"status": "ok", "pinned_version": VERSION, "latest_version": "1.1.0"})); sys.exit(0)
 if args[:1] == ["upgrade-plan"]:
     if VERSION == "1.1.0":
-        print(json.dumps({"error": "x", "code": "upgrade_target_not_newer"})); sys.exit(2)
+        # Same contract as the real CLI: errors go to stderr as JSON with exit 2.
+        print(json.dumps({"error": "x", "code": "upgrade_target_not_newer"}), file=sys.stderr); sys.exit(2)
     print(json.dumps({"from": VERSION, "to": "1.1.0", "commit": tagcommit("v1.1.0"), "tag": "v1.1.0",
                       "channel_action": "unchanged", "applicable_advisory": {"advisory": os.environ.get("UC_ADVISORY", "optional")},
                       "owner_notice": "notice"})); sys.exit(0)
@@ -234,6 +235,50 @@ class ControllerTests(unittest.TestCase):
         self.assertTrue(out["prompt"]["should_ask"])
         self.assertEqual(out["prompt"]["target"], "1.1.0")
         self.assertEqual(out["prompt"]["source"], "https://example.invalid/ai-comm.git")
+
+    def test_check_on_current_pin_reports_no_offer(self):
+        self.fx.write_manifest([])
+        git(self.fx.pin, "checkout", "-q", "--detach", self.fx.to_commit)
+        code, out = self.run_uc("check")
+        self.assertEqual(code, 0, out)
+        self.assertEqual((out["status"], out["pinned"], out["latest"], out["prompt"]), ("ok", "1.1.0", "1.1.0", None))
+
+    def test_explicit_target_not_newer_still_stops(self):
+        git(self.fx.pin, "checkout", "-q", "--detach", self.fx.to_commit)
+        with self.assertRaises(uc.Stop) as ctx:
+            uc.upgrade_plan(self.fx.pin, target="1.1.0")
+        self.assertEqual(ctx.exception.code, "upgrade_plan_invalid")
+
+    def test_only_the_exact_no_newer_result_is_normalized(self):
+        expected = json.dumps({"error": "x", "code": "upgrade_target_not_newer"}).encode()
+        result = lambda rc=2, out=b"", err=expected: subprocess.CompletedProcess([], rc, out, err)
+        self.assertTrue(uc.no_newer_release(result()))
+        bad = [result(rc=1), result(rc=3), result(rc=0), result(out=b"{}"),
+               result(err=json.dumps({"code": "upgrade_plan_unavailable"}).encode()),
+               result(err=b'{"code": "upgrade_target_not_newer", "code": "x"}'),
+               result(err=b'{"code": "upgrade_target_not_newer", "n": NaN}'),
+               result(err=b'["upgrade_target_not_newer"]'), result(err=b'{"code": 1}'),
+               result(err=b"\xff\xfe"), result(err=b""), result(err=b" " * (uc.MAX_JSON + 1))]
+        for item in bad:
+            with self.subTest(rc=item.returncode, out=item.stdout[:20], err=item.stderr[:40]):
+                self.assertFalse(uc.no_newer_release(item))
+        with mock.patch.object(uc.subprocess, "run", return_value=result(rc=1)):
+            with self.assertRaises(uc.Stop) as ctx:
+                uc.upgrade_plan(self.fx.pin)
+        self.assertEqual(ctx.exception.code, "upgrade_plan_invalid")
+
+    def test_real_cli_reports_no_newer_on_stderr_with_exit_2(self):
+        """Contract with the package's own CLI, which the controller relies on."""
+        import ai_comm as ac
+        status = {"status": "ok", "verified_releases": []}
+        with mock.patch.object(ac, "release_status", return_value=status), \
+                mock.patch.object(ac, "package_identity", return_value={"version": "1.1.0"}):
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                code = ac.main(["upgrade-plan"])
+        self.assertEqual((code, out.getvalue()), (2, ""))
+        fake = subprocess.CompletedProcess([], code, b"", err.getvalue().encode())
+        self.assertTrue(uc.no_newer_release(fake))
 
     def test_snooze_skip_never(self):
         self.fx.write_manifest([])

@@ -27,8 +27,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 11659,
-      "sha256": "a36116c1bd7f11b5d6e97626ca3fdbf080a0748a29b444f628c97eb5d4ebaae9"
+      "bytes": 12208,
+      "sha256": "e21f6ad586482e8a052836791205a1099891090fca2963fc5299b870f841a8af"
     },
     {
       "path": "PROTOCOL.md",
@@ -48,7 +48,7 @@
     {
       "path": "ai_comm.py",
       "bytes": 155549,
-      "sha256": "521fff85353e9da3e71f3d74fa5fbb4b3727237ec7e9b65b6b1cfd524dd0a6b9"
+      "sha256": "5826c104ee7ca2af8b2d224453fc4db02d5d36bf1475013ec3cb3e1c0d852618"
     },
     {
       "path": "docs/ERRORS.md",
@@ -147,8 +147,8 @@
     },
     {
       "path": "tests/test_upgrade_controller.py",
-      "bytes": 57198,
-      "sha256": "d750629cf5cb62fac496638317697783d47e2d7a29f5a36d4ce10c7402a9166b"
+      "bytes": 60000,
+      "sha256": "143c1d1f0b5806604cefe160608f77fdf56c166f7472158720a4cbc616efc568"
     },
     {
       "path": "tests/test_upgrade_plan.py",
@@ -162,8 +162,8 @@
     },
     {
       "path": "upgrade_controller.py",
-      "bytes": 73192,
-      "sha256": "c311a45e505f1e4b0ffac47bccb3136552d3be0173e90ed61ca56625304ed21a"
+      "bytes": 74323,
+      "sha256": "65e331ad8af28e3df7db033ee554dd24ca86c50d55f62bf9f49c2b6202d7d9e4"
     }
   ],
   "format": "ai-comm-review-manifest/1",

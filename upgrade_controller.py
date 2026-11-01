@@ -382,9 +382,36 @@ def upgrade_plan(pin, target=None):
         result = subprocess.run(argv, capture_output=True, timeout=120, env=clean_env(), check=False)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise Stop("upgrade_plan_unavailable") from exc
+    if result.returncode != 0:
+        need(target is None and no_newer_release(result), "upgrade_plan_invalid")
+        return {"no_newer": True}
     value = parse_json(result.stdout, "upgrade_plan_invalid")
     need(isinstance(value, dict), "upgrade_plan_invalid")
     return value
+
+
+def _unique_pairs(pairs):
+    keys = [key for key, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise ValueError("duplicate key")
+    return dict(pairs)
+
+
+def _no_constant(name):
+    raise ValueError("non-finite number")
+
+
+def no_newer_release(result):
+    """True only for the core plan's expected "no newer verified release" result:
+    exit 2, empty stdout, and bounded strict JSON on stderr naming that code."""
+    if result.returncode != 2 or result.stdout or not result.stderr or len(result.stderr) > MAX_JSON:
+        return False
+    try:
+        value = json.loads(bytes(result.stderr).decode("utf-8"), object_pairs_hook=_unique_pairs,
+                           parse_constant=_no_constant)
+    except (UnicodeError, ValueError):
+        return False
+    return isinstance(value, dict) and value.get("code") == "upgrade_target_not_newer"
 
 
 # --------------------------------------------------------------------------- journal
@@ -672,7 +699,8 @@ def _check(project):
     status = release_status(project.pin)
     plan = upgrade_plan(project.pin) if status.get("status") == "ok" else {}
     state = prompt_state(project)
-    version = plan.get("to") if "error" not in plan else None
+    # A pin already at the newest verified release has nothing to offer (prompt stays None).
+    version = plan.get("to") if "error" not in plan and not plan.get("no_newer") else None
     result = {"status": "ok", "pinned": pin["version"], "pin_commit": pin["commit"],
               "release_status": status.get("status"), "latest": status.get("latest_version"),
               "prompt": None}
