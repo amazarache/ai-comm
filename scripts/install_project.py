@@ -29,55 +29,24 @@ sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 INSTALL_SCHEMA = "ai-comm-install/1"
 GITIGNORE_LINES = (".tools/", ".ai-comm-local/")
-GUARD = "AI_COMM_UPGRADE_REAL_BOUNDARY_INNER"
 
 
-def _load(name, path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+def _shared():
+    """Load the shared installer module once per process (by path: `python3 -I` does not
+    put this directory on sys.path), so every installer sees the same Stop class."""
+    name = "ai_comm_release_install"
+    if name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(name, Path(__file__).resolve().parent / "release_install.py")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return sys.modules[name]
 
 
-uc = _load("ai_comm_upgrade_controller_for_install", ROOT / "upgrade_controller.py")
-Stop, need = uc.Stop, uc.need
-
-
-def git(cwd, *args, timeout=300):
-    return uc.git(cwd, *args, timeout=timeout)
-
-
-def run_checked(argv, cwd, code, timeout=600, env=None):
-    try:
-        done = subprocess.run(argv, cwd=str(cwd), capture_output=True, timeout=timeout,
-                              env=env or uc.clean_env(), check=False)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise Stop(code) from exc
-    need(done.returncode == 0, code)
-    return done
-
-
-def trusted_source(root=ROOT):
-    """The running package must itself be a verified, unmodified release (design §8):
-    a clean Git checkout, or an extracted release archive (which the owner checked
-    against the release's SHA256SUMS) whose every manifest entry and protocol digest
-    verify. RELEASE_ORIGIN is read only from the manifest-verified ai_comm.py."""
-    run_checked([sys.executable, "-I", str(root / "scripts" / "check_release_manifest.py")], root,
-                "installer_package_unverified", timeout=120)
-    if (root / ".git").exists():
-        try:
-            identity = uc.package_identity(root)
-        except Stop as exc:
-            raise Stop("installer_package_unverified") from exc
-        need(not identity["dirty"] and identity["origin"], "installer_package_unverified")
-        return identity["origin"]
-    manifest = uc.parse_json((root / "RELEASE-MANIFEST.json").read_bytes(), "installer_package_unverified")
-    cli = (root / "ai_comm.py").read_bytes()
-    entries = [e for e in manifest.get("files", []) if isinstance(e, dict) and e.get("path") == "ai_comm.py"]
-    need(len(entries) == 1 and entries[0].get("sha256") == uc.sha256_bytes(cli), "installer_package_unverified")
-    origin = re.findall(r'^RELEASE_ORIGIN = "([^"\r\n]+)"$', cli.decode("utf-8", "replace"), re.MULTILINE)
-    need(len(origin) == 1, "installer_package_unverified")
-    return origin[0]
+ri = _shared()
+uc, Stop, need, GUARD = ri.uc, ri.Stop, ri.need, ri.GUARD
+_load, git, run_checked, trusted_source = ri._load, ri.git, ri.run_checked, ri.trusted_source
+select_record, real_suite, real_fetch, open_dir_nofollow = ri.select_record, ri.real_suite, ri.real_fetch, ri.open_dir_nofollow
 
 
 def check_project(project_dir):
@@ -117,38 +86,10 @@ def install_lock(local):
         os.close(fd)
 
 
-def select_record(repo, version):
-    raw = git(repo, "show", "refs/remotes/origin/release-index:RELEASES.json").encode()
-    index = uc.parse_json(raw, "release_index_invalid")
-    need(isinstance(index, dict) and index.get("format") == "ai-comm-releases/1"
-         and isinstance(index.get("releases"), list), "release_index_invalid")
-    matches = [r for r in index["releases"] if isinstance(r, dict) and r.get("package_version") == version]
-    need(len(matches) == 1, "release_not_in_index", version=version)
-    record = matches[0]
-    for key in ("commit", "tag", "manifest_sha256", "protocol_sha256"):
-        need(isinstance(record.get(key), str), "release_index_invalid")
-    need(record["tag"] == "v" + version, "release_index_invalid")
-    return record
 
 
 def verify_staging(repo, version, record, run_suite):
-    tag = uc.tag_identity(repo, version)
-    need(tag["commit"] == record["commit"], "index_tag_mismatch", what="commit")
-    need(tag["manifest_sha256"] == record["manifest_sha256"], "index_tag_mismatch", what="manifest")
-    need(tag["protocol_sha256"] == record["protocol_sha256"], "index_tag_mismatch", what="protocol")
-    git(repo, "checkout", "--quiet", "--detach", tag["commit"])
-    for argv in (["scripts/check_tag.py", tag["tag"]], ["scripts/check_release_manifest.py"]):
-        run_checked([sys.executable, "-I", *argv], repo, "verify_failed", timeout=300)
-    tests = run_suite(repo)
-    require_staged_identity(repo, tag)
-    status = uc.release_status(repo)
-    awareness = "complete"
-    if status.get("status") == "index_tags_missing":
-        awareness = "partial: newer releases are listed but not verified locally; run the guided check to learn about them"
-    else:
-        need(status.get("status") == "ok", "verify_failed", check="release_status")
-    need(status.get("pinned_version") == version, "verify_failed", check="release_status")
-    return {"tag": tag, "tests_ran": tests, "release_awareness": awareness}
+    return ri.verify_staging(repo, version, record, run_suite, require_staged_identity)
 
 
 def check_staged_repo(repo):
@@ -169,40 +110,13 @@ def require_staged_identity(repo, tag):
     """After code ran in the staging repository: remove build debris, then require the
     exact tag commit with no tracked, untracked or ignored changes (I2)."""
     check_staged_repo(repo)
-    git(repo, "clean", "-fdxq")
-    need(git(repo, "rev-parse", "HEAD").strip() == tag["commit"], "staged_identity_changed", what="commit")
-    need(git(repo, "status", "--porcelain", "--untracked-files=all", "--ignored").strip() == "",
-         "staged_identity_changed", what="worktree")
-    need(git(repo, "rev-parse", f"refs/tags/{tag['tag']}").strip() == tag["tag_object"],
-         "staged_identity_changed", what="tag")
+    ri.clean_tree_identity(repo, tag)
 
 
-def real_suite(repo):
-    env = uc.clean_env() | {GUARD: "1"}
-    done = run_checked([sys.executable, "-m", "unittest", "discover", "-s", "tests"], repo, "verify_failed",
-                       timeout=uc.TEST_TIMEOUT, env=env)
-    summary = re.findall(rb"^Ran ([0-9]+) tests? in", done.stderr, re.MULTILINE)
-    need(summary, "verify_failed", check="tests")
-    return int(summary[-1])
 
 
-def real_fetch(repo, origin, version, use_helper):
-    cfr = _load("ai_comm_install_release_check", ROOT / "scripts" / "check_for_release.py")
-    cfr._load_package(ROOT)
-    helpers = cfr._read_credential_helpers() if use_helper else []
-    refspecs = (f"refs/tags/v{version}:refs/tags/v{version}",
-                "refs/heads/release-index:refs/remotes/origin/release-index")
-    try:
-        cfr._fetch_isolated(repo, origin, helpers, refspecs=refspecs)
-    except cfr.CheckError as exc:
-        raise Stop("fetch_failed", helper_error=exc.code) from exc
 
 
-def open_dir_nofollow(name, dir_fd=None):
-    try:
-        return os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dir_fd)
-    except OSError as exc:
-        raise Stop("unsafe_path", path=str(name)) from exc
 
 
 def publish(project, staging):

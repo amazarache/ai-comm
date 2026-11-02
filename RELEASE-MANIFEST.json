@@ -61,6 +61,11 @@
       "sha256": "949e60f217e0742f08f0a48b156a0990d6b1c4438022f89ed3dd22a8c1d25d0b"
     },
     {
+      "path": "docs/INSTALL.md",
+      "bytes": 4062,
+      "sha256": "9dfcb30a2719868733feae7df91ca72edb906152fa428231494c5d781466e306"
+    },
+    {
       "path": "docs/PERFORMANCE.md",
       "bytes": 3083,
       "sha256": "cfcdc55e137ed8b10833e767a338d516eff571c21ecb16cfcacb491f709c001d"
@@ -77,8 +82,8 @@
     },
     {
       "path": "install.sh",
-      "bytes": 204,
-      "sha256": "c7aca266e11075f0a3280cdc1f42be8dff041e27ef6738e92e10bc3fe48168cf"
+      "bytes": 474,
+      "sha256": "fba221989f137f8713dae8bdb410b83cf462e893b495b1d842fdc51ccf91770b"
     },
     {
       "path": "scripts/benchmark_snapshot.py",
@@ -107,13 +112,23 @@
     },
     {
       "path": "scripts/install_project.py",
-      "bytes": 19911,
-      "sha256": "feaeb3bac33014e47c6fc7517e8942c1a6104673e0ce06bbf3d6c759422dd8e0"
+      "bytes": 15152,
+      "sha256": "2d69f94b90ce0b82e9cc29bb6ab0492679c86b507857a4769155004b00870af0"
+    },
+    {
+      "path": "scripts/install_user.py",
+      "bytes": 27753,
+      "sha256": "72a4c5b873529d6b60fd95f57ba83599ef939f619c49ef4bc4681fd23357a86f"
     },
     {
       "path": "scripts/leak_scan.py",
       "bytes": 2260,
       "sha256": "622fe13b1e67b6715b40cbcb3b4861c53da2e6b6f99e7fb5d886a363af44f2af"
+    },
+    {
+      "path": "scripts/release_install.py",
+      "bytes": 7490,
+      "sha256": "ae6032ddc3547865ef41cbdc37f48f34acb6669b2d6f156e2c17340eda75c7f0"
     },
     {
       "path": "scripts/test_old_protocol.py",
@@ -134,6 +149,11 @@
       "path": "tests/test_install_project.py",
       "bytes": 18761,
       "sha256": "af7a1813f32ef136acaf0b8755d1caeb45d9b2b975dd5fe8dbf478f3547c6f26"
+    },
+    {
+      "path": "tests/test_install_user.py",
+      "bytes": 11065,
+      "sha256": "d72f4c89e6b93f8e38a7dd79f1101f759dcc3c5367ef77a7442015e61fc87423"
     },
     {
       "path": "tests/test_neutrality.py",
