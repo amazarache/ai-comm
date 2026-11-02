@@ -27,8 +27,8 @@ def main():
         import ai_comm as current
         current.Channel.init(channel, "Old tool regression fixture", ["alpha", "beta"])
         ledger = current.Channel(channel)
-        ledger.join("alpha", "codex", "alpha-session")
-        ledger.join("beta", "claude", "beta-session")
+        ledger.join("alpha", "host-a", "alpha-session")
+        ledger.join("beta", "host-b", "beta-session")
         initial_head = ledger.snapshot().head
         draft = json.dumps({"act": "PING", "to": ["beta"], "topic": "compat",
                             "summary": "Must not be published."}).encode()

@@ -62,9 +62,9 @@ class UpgradePlanTests(unittest.TestCase):
         self.channel_path = self.root / 'migration channel ;$(literal) `quoted` "double"\nline'
         ac.Channel.init(self.channel_path, "Marker: USER_NOTICE_SECRET", ["alpha", "beta"])
         self.channel = ac.Channel(self.channel_path)
-        self.channel.join("alpha", "codex", "alpha-session")
-        self.channel.join("beta", "claude", "beta-session")
-        self.channel.join("guest", "codex", "guest-session")
+        self.channel.join("alpha", "host-b", "alpha-session")
+        self.channel.join("beta", "host-a", "beta-session")
+        self.channel.join("guest", "host-b", "guest-session")
 
     def tearDown(self):
         self.temp.cleanup()
@@ -318,7 +318,7 @@ class UpgradePlanTests(unittest.TestCase):
         path = self.root / "unjoined-reviewer"
         ac.Channel.init(path, "Review a migration", ["alpha", "beta"])
         channel = ac.Channel(path)
-        channel.join("alpha", "codex", "alpha-only")
+        channel.join("alpha", "host-b", "alpha-only")
         plan = ac.upgrade_plan(directory=self.repo, channel_path=str(path))
         migration = plan["migration"]
         self.assertFalse(migration["complete"])
@@ -332,7 +332,7 @@ class UpgradePlanTests(unittest.TestCase):
             ac.upgrade_plan(directory=self.repo, channel_path=str(path),
                             participant_values=["alpha=will_upgrade", "beta=will_upgrade"])
         self.assertEqual("upgrade_participant_missing", caught.exception.details["code"])
-        channel.join("beta", "claude", "beta-session")
+        channel.join("beta", "host-a", "beta-session")
         complete = ac.upgrade_plan(directory=self.repo, channel_path=str(path),
                                    participant_values=["alpha=will_upgrade", "beta=will_upgrade"])
         self.assertTrue(complete["migration"]["complete"])
@@ -399,10 +399,10 @@ class UpgradePlanTests(unittest.TestCase):
             ac.upgrade_plan(directory=self.repo, channel_path=str(non_bare))
         self.assertEqual("upgrade_channel_invalid", caught.exception.details["code"])
         with self.assertRaises(ac.ProtocolError) as caught:
-            ac.upgrade_plan(directory=self.repo, channel_path="~codex-no-such-user/channel")
+            ac.upgrade_plan(directory=self.repo, channel_path="~agent-no-such-user/channel")
         self.assertEqual("upgrade_channel_invalid", caught.exception.details["code"])
         with self.assertRaises(ac.ProtocolError) as caught:
-            ac.Channel("~codex-no-such-user/channel")
+            ac.Channel("~agent-no-such-user/channel")
         self.assertEqual("channel_does_not_exist_initialize_it_explicitly",
                          caught.exception.details["code"])
 

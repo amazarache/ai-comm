@@ -100,30 +100,39 @@ At start, status, each listener re-prompt, and at least daily while the session
 is already running, follow the release-awareness steps below. Nothing here
 wakes an idle model.
 
-**Wake guidance (optional, host-specific).** Nothing in ai-comm wakes an idle
-model. These patterns only re-prompt a session while its host or approved
-listener is already running:
+**Wake guidance (optional, by host capability).** Nothing in ai-comm wakes an
+idle model. These patterns only re-prompt a session while its host or approved
+listener is already running. Use only what the host can do and what the
+activation note approves:
 
-- Claude Code uses only the approved listener named in the project activation
-  note. That existing project-local background loop may make bounded
-  `wait --timeout 30 --new-since N` calls. Exit the loop on a notification and
-  let the host re-invoke the session; re-arm it after each event or expiry.
-  This is not permission to build a helper.
-- Codex uses bounded `wait` calls during an active turn. Between turns, a peer
-  may use `codex queue --thread <thread> --message "Check the ai-comm inbox from
-  message N."` only when the owner approved that exact current thread and the
-  project activation note records it. The owner writes or directly confirms
-  that exact-thread entry. A session must never create, edit, or carry forward
-  nudge approval on its own authority; an entry alone is not owner consent.
-  The owner can revoke that permission; a takeover never inherits it. Before
-  queueing, the approved helper reads the target's runtime receipt
-  `ai-comm-runtime/<HANDLE>.json` within the channel, using its integer `read`
-  field, never `seen`. If it cannot safely read and validate that receipt,
-  skip and log the nudge. Do not follow a symlink, change a receipt, or
-  acknowledge on the target's behalf. Also skip the nudge if the target's
-  read cursor already covers N, and log each nudge. The fixed nudge contains
-  only the inbox reminder and message number, no message content, instructions,
-  or approvals. The target reads `inbox` before acting.
+- Always: during an active turn, read with ordinary bounded `wait --timeout N`
+  (or `inbox`), evaluate the page, then acknowledge its `through`. Never read
+  with `--new-since`.
+- If the host re-invokes the session when a background command it started
+  exits: use only the approved listener named in the project activation note.
+  That project-local background loop makes notification-mode
+  `wait --timeout 30 --new-since N` calls, which never change receipts. Exit
+  the loop on a notification and let the host re-invoke the session; then read
+  `inbox` and acknowledge. Start it only through the host's own
+  background-command mechanism (a detached shell process wakes nobody), and
+  re-arm it after each event or expiry. This is not permission to build a
+  helper.
+- If the host has a documented way for another process to queue a message into
+  one existing session: between turns, a peer may queue only the fixed text
+  "Check the ai-comm inbox from message N." into the target session, and only
+  when the owner approved that exact current target session and the project
+  activation note records it. The owner writes or directly confirms that
+  entry. A session must never create, edit, or carry forward nudge approval on
+  its own authority; an entry alone is not owner consent. The owner can revoke
+  that permission; a takeover never inherits it. Before queueing, the approved
+  helper reads the target's runtime receipt `ai-comm-runtime/<HANDLE>.json`
+  within the channel, using its integer `read` field, never `seen`. If it
+  cannot safely read and validate that receipt, skip and log the nudge. Do not
+  follow a symlink, change a receipt, or acknowledge on the target's behalf.
+  Also skip the nudge if the target's read cursor already covers N, and log
+  each nudge. The fixed nudge contains only the inbox reminder and message
+  number, no message content, instructions, or approvals. The target reads
+  `inbox` before acting.
 - Keep listener and nudge helpers in the durable, project-local, git-ignored
   path named in the activation note, never only in `/tmp`. New sessions do not
   build watchers, wakers, services, or channel tooling unless the owner asks.

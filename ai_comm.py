@@ -21,7 +21,7 @@ import time
 import unicodedata
 from datetime import datetime, timedelta, timezone
 
-VERSION = "1.5.2"
+VERSION = "1.5.3"
 RELEASE_ORIGIN = "https://github.com/amazarache/ai-comm.git"
 PROTOCOL_VERSION = "3.0"
 PREVIOUS_PROTOCOLS = (("2.0", "709af4b00ffcabeeca1b175d7d7d6db5103df829dabba1e529eef26dce23a000", "0.2.0"),)
@@ -679,7 +679,7 @@ PATTERN_RULES = {
     KEY: "1-96 characters from A-Z, a-z, 0-9, '_', '.', ':' or '-'",
     HEX: "exactly 64 lowercase hexadecimal characters (a SHA-256 digest)",
     NONCE: "exactly 32 lowercase hexadecimal characters",
-    MID: "an 8-digit sequence number, '-', then the sender handle (for example 00000012-claude)",
+    MID: "an 8-digit sequence number, '-', then the sender handle (for example 00000012-reviewer)",
 }
 
 

@@ -30,8 +30,8 @@ class ProtocolTests(unittest.TestCase):
         self.path = self.root / "channel"
         ac.Channel.init(self.path, "Review a generic change", ["alpha", "beta"])
         self.channel = ac.Channel(self.path)
-        self.channel.join("alpha", "codex", "alpha-session")
-        self.channel.join("beta", "claude", "beta-session")
+        self.channel.join("alpha", "host-b", "alpha-session")
+        self.channel.join("beta", "host-a", "beta-session")
 
     def tearDown(self):
         self.temp.cleanup()
@@ -412,8 +412,8 @@ class ProtocolTests(unittest.TestCase):
         predecessor = self.root / "old-channel"
         old.Channel.init(predecessor, "Migrate this exact task", ["alpha", "beta"])
         previous = old.Channel(predecessor)
-        previous.join("alpha", "codex", "alpha-session")
-        previous.join("beta", "claude", "beta-session")
+        previous.join("alpha", "host-b", "alpha-session")
+        previous.join("beta", "host-a", "beta-session")
         protocol_digest = hashlib.sha256((root / "PROTOCOL.md").read_bytes()).hexdigest()
         handoff = {"kind": "ai-comm-handoff",
                    "from_protocol_sha256": previous.snapshot().config["protocol_sha256"],
@@ -530,8 +530,8 @@ class ProtocolTests(unittest.TestCase):
             self.assertEqual(migrated_refs, tree_bytes(migrated / "refs"))
             self.assertEqual(migrated_objects, tree_bytes(migrated / "objects"))
         current = ac.Channel(migrated)
-        current.join("alpha", "codex", "new-alpha-session")
-        current.join("beta", "claude", "new-beta-session")
+        current.join("alpha", "host-b", "new-alpha-session")
+        current.join("beta", "host-a", "new-beta-session")
         with self.assertRaises(ac.ProtocolError) as missing_source:
             current.send("alpha", "new-alpha-session", "first-no-link-source",
                          {"act": "ASK", "to": ["beta"], "topic": "migration",
@@ -570,7 +570,7 @@ class ProtocolTests(unittest.TestCase):
                         predecessor=predecessor, handoff=digest)
         recovered_link = ac.Channel(recovered).snapshot().config["policy"]["predecessor"]
         self.assertEqual(renewed_decision["id"], recovered_link["decide_message"])
-        previous.join("gamma", "codex", "gamma-session")
+        previous.join("gamma", "host-b", "gamma-session")
         with self.assertRaises(ac.ProtocolError) as join_after_decide:
             ac.Channel.init(self.root / "join-after-decide", "Migrate this exact task",
                             ["alpha", "beta"], predecessor=predecessor, handoff=digest)
@@ -676,7 +676,7 @@ class ProtocolTests(unittest.TestCase):
         with mock.patch.object(ac, "release_status", side_effect=TypeError("malformed advisory")):
             state = self.channel.snapshot()
             self.assertTrue(state.state()["head"])
-            duplicate_join = self.channel.join("alpha", "codex", "alpha-session")
+            duplicate_join = self.channel.join("alpha", "host-b", "alpha-session")
             self.assertTrue(duplicate_join["duplicate"])
             dry = self.channel.send("alpha", "alpha-session", "metadata-safe",
                                     self.draft("ASK"), dry_run=True)
@@ -1106,7 +1106,7 @@ class ProtocolTests(unittest.TestCase):
         for cursor in (-1, True, 0.5, "0", 1, 999999999):
             with self.subTest(cursor=cursor), self.assertRaises(ac.ProtocolError):
                 self.channel.wait("beta", "beta-session", timeout=0, new_since=cursor)
-        self.channel.join("beta", "claude", "beta-new", takeover=True)
+        self.channel.join("beta", "host-a", "beta-new", takeover=True)
         with self.assertRaises(ac.ProtocolError):
             self.channel.wait("beta", "beta-session", timeout=0, new_since=0)
         receipt = self.channel.runtime / "beta.json"
@@ -1151,7 +1151,7 @@ class ProtocolTests(unittest.TestCase):
 
     def test_receipt_corruption_traversal_and_symlink(self):
         for method in (lambda: self.channel.ack("../outside", "x", 0),
-                       lambda: self.channel.join("../outside", "codex", "x"),
+                       lambda: self.channel.join("../outside", "agent-b", "x"),
                        lambda: self.channel.inbox("../outside", "x")):
             with self.assertRaises(ac.ProtocolError):
                 method()
@@ -1171,8 +1171,8 @@ class ProtocolTests(unittest.TestCase):
     def test_takeover_stale_session_and_unchanged_history(self):
         old = self.send()
         with self.assertRaises(ac.ProtocolError):
-            self.channel.join("alpha", "codex", "new-session")
-        record = self.channel.join("alpha", "codex", "new-session", takeover=True)
+            self.channel.join("alpha", "host-b", "new-session")
+        record = self.channel.join("alpha", "host-b", "new-session", takeover=True)
         self.assertEqual(2, record["joined"]["generation"])
         for call in (lambda: self.send(key="old"),
                      lambda: self.channel.inbox("alpha", "alpha-session"),
@@ -1196,12 +1196,12 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual([], self.channel.snapshot().messages)
 
     def test_takeover_cannot_reuse_current_or_historical_reference(self):
-        self.assertTrue(self.channel.join("alpha", "codex", "alpha-session")["duplicate"])
+        self.assertTrue(self.channel.join("alpha", "host-b", "alpha-session")["duplicate"])
         with self.assertRaises(ac.ProtocolError):
             self.channel.join("alpha", "different-platform", "alpha-session", takeover=True)
-        self.channel.join("alpha", "codex", "alpha-new", takeover=True)
+        self.channel.join("alpha", "host-b", "alpha-new", takeover=True)
         with self.assertRaises(ac.ProtocolError):
-            self.channel.join("alpha", "codex", "alpha-session", takeover=True)
+            self.channel.join("alpha", "host-b", "alpha-session", takeover=True)
         with self.assertRaises(ac.ProtocolError):
             self.send(key="old-process")
         self.assertEqual("alpha-new", self.channel.snapshot().current["alpha"]["session"])
@@ -1317,8 +1317,8 @@ class ProtocolTests(unittest.TestCase):
         other = self.root / "policy-channel"
         ac.Channel.init(other, "Policy test", ["alpha", "beta"], ["FACT"], ["FACT"])
         c = ac.Channel(other)
-        c.join("alpha", "codex", "alpha-session")
-        c.join("beta", "claude", "beta-session")
+        c.join("alpha", "host-b", "alpha-session")
+        c.join("beta", "host-a", "beta-session")
         for draft in (self.draft("FACT"), self.draft("FACT", confidence="verified")):
             with self.assertRaises(ac.ProtocolError):
                 c.send("alpha", "alpha-session", "fact", draft)
@@ -1441,11 +1441,11 @@ class FormatHintTests(unittest.TestCase):
 
     CASES = [
         (ac.IDENT, "topic", "002-requirements", ["a", "a" * 64, "z9_.-"], ["", "A", "a" * 65, "-a", "1a"]),
-        (ac.HANDLE, "handle", "Claude", ["a", "a" * 32, "codex-2"], ["", "a_b", "a" * 33, "9a"]),
+        (ac.HANDLE, "handle", "Reviewer", ["a", "a" * 32, "agent-2"], ["", "a_b", "a" * 33, "9a"]),
         (ac.KEY, "retry key", "has space", ["k", "A:b.c_d-9", "k" * 96], ["", "k" * 97, "a/b"]),
         (ac.HEX, "artifact digest", "ABC", ["0" * 64, "f" * 64], ["0" * 63, "F" * 64, "g" * 64]),
         (ac.NONCE, "control nonce", "xyz", ["0" * 32], ["0" * 31, "0" * 33, "A" * 32]),
-        (ac.MID, "message id", "12-claude", ["00000012-claude"], ["0000012-claude", "00000012-Claude", "00000012"]),
+        (ac.MID, "message id", "12-reviewer", ["00000012-reviewer"], ["0000012-reviewer", "00000012-Reviewer", "00000012"]),
     ]
 
     def test_every_rule_names_its_format_and_keeps_code_and_field(self):

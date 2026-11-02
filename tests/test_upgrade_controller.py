@@ -118,7 +118,7 @@ class Fixture:
         (self.fake / "messages").mkdir(parents=True)
         (self.fake / "artifacts").mkdir()
         (self.fake / "state.json").write_text(json.dumps({"participants": [
-            {"handle": "claude", "session": "s-claude"}, {"handle": "codex", "session": "s-codex"}]}))
+            {"handle": "agent-a", "session": "s-agent-a"}, {"handle": "agent-b", "session": "s-agent-b"}]}))
         (self.project / "listener.py").write_text(LISTENER)
         staged = self.project / "staged"
         staged.mkdir()
@@ -214,9 +214,9 @@ class ControllerTests(unittest.TestCase):
         return out.get("consent")
 
     def prepared(self, integrations=None):
-        self.fx.write_manifest(integrations if integrations is not None else [self.fx.integration("own", "claude")])
+        self.fx.write_manifest(integrations if integrations is not None else [self.fx.integration("own", "agent-a")])
         consent = self.consent()
-        code, out = self.run_uc("prepare", "--target", "1.1.0", "--consent", consent, "--as", "claude", "--session", "s-claude")
+        code, out = self.run_uc("prepare", "--target", "1.1.0", "--consent", consent, "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual(code, 0, out)
         return consent, out
 
@@ -300,39 +300,39 @@ class ControllerTests(unittest.TestCase):
         self.assertFalse(uc.should_ask(state, "1.2.0", "optional", 10 ** 12))
 
     def test_consent_scope_source_and_target_are_bound(self):
-        self.fx.write_manifest([self.fx.integration("own", "claude")])
+        self.fx.write_manifest([self.fx.integration("own", "agent-a")])
         code, out = self.run_uc("record-answer", "--answer", "yes", "--target", "1.1.0",
                                 "--target-commit", self.fx.to_commit, "--source", "https://other.invalid/x.git",
                                 "--evidence", "e")
         self.assertEqual(out["code"], "consent_source_mismatch")
         fetch_only = self.consent(answer="fetch_only")
-        code, out = self.run_uc("prepare", "--target", "1.1.0", "--consent", fetch_only, "--as", "claude", "--session", "s-claude")
+        code, out = self.run_uc("prepare", "--target", "1.1.0", "--consent", fetch_only, "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual(out["code"], "consent_scope_insufficient")
         wrong = self.consent(commit="0" * 40)
-        code, out = self.run_uc("prepare", "--target", "1.1.0", "--consent", wrong, "--as", "claude", "--session", "s-claude")
+        code, out = self.run_uc("prepare", "--target", "1.1.0", "--consent", wrong, "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual(out["code"], "consent_target_mismatch")
         self.assertEqual(self.pin_commit(), self.fx.from_commit)
 
     def test_expired_consent_refused(self):
-        self.fx.write_manifest([self.fx.integration("own", "claude")])
+        self.fx.write_manifest([self.fx.integration("own", "agent-a")])
         consent = self.consent()
         with mock.patch.object(uc, "now", return_value=uc.now() + uc.CONSENT_TTL + 1):
-            code, out = self.run_uc("prepare", "--target", "1.1.0", "--consent", consent, "--as", "claude", "--session", "s-claude")
+            code, out = self.run_uc("prepare", "--target", "1.1.0", "--consent", consent, "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual(out["code"], "consent_expired")
 
     def test_consent_unconsumed_after_prepare_and_consumed_at_first_mutation(self):
         consent, out = self.prepared()
         project = uc.Project(self.fx.project)
         self.assertIsNone(uc.load_consent(project, consent)["consumed_by"])
-        code, res = self.run_uc("apply", "--as", "claude", "--session", "s-claude")
+        code, res = self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual(code, 0, res)
         self.assertEqual(uc.load_consent(project, consent)["consumed_by"], out["txn"])
 
     def test_spent_consent_cannot_start_another_transaction(self):
         consent, out = self.prepared()
-        self.run_uc("apply", "--as", "claude", "--session", "s-claude")
-        self.run_uc("rollback", "--as", "claude", "--session", "s-claude", "--txn", out["txn"])
-        code, res = self.run_uc("prepare", "--target", "1.1.0", "--consent", consent, "--as", "claude", "--session", "s-claude")
+        self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")
+        self.run_uc("rollback", "--as", "agent-a", "--session", "s-agent-a", "--txn", out["txn"])
+        code, res = self.run_uc("prepare", "--target", "1.1.0", "--consent", consent, "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual(res["code"], "consent_from_mismatch" if self.pin_commit() != self.fx.from_commit
                          else "consent_spent")
 
@@ -343,38 +343,38 @@ class ControllerTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix="uc-")
         os.chmod(self.temp.name, 0o700)
         self.fx = Fixture(Path(self.temp.name).resolve(), fail_target_tests=True)
-        self.fx.write_manifest([self.fx.integration("own", "claude")])
+        self.fx.write_manifest([self.fx.integration("own", "agent-a")])
         consent = self.consent()
-        code, out = self.run_uc("prepare", "--target", "1.1.0", "--consent", consent, "--as", "claude", "--session", "s-claude")
+        code, out = self.run_uc("prepare", "--target", "1.1.0", "--consent", consent, "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual(out["code"], "verify_failed")
         self.assertEqual(self.pin_commit(), self.fx.from_commit)
         self.assertIsNone(uc.load_consent(uc.Project(self.fx.project), consent)["consumed_by"])
 
     def test_unsupported_integration_fails_before_mutation(self):
-        item = self.fx.integration("own", "claude", supports={"pairs": [["1" * 40, "2" * 40]]})
+        item = self.fx.integration("own", "agent-a", supports={"pairs": [["1" * 40, "2" * 40]]})
         self.fx.write_manifest([item])
         consent = self.consent()
-        code, out = self.run_uc("prepare", "--target", "1.1.0", "--consent", consent, "--as", "claude", "--session", "s-claude")
+        code, out = self.run_uc("prepare", "--target", "1.1.0", "--consent", consent, "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual(out["code"], "upgrade_integration_unsupported")
         self.assertEqual(self.pin_commit(), self.fx.from_commit)
 
     def test_unintegrated_project_refused(self):
         self.fx.write_manifest([], status="unintegrated")
         consent = self.consent()
-        code, out = self.run_uc("prepare", "--target", "1.1.0", "--consent", consent, "--as", "claude", "--session", "s-claude")
+        code, out = self.run_uc("prepare", "--target", "1.1.0", "--consent", consent, "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual(out["code"], "project_integration_undeclared")
 
     def test_missing_manifest_is_error_not_empty(self):
         uc.Project(self.fx.project).runtime()
         consent = self.consent()
-        code, out = self.run_uc("prepare", "--target", "1.1.0", "--consent", consent, "--as", "claude", "--session", "s-claude")
+        code, out = self.run_uc("prepare", "--target", "1.1.0", "--consent", consent, "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual(out["code"], "runtime_missing")
 
     # ---- forward, identities, lock
 
     def test_forward_upgrade_reaches_pending_liveness_not_completed(self):
         consent, out = self.prepared()
-        code, res = self.run_uc("apply", "--as", "claude", "--session", "s-claude")
+        code, res = self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual(code, 0, res)
         self.assertEqual(res["status"], "integrated_pending_liveness")
         self.assertEqual(self.pin_commit(), self.fx.to_commit)
@@ -389,14 +389,14 @@ class ControllerTests(unittest.TestCase):
         consent, out = self.prepared()
         with open(self.fx.project / "listener.py", "a") as stream:
             stream.write("\n# changed\n")
-        code, res = self.run_uc("apply", "--as", "claude", "--session", "s-claude")
+        code, res = self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual((res["code"], res.get("what")), ("upgrade_identity_changed", "integration_code"))
         self.assertEqual(self.pin_commit(), self.fx.from_commit)
 
     def test_moved_tag_after_prepare_stops(self):
         consent, out = self.prepared()
         git(self.fx.pin, "tag", "-f", "-a", "v1.1.0", "-m", "moved", self.fx.from_commit)
-        code, res = self.run_uc("apply", "--as", "claude", "--session", "s-claude")
+        code, res = self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual(res["code"], "tag_manifest_mismatch")
         self.assertEqual(self.pin_commit(), self.fx.from_commit)
 
@@ -404,14 +404,14 @@ class ControllerTests(unittest.TestCase):
         consent, out = self.prepared()
         project = uc.Project(self.fx.project)
         with project.lock():
-            code, res = self.run_uc("apply", "--as", "claude", "--session", "s-claude")
+            code, res = self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual(res["code"], "upgrade_locked")
 
     def test_dirty_pin_refused(self):
         consent, out = self.prepared()
         with open(self.fx.pin / "PROTOCOL.md", "a") as stream:
             stream.write("x")
-        code, res = self.run_uc("apply", "--as", "claude", "--session", "s-claude")
+        code, res = self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual((res["code"], res.get("what")), ("upgrade_identity_changed", "pin_dirty"))
 
     # ---- crash and journal
@@ -427,9 +427,9 @@ class ControllerTests(unittest.TestCase):
             return result
         with mock.patch.object(uc, "perform_own", crash_after):
             with self.assertRaises(KeyboardInterrupt):
-                self.run_uc("apply", "--as", "claude", "--session", "s-claude")
+                self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual(self.pin_commit(), self.fx.to_commit)
-        code, res = self.run_uc("apply", "--as", "claude", "--session", "s-claude")
+        code, res = self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual(res["status"], "integrated_pending_liveness", res)
         outcomes = [r for r in self.journal(out["txn"]).read()[0] if r["kind"] == "outcome"]
         self.assertTrue(any(r["data"].get("by") == "probe" for r in outcomes))
@@ -445,8 +445,8 @@ class ControllerTests(unittest.TestCase):
             return result
         with mock.patch.object(uc, "perform_own", crash_after):
             with self.assertRaises(KeyboardInterrupt):
-                self.run_uc("apply", "--as", "claude", "--session", "s-claude")
-        code, res = self.run_uc("apply", "--as", "claude", "--session", "s-claude")
+                self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")
+        code, res = self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual(res["status"], "integrated_pending_liveness", res)
 
     def test_crash_matrix_every_action_before_and_after_side_effect(self):
@@ -472,8 +472,8 @@ class ControllerTests(unittest.TestCase):
                         return result
                     with mock.patch.object(uc, "perform_own", crash):
                         with self.assertRaises(KeyboardInterrupt):
-                            self.run_uc("apply", "--as", "claude", "--session", "s-claude")
-                    code, res = self.run_uc("apply", "--as", "claude", "--session", "s-claude")
+                            self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")
+                    code, res = self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")
                     self.assertEqual(res.get("status"), "integrated_pending_liveness", res)
                     self.assertEqual(self.pin_commit(), self.fx.to_commit)
                     state = json.loads((self.fx.project / "own.state.json").read_text())
@@ -492,10 +492,10 @@ class ControllerTests(unittest.TestCase):
     def test_failing_step_records_stop_and_rollback_restores(self):
         consent, out = self.prepared()
         os.environ["UC_FAIL_STEP"] = "own:rebind"
-        code, res = self.run_uc("apply", "--as", "claude", "--session", "s-claude")
+        code, res = self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual(res["code"], "hook_failed")
         os.environ.pop("UC_FAIL_STEP")
-        code, res = self.run_uc("rollback", "--as", "claude", "--session", "s-claude")
+        code, res = self.run_uc("rollback", "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual(res["status"], "rolled_back", res)
         self.assertEqual(self.pin_commit(), self.fx.from_commit)
         self.assertEqual((self.fx.project / "own_src.py").read_bytes(),
@@ -506,11 +506,11 @@ class ControllerTests(unittest.TestCase):
 
     def test_rollback_to_release_without_controller_uses_frozen_copy(self):
         consent, out = self.prepared()
-        self.run_uc("apply", "--as", "claude", "--session", "s-claude")
+        self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")
         self.assertTrue((self.fx.pin / "upgrade_controller.py").exists())
         frozen = Path(out["invocation"][2])
         self.assertTrue(str(frozen).startswith(str(self.fx.project / ".ai-comm-local" / "upgrade" / "controller")))
-        code, res = self.run_uc("rollback", "--as", "claude", "--session", "s-claude", controller=frozen)
+        code, res = self.run_uc("rollback", "--as", "agent-a", "--session", "s-agent-a", controller=frozen)
         self.assertEqual(res["status"], "rolled_back", res)
         self.assertFalse((self.fx.pin / "upgrade_controller.py").exists())
         code, res = self.run_uc("status", controller=frozen)
@@ -521,7 +521,7 @@ class ControllerTests(unittest.TestCase):
         journal = self.journal(out["txn"])
         with open(journal.path, "ab") as stream:
             stream.write(b'{"partial":')
-        code, res = self.run_uc("recover", "--as", "claude", "--session", "s-claude")
+        code, res = self.run_uc("recover", "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual(code, 0, res)
         records, torn = journal.read()
         self.assertIsNone(torn)
@@ -534,42 +534,42 @@ class ControllerTests(unittest.TestCase):
         journal = self.journal(out["txn"])
         with open(journal.path, "ab") as stream:
             stream.write(b'{"v":1,"schema":"ai-comm-upgrade-journal/1","seq":99,"prev":null,"kind":"note"}\n')
-        code, res = self.run_uc("recover", "--as", "claude", "--session", "s-claude")
+        code, res = self.run_uc("recover", "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual(res["code"], "journal_corrupt")
 
     # ---- peers and completion
 
     def test_peer_phase_waits_and_validates_reports(self):
-        consent, out = self.prepared([self.fx.integration("own", "claude"), self.fx.integration("peer", "codex")])
-        code, res = self.run_uc("apply", "--as", "claude", "--session", "s-claude")
+        consent, out = self.prepared([self.fx.integration("own", "agent-a"), self.fx.integration("peer", "agent-b")])
+        code, res = self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual(res["status"], "awaiting_peer")
-        self.assertEqual((res["integration"], res["phase"], res["owner"]), ("peer", "pause", "codex"))
+        self.assertEqual((res["integration"], res["phase"], res["owner"]), ("peer", "pause", "agent-b"))
         nonce = res["nonce"]
         self.assertEqual(self.pin_commit(), self.fx.from_commit)
         base = ["report", "--integration", "peer", "--phase", "pause"]
-        self.assertEqual(self.run_uc(*base, "--nonce", "0" * 32, "--as", "codex", "--session", "s-codex")[1]["code"],
+        self.assertEqual(self.run_uc(*base, "--nonce", "0" * 32, "--as", "agent-b", "--session", "s-agent-b")[1]["code"],
                          "stale_report")
-        self.assertEqual(self.run_uc(*base, "--nonce", nonce, "--as", "claude", "--session", "s-claude")[1]["code"],
+        self.assertEqual(self.run_uc(*base, "--nonce", nonce, "--as", "agent-a", "--session", "s-agent-a")[1]["code"],
                          "not_integration_owner")
-        self.assertEqual(self.run_uc(*base, "--nonce", nonce, "--as", "codex", "--session", "old")[1]["code"],
+        self.assertEqual(self.run_uc(*base, "--nonce", nonce, "--as", "agent-b", "--session", "old")[1]["code"],
                          "session_not_current")
-        code, rep = self.run_uc(*base, "--nonce", nonce, "--as", "codex", "--session", "s-codex")
+        code, rep = self.run_uc(*base, "--nonce", nonce, "--as", "agent-b", "--session", "s-agent-b")
         self.assertEqual(rep["status"], "reported", rep)
-        self.assertEqual(self.run_uc(*base, "--nonce", nonce, "--as", "codex", "--session", "s-codex")[1]["code"],
+        self.assertEqual(self.run_uc(*base, "--nonce", nonce, "--as", "agent-b", "--session", "s-agent-b")[1]["code"],
                          "no_pending_phase")
         for _ in range(20):
-            code, res = self.run_uc("continue", "--as", "claude", "--session", "s-claude")
+            code, res = self.run_uc("continue", "--as", "agent-a", "--session", "s-agent-a")
             if res.get("status") != "awaiting_peer":
                 break
-            self.assertEqual(res["owner"], "codex")
+            self.assertEqual(res["owner"], "agent-b")
             self.run_uc("report", "--integration", "peer", "--phase", res["phase"], "--nonce", res["nonce"],
-                        "--as", "codex", "--session", "s-codex")
+                        "--as", "agent-b", "--session", "s-agent-b")
         self.assertEqual(res["status"], "integrated_pending_liveness", res)
 
     def test_recover_reports_peer_state_honestly(self):
-        consent, out = self.prepared([self.fx.integration("own", "claude"), self.fx.integration("peer", "codex")])
-        self.run_uc("apply", "--as", "claude", "--session", "s-claude")
-        code, res = self.run_uc("recover", "--as", "claude", "--session", "s-claude")
+        consent, out = self.prepared([self.fx.integration("own", "agent-a"), self.fx.integration("peer", "agent-b")])
+        self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")
+        code, res = self.run_uc("recover", "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual(res["integrations"]["peer"], "owner_unavailable_to_probe")
         self.assertEqual(res["integrations"]["own"], "paused")
         self.assertEqual(res["package"], "from")
@@ -577,11 +577,11 @@ class ControllerTests(unittest.TestCase):
     def test_finalize_requires_both_decisions_bound_to_txn(self):
         consent, out = self.prepared()
         txn = out["txn"]
-        code, res = self.run_uc("finalize", "--as", "claude", "--session", "s-claude",
-                                "--liveness-decision", "00000001-codex",
-                                "--guidance-decision", "00000002-codex", "--guidance-file", "GUIDE.md")
+        code, res = self.run_uc("finalize", "--as", "agent-a", "--session", "s-agent-a",
+                                "--liveness-decision", "00000001-agent-b",
+                                "--guidance-decision", "00000002-agent-b", "--guidance-file", "GUIDE.md")
         self.assertEqual(res["code"], "not_ready_to_finalize")
-        self.run_uc("apply", "--as", "claude", "--session", "s-claude")
+        self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")
         guide = self.fx.project / "GUIDE.md"
         guide.write_text("pin v1.1.0\n")
 
@@ -589,14 +589,14 @@ class ControllerTests(unittest.TestCase):
             digest = sha(text.encode())
             (self.fx.fake / "artifacts" / digest).write_text(text)
             (self.fx.fake / "messages" / f"{mid}.json").write_text(json.dumps({"act": "DECIDE", "artifact": digest}))
-        publish("00000001-codex", "live\nai-comm-upgrade-txn: txn-0000000000000000\n")
-        publish("00000002-codex", f"guide\nai-comm-upgrade-txn: {txn}\nai-comm-upgrade-guidance-sha256: {'0' * 64}\n")
-        args = ["finalize", "--as", "claude", "--session", "s-claude", "--liveness-decision", "00000001-codex", "--guidance-decision", "00000002-codex",
+        publish("00000001-agent-b", "live\nai-comm-upgrade-txn: txn-0000000000000000\n")
+        publish("00000002-agent-b", f"guide\nai-comm-upgrade-txn: {txn}\nai-comm-upgrade-guidance-sha256: {'0' * 64}\n")
+        args = ["finalize", "--as", "agent-a", "--session", "s-agent-a", "--liveness-decision", "00000001-agent-b", "--guidance-decision", "00000002-agent-b",
                 "--guidance-file", "GUIDE.md"]
         self.assertEqual(self.run_uc(*args)[1]["code"], "decision_not_for_txn")
-        publish("00000001-codex", f"live\nai-comm-upgrade-txn: {txn}\n")
+        publish("00000001-agent-b", f"live\nai-comm-upgrade-txn: {txn}\n")
         self.assertEqual(self.run_uc(*args)[1]["code"], "guidance_not_installed")
-        publish("00000002-codex", f"guide\nai-comm-upgrade-txn: {txn}\n"
+        publish("00000002-agent-b", f"guide\nai-comm-upgrade-txn: {txn}\n"
                 f"ai-comm-upgrade-guidance-sha256: {sha(guide.read_bytes())}\n")
         code, res = self.run_uc(*args)
         self.assertEqual(res["status"], "completed", res)
@@ -628,78 +628,78 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(out["code"], "fetch_failed")
 
     def test_r2_peer_first_action_still_validates_and_consumes_consent(self):
-        consent, out = self.prepared([self.fx.integration("peer", "codex")])
+        consent, out = self.prepared([self.fx.integration("peer", "agent-b")])
         with mock.patch.object(uc, "now", return_value=uc.now() + uc.CONSENT_TTL + 1):
-            code, res = self.run_uc("apply", "--as", "claude", "--session", "s-claude")
+            code, res = self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual(res["code"], "consent_expired")
         self.assertFalse((self.fx.project / "peer.state.json").exists()
                          and json.loads((self.fx.project / "peer.state.json").read_text())["paused"])
         self.assertEqual(self.pin_commit(), self.fx.from_commit)
 
     def test_r2_peer_first_consumes_before_awaiting(self):
-        consent, out = self.prepared([self.fx.integration("peer", "codex")])
-        code, res = self.run_uc("apply", "--as", "claude", "--session", "s-claude")
+        consent, out = self.prepared([self.fx.integration("peer", "agent-b")])
+        code, res = self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual(res["status"], "awaiting_peer")
         self.assertEqual(uc.load_consent(uc.Project(self.fx.project), consent)["consumed_by"], out["txn"])
 
     def test_r2_empty_integrations_and_concurrent_prepares(self):
         self.fx.write_manifest([])
         consent = self.consent()
-        first = self.run_uc("prepare", "--target", "1.1.0", "--consent", consent, "--as", "claude",
-                            "--session", "s-claude")[1]
-        second = self.run_uc("prepare", "--target", "1.1.0", "--consent", consent, "--as", "claude",
-                             "--session", "s-claude")[1]
-        code, res = self.run_uc("apply", "--txn", first["txn"], "--as", "claude", "--session", "s-claude")
+        first = self.run_uc("prepare", "--target", "1.1.0", "--consent", consent, "--as", "agent-a",
+                            "--session", "s-agent-a")[1]
+        second = self.run_uc("prepare", "--target", "1.1.0", "--consent", consent, "--as", "agent-a",
+                             "--session", "s-agent-a")[1]
+        code, res = self.run_uc("apply", "--txn", first["txn"], "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual(res["status"], "integrated_pending_liveness", res)
-        code, res = self.run_uc("apply", "--txn", second["txn"], "--as", "claude", "--session", "s-claude")
+        code, res = self.run_uc("apply", "--txn", second["txn"], "--as", "agent-a", "--session", "s-agent-a")
         self.assertIn(res["code"], {"consent_spent", "upgrade_identity_changed"})
 
     def test_r3_owner_only_peer_probe_not_run_by_preparer(self):
-        self.prepared([self.fx.integration("own", "claude"), self.fx.integration("peer", "codex")])
+        self.prepared([self.fx.integration("own", "agent-a"), self.fx.integration("peer", "agent-b")])
         self.assertTrue((self.fx.project / "own.state.json").exists())
         self.assertFalse((self.fx.project / "peer.state.json").exists())
 
     def test_r3_applier_session_frozen_takeover_stops(self):
         consent, out = self.prepared()
-        code, res = self.run_uc("apply", "--as", "claude", "--session", "other")
+        code, res = self.run_uc("apply", "--as", "agent-a", "--session", "other")
         self.assertEqual(res["code"], "applier_session_changed")
-        code, res = self.run_uc("apply", "--as", "codex", "--session", "s-codex")
+        code, res = self.run_uc("apply", "--as", "agent-b", "--session", "s-agent-b")
         self.assertEqual(res["code"], "not_applier")
         state = json.loads((self.fx.fake / "state.json").read_text())
-        state["participants"][0]["session"] = "s-claude-takeover"
+        state["participants"][0]["session"] = "s-agent-a-takeover"
         (self.fx.fake / "state.json").write_text(json.dumps(state))
-        code, res = self.run_uc("apply", "--as", "claude", "--session", "s-claude")
+        code, res = self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual(res["code"], "session_not_current")
         self.assertEqual(self.pin_commit(), self.fx.from_commit)
         before = self.journal(out["txn"]).path.read_bytes()
-        code, res = self.run_uc("apply", "--as", "claude", "--session", "s-claude-takeover")
+        code, res = self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a-takeover")
         self.assertEqual(res["code"], "applier_session_changed")
         self.assertEqual(self.journal(out["txn"]).path.read_bytes(), before)
         self.assertEqual(self.pin_commit(), self.fx.from_commit)
 
     def _complete(self, out):
         txn = out["txn"]
-        self.run_uc("apply", "--as", "claude", "--session", "s-claude")
+        self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")
         guide = self.fx.project / "GUIDE.md"
         guide.write_text("pin v1.1.0\n")
-        for mid, text in (("00000001-codex", f"live\nai-comm-upgrade-txn: {txn}\n"),
-                          ("00000002-codex", f"guide\nai-comm-upgrade-txn: {txn}\n"
+        for mid, text in (("00000001-agent-b", f"live\nai-comm-upgrade-txn: {txn}\n"),
+                          ("00000002-agent-b", f"guide\nai-comm-upgrade-txn: {txn}\n"
                                              f"ai-comm-upgrade-guidance-sha256: {sha(guide.read_bytes())}\n")):
             digest = sha(text.encode())
             (self.fx.fake / "artifacts" / digest).write_text(text)
             (self.fx.fake / "messages" / f"{mid}.json").write_text(json.dumps({"act": "DECIDE", "artifact": digest}))
-        return ["finalize", "--as", "claude", "--session", "s-claude", "--liveness-decision", "00000001-codex",
-                "--guidance-decision", "00000002-codex", "--guidance-file", "GUIDE.md"]
+        return ["finalize", "--as", "agent-a", "--session", "s-agent-a", "--liveness-decision", "00000001-agent-b",
+                "--guidance-decision", "00000002-agent-b", "--guidance-file", "GUIDE.md"]
 
     def test_r4_completed_upgrade_can_roll_back_once_via_frozen_controller(self):
         consent, out = self.prepared()
         args = self._complete(out)
         self.assertEqual(self.run_uc(*args)[1]["status"], "completed")
         frozen = Path(out["invocation"][2])
-        code, res = self.run_uc("rollback", "--as", "claude", "--session", "s-claude", controller=frozen)
+        code, res = self.run_uc("rollback", "--as", "agent-a", "--session", "s-agent-a", controller=frozen)
         self.assertEqual(res["status"], "rolled_back", res)
         self.assertEqual(self.pin_commit(), self.fx.from_commit)
-        code, res = self.run_uc("rollback", "--as", "claude", "--session", "s-claude", controller=frozen)
+        code, res = self.run_uc("rollback", "--as", "agent-a", "--session", "s-agent-a", controller=frozen)
         self.assertEqual(res["code"], "transaction_finished")
 
     def test_r5_rollback_after_interrupted_install_source(self):
@@ -713,27 +713,27 @@ class ControllerTests(unittest.TestCase):
             return result
         with mock.patch.object(uc, "perform_own", crash_after):
             with self.assertRaises(KeyboardInterrupt):
-                self.run_uc("apply", "--as", "claude", "--session", "s-claude")
-        code, res = self.run_uc("rollback", "--as", "claude", "--session", "s-claude")
+                self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")
+        code, res = self.run_uc("rollback", "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual(res["status"], "rolled_back", res)
         self.assertEqual(self.pin_commit(), self.fx.from_commit)
         self.assertEqual((self.fx.project / "own_src.py").read_bytes(),
                          (self.fx.project / "staged" / "own-from.py").read_bytes())
 
     def test_r5_peer_unresolved_intent_blocks_rollback_until_reported(self):
-        consent, out = self.prepared([self.fx.integration("peer", "codex")])
-        res = self.run_uc("apply", "--as", "claude", "--session", "s-claude")[1]
-        code, rb = self.run_uc("rollback", "--as", "claude", "--session", "s-claude")
+        consent, out = self.prepared([self.fx.integration("peer", "agent-b")])
+        res = self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")[1]
+        code, rb = self.run_uc("rollback", "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual((rb["code"], rb["integration"], rb["nonce"]), ("peer_reconcile_required", "peer", res["nonce"]))
         self.run_uc("report", "--integration", "peer", "--phase", "pause", "--nonce", res["nonce"],
-                    "--as", "codex", "--session", "s-codex")
-        code, rb = self.run_uc("rollback", "--as", "claude", "--session", "s-claude")
+                    "--as", "agent-b", "--session", "s-agent-b")
+        code, rb = self.run_uc("rollback", "--as", "agent-a", "--session", "s-agent-a")
         phases = []
         while rb.get("status") == "awaiting_peer":
             phases.append(rb["phase"])
             self.run_uc("report", "--integration", "peer", "--phase", rb["phase"], "--nonce", rb["nonce"],
-                        "--as", "codex", "--session", "s-codex")
-            code, rb = self.run_uc("rollback", "--as", "claude", "--session", "s-claude")
+                        "--as", "agent-b", "--session", "s-agent-b")
+            code, rb = self.run_uc("rollback", "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual(phases, ["pause", "resume"])
         self.assertEqual(rb["status"], "rolled_back", rb)
         self.assertEqual(self.pin_commit(), self.fx.from_commit)
@@ -748,7 +748,7 @@ class ControllerTests(unittest.TestCase):
                     os.chmod(self.temp.name, 0o700)
                     self.fx = Fixture(Path(self.temp.name).resolve())
                     consent, out = self.prepared()
-                    self.run_uc("apply", "--as", "claude", "--session", "s-claude")
+                    self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")
                     real = uc.perform_own
 
                     def crash(txn, action, op=op, when=when):
@@ -760,8 +760,8 @@ class ControllerTests(unittest.TestCase):
                         return result
                     with mock.patch.object(uc, "perform_own", crash):
                         with self.assertRaises(KeyboardInterrupt):
-                            self.run_uc("rollback", "--as", "claude", "--session", "s-claude")
-                    code, res = self.run_uc("rollback", "--as", "claude", "--session", "s-claude")
+                            self.run_uc("rollback", "--as", "agent-a", "--session", "s-agent-a")
+                    code, res = self.run_uc("rollback", "--as", "agent-a", "--session", "s-agent-a")
                     self.assertEqual(res.get("status"), "rolled_back", res)
                     self.assertEqual(self.pin_commit(), self.fx.from_commit)
                     state = json.loads((self.fx.project / "own.state.json").read_text())
@@ -769,8 +769,8 @@ class ControllerTests(unittest.TestCase):
                                      (False, sha((self.fx.pin / "ai_comm.py").read_bytes())))
 
     def test_peer_report_crash_then_retry_with_same_nonce(self):
-        consent, out = self.prepared([self.fx.integration("peer", "codex")])
-        res = self.run_uc("apply", "--as", "claude", "--session", "s-claude")[1]
+        consent, out = self.prepared([self.fx.integration("peer", "agent-b")])
+        res = self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")[1]
         real = uc.Journal.append
 
         def crash_on_outcome(journal, kind, data):
@@ -780,11 +780,11 @@ class ControllerTests(unittest.TestCase):
         with mock.patch.object(uc.Journal, "append", crash_on_outcome):
             with self.assertRaises(KeyboardInterrupt):
                 self.run_uc("report", "--integration", "peer", "--phase", "pause", "--nonce", res["nonce"],
-                            "--as", "codex", "--session", "s-codex")
-        again = self.run_uc("apply", "--as", "claude", "--session", "s-claude")[1]
+                            "--as", "agent-b", "--session", "s-agent-b")
+        again = self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")[1]
         self.assertEqual((again["status"], again["nonce"]), ("awaiting_peer", res["nonce"]))
         code, rep = self.run_uc("report", "--integration", "peer", "--phase", "pause", "--nonce", res["nonce"],
-                                "--as", "codex", "--session", "s-codex")
+                                "--as", "agent-b", "--session", "s-agent-b")
         self.assertEqual(rep["status"], "reported", rep)
 
     def test_r6_finalize_rechecks_live_state(self):
@@ -803,21 +803,21 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(self.run_uc(*args)[1]["status"], "completed")
 
     def test_r6_peer_attestation_required_before_completion(self):
-        consent, out = self.prepared([self.fx.integration("peer", "codex")])
-        res = self.run_uc("apply", "--as", "claude", "--session", "s-claude")[1]
+        consent, out = self.prepared([self.fx.integration("peer", "agent-b")])
+        res = self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")[1]
         while res.get("status") == "awaiting_peer":
             self.run_uc("report", "--integration", "peer", "--phase", res["phase"], "--nonce", res["nonce"],
-                        "--as", "codex", "--session", "s-codex")
-            res = self.run_uc("continue", "--as", "claude", "--session", "s-claude")[1]
+                        "--as", "agent-b", "--session", "s-agent-b")
+            res = self.run_uc("continue", "--as", "agent-a", "--session", "s-agent-a")[1]
         args = self._complete(out)
         code, res = self.run_uc(*args)
         self.assertEqual(res["status"], "awaiting_peer", res)
         att = res["attestations"][0]
         code, bad = self.run_uc("report", "--integration", "peer", "--phase", "attest", "--nonce", "0" * 32,
-                                "--as", "codex", "--session", "s-codex")
+                                "--as", "agent-b", "--session", "s-agent-b")
         self.assertEqual(bad["code"], "stale_report")
         code, rep = self.run_uc("report", "--integration", "peer", "--phase", "attest", "--nonce", att["nonce"],
-                                "--as", "codex", "--session", "s-codex")
+                                "--as", "agent-b", "--session", "s-agent-b")
         self.assertEqual(rep["status"], "reported", rep)
         self.assertEqual(self.run_uc(*args)[1]["status"], "completed")
 
@@ -831,8 +831,8 @@ class ControllerTests(unittest.TestCase):
         git(other, "commit", "-q", "--allow-empty", "-m", "other root")
         out2 = io.StringIO()
         with contextlib.redirect_stdout(out2):
-            uc.main(["--project", str(self.fx.project), "--channel", str(other), "apply", "--as", "claude",
-                     "--session", "s-claude"])
+            uc.main(["--project", str(self.fx.project), "--channel", str(other), "apply", "--as", "agent-a",
+                     "--session", "s-agent-a"])
         result = json.loads(out2.getvalue())
         self.assertIn(result["code"], {"upgrade_identity_changed", "project_identity_mismatch"})
         self.assertEqual(self.pin_commit(), self.fx.from_commit)
@@ -846,7 +846,7 @@ class ControllerTests(unittest.TestCase):
 
     def test_prepare_emits_guidance_proposal(self):
         (self.fx.project / "GUIDE.md").write_text("intro\nTransport: ai-comm v1.0.0 pinned\n")
-        item = self.fx.integration("own", "claude")
+        item = self.fx.integration("own", "agent-a")
         root = self.fx.project / ".ai-comm-local" / "upgrade"
         uc.Project(self.fx.project).runtime()
         manifest = {"v": 1, "schema": uc.PROJECT_SCHEMA, "status": "declared",
@@ -854,54 +854,54 @@ class ControllerTests(unittest.TestCase):
                     "integrations": [item], "guidance": ["GUIDE.md"]}
         uc.write_private_atomic(root / "project.json", json.dumps(manifest).encode())
         consent = self.consent()
-        code, out = self.run_uc("prepare", "--target", "1.1.0", "--consent", consent, "--as", "claude",
-                                "--session", "s-claude")
+        code, out = self.run_uc("prepare", "--target", "1.1.0", "--consent", consent, "--as", "agent-a",
+                                "--session", "s-agent-a")
         text = Path(out["guidance_proposal"]).read_text()
         self.assertIn(f"ai-comm-upgrade-txn: {out['txn']}", text)
         self.assertIn("GUIDE.md:2: Transport: ai-comm v1.0.0 pinned", text)
         self.assertIn("ai-comm-upgrade-guidance-sha256:", text)
 
     def test_r3b_unauthorized_recover_neither_repairs_nor_probes(self):
-        consent, out = self.prepared([self.fx.integration("peer", "codex")])
+        consent, out = self.prepared([self.fx.integration("peer", "agent-b")])
         journal = self.journal(out["txn"])
         with open(journal.path, "ab") as stream:
             stream.write(b'{"torn":')
         before = journal.path.read_bytes()
-        for args in (["--as", "codex", "--session", "stale"], ["--as", "intruder", "--session", "s-codex"],
-                     ["--as", "claude", "--session", "s-other"]):
+        for args in (["--as", "agent-b", "--session", "stale"], ["--as", "intruder", "--session", "s-agent-b"],
+                     ["--as", "agent-a", "--session", "s-other"]):
             with self.subTest(args=args):
                 code, res = self.run_uc("recover", *args)
                 self.assertEqual(code, 2, res)
                 self.assertEqual(journal.path.read_bytes(), before)
                 self.assertFalse(list(journal.dir.glob("torn-*.bin")))
                 self.assertFalse((self.fx.project / "peer.state.json").exists())
-        code, res = self.run_uc("recover", "--as", "codex")
+        code, res = self.run_uc("recover", "--as", "agent-b")
         self.assertEqual(res["code"], "invalid_arguments")
-        code, res = self.run_uc("recover", "--as", "codex", "--session", "s-codex")
+        code, res = self.run_uc("recover", "--as", "agent-b", "--session", "s-agent-b")
         self.assertEqual(res["integrations"]["peer"], "running_from", res)
         self.assertTrue(list(journal.dir.glob("torn-*.bin")))
 
     def test_r3b_unauthorized_report_does_not_repair(self):
-        consent, out = self.prepared([self.fx.integration("peer", "codex")])
-        res = self.run_uc("apply", "--as", "claude", "--session", "s-claude")[1]
+        consent, out = self.prepared([self.fx.integration("peer", "agent-b")])
+        res = self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")[1]
         journal = self.journal(out["txn"])
         with open(journal.path, "ab") as stream:
             stream.write(b'{"torn":')
         before = journal.path.read_bytes()
         code, bad = self.run_uc("report", "--integration", "peer", "--phase", "pause", "--nonce", res["nonce"],
-                                "--as", "claude", "--session", "s-claude")
+                                "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual(bad["code"], "not_integration_owner")
         self.assertEqual(journal.path.read_bytes(), before)
 
     def test_r5_hook_writes_target_then_fails_rollback_restores(self):
         consent, out = self.prepared()
         os.environ["UC_WRITE_THEN_FAIL"] = "own:install_source"
-        code, res = self.run_uc("apply", "--as", "claude", "--session", "s-claude")
+        code, res = self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual(res["code"], "hook_failed")
         self.assertEqual((self.fx.project / "own_src.py").read_bytes(),
                          (self.fx.project / "staged" / "own-to.py").read_bytes())
         os.environ.pop("UC_WRITE_THEN_FAIL")
-        code, res = self.run_uc("rollback", "--as", "claude", "--session", "s-claude")
+        code, res = self.run_uc("rollback", "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual(res["status"], "rolled_back", res)
         self.assertEqual(self.pin_commit(), self.fx.from_commit)
         self.assertEqual((self.fx.project / "own_src.py").read_bytes(),
@@ -912,7 +912,7 @@ class ControllerTests(unittest.TestCase):
     def test_changed_hook_code_blocks_recover_and_rollback_probes(self):
         consent, out = self.prepared()
         os.environ["UC_WRITE_THEN_FAIL"] = "own:install_source"
-        self.run_uc("apply", "--as", "claude", "--session", "s-claude")
+        self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")
         os.environ.pop("UC_WRITE_THEN_FAIL")
         journal = self.journal(out["txn"])
         with open(self.fx.project / "listener.py", "a") as stream:
@@ -920,22 +920,22 @@ class ControllerTests(unittest.TestCase):
         before = journal.path.read_bytes()
         for cmd in ("recover", "rollback"):
             with self.subTest(cmd=cmd):
-                code, res = self.run_uc(cmd, "--as", "claude", "--session", "s-claude")
+                code, res = self.run_uc(cmd, "--as", "agent-a", "--session", "s-agent-a")
                 self.assertEqual((res["code"], res.get("what")), ("upgrade_identity_changed", "integration_code"))
                 self.assertFalse((self.fx.project / "SENTINEL").exists())
                 self.assertEqual(journal.path.read_bytes(), before)
 
     def test_r8_modified_pin_cli_never_runs(self):
-        consent, out = self.prepared([self.fx.integration("own", "claude"), self.fx.integration("peer", "codex")])
+        consent, out = self.prepared([self.fx.integration("own", "agent-a"), self.fx.integration("peer", "agent-b")])
         journal = self.journal(out["txn"])
         cli = self.fx.pin / "ai_comm.py"
         cli.write_text(cli.read_text() + "\nopen(%r, 'w').write('ran')\n" % str(self.fx.project / "SENTINEL"))
         before = journal.path.read_bytes()
-        calls = [("apply", "--as", "claude", "--session", "s-claude"),
-                 ("rollback", "--as", "claude", "--session", "s-claude"),
-                 ("recover", "--as", "codex", "--session", "s-codex"),
+        calls = [("apply", "--as", "agent-a", "--session", "s-agent-a"),
+                 ("rollback", "--as", "agent-a", "--session", "s-agent-a"),
+                 ("recover", "--as", "agent-b", "--session", "s-agent-b"),
                  ("report", "--integration", "peer", "--phase", "pause", "--nonce", "0" * 32,
-                  "--as", "codex", "--session", "s-codex")]
+                  "--as", "agent-b", "--session", "s-agent-b")]
         for call in calls:
             with self.subTest(call=call[0]):
                 code, res = self.run_uc(*call)
@@ -944,12 +944,12 @@ class ControllerTests(unittest.TestCase):
                 self.assertEqual(journal.path.read_bytes(), before)
 
     def test_r8_modified_peer_probe_blocks_report(self):
-        consent, out = self.prepared([self.fx.integration("peer", "codex")])
-        res = self.run_uc("apply", "--as", "claude", "--session", "s-claude")[1]
+        consent, out = self.prepared([self.fx.integration("peer", "agent-b")])
+        res = self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")[1]
         with open(self.fx.project / "listener.py", "a") as stream:
             stream.write("\nopen('SENTINEL', 'w').write('ran')\n")
         code, rep = self.run_uc("report", "--integration", "peer", "--phase", "pause", "--nonce", res["nonce"],
-                                "--as", "codex", "--session", "s-codex")
+                                "--as", "agent-b", "--session", "s-agent-b")
         self.assertEqual((rep["code"], rep.get("what")), ("upgrade_identity_changed", "integration_code"))
         self.assertFalse((self.fx.project / "SENTINEL").exists())
 
@@ -964,7 +964,7 @@ class ControllerTests(unittest.TestCase):
         cfg = Path(self.temp.name) / "gitconfig"
         cfg.write_text(f"[core]\n\thooksPath = {hooks}\n")
         with mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(cfg)}):
-            code, res = self.run_uc("apply", "--as", "claude", "--session", "s-claude")
+            code, res = self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual(res["status"], "integrated_pending_liveness", res)
         self.assertFalse(sentinel.exists())
 
@@ -977,17 +977,17 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual((res["code"], res.get("what")), ("postcondition_failed", "release_status"))
 
     def test_r6_attestation_does_not_survive_new_readiness(self):
-        consent, out = self.prepared([self.fx.integration("peer", "codex")])
-        res = self.run_uc("apply", "--as", "claude", "--session", "s-claude")[1]
+        consent, out = self.prepared([self.fx.integration("peer", "agent-b")])
+        res = self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")[1]
         while res.get("status") == "awaiting_peer":
             self.run_uc("report", "--integration", "peer", "--phase", res["phase"], "--nonce", res["nonce"],
-                        "--as", "codex", "--session", "s-codex")
-            res = self.run_uc("continue", "--as", "claude", "--session", "s-claude")[1]
+                        "--as", "agent-b", "--session", "s-agent-b")
+            res = self.run_uc("continue", "--as", "agent-a", "--session", "s-agent-a")[1]
         args = self._complete(out)
         att = self.run_uc(*args)[1]["attestations"][0]
         self.run_uc("report", "--integration", "peer", "--phase", "attest", "--nonce", att["nonce"],
-                    "--as", "codex", "--session", "s-codex")
-        code, res = self.run_uc("continue", "--as", "claude", "--session", "s-claude")
+                    "--as", "agent-b", "--session", "s-agent-b")
+        code, res = self.run_uc("continue", "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual(res["code"], "transaction_finished")
         txn = uc.Txn(uc.Project(self.fx.project), out["txn"])
         txn.journal.append("state", {"state": "integrated_pending_liveness"})

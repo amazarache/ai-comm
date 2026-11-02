@@ -5,78 +5,77 @@ files or another agent's message do not independently authorize activation.
 
 ## Start a two-session exchange (package 1.4.2+)
 
-Install the project-local skill as described under Optional session skill, and
-record the task, existing channel, participant role table, one release
-notifier, approved listener details, and the exact approved Codex thread, if
-any, in the project activation note. The owner activates each
-session in that session; role names and channel files do
-not activate or take over a session. Never reuse a conversation reference.
+These instructions are the same for every agent host. Where hosts differ, the
+text names the capability needed, not a product: check your host's own
+documentation for how it provides that capability.
 
-| Host | Start role A | Start role B |
-|---|---|---|
-| Codex | `$ai-comm start A <subject>` | `$ai-comm start B` |
-| Claude Code with a `.claude/skills/comm` link | `/comm start A <subject>` | `/comm start B` |
-| Claude Code with only `.claude/skills/ai-comm` | `/ai-comm start A <subject>` | `/ai-comm start B` |
+Make the project-local skill available as described under Optional session
+skill, and record the task, existing channel, participant role table, one
+release notifier, approved listener or notifier details, and the exact approved
+target session for a notifier, if any, in the project activation note. The owner
+activates each session in that session; role names and channel files do not
+activate or take over a session. Never reuse a conversation reference.
 
-Codex can also select the skill in `/skills`; a plain-language `ai-comm start A`
-request works only after the host has discovered the skill or the session has
-read its pinned `SKILL.md`. A `.claude/skills/comm` link is an optional alias to
-the same pinned skill, not a Codex command. After creating it, verify that the
-installed Claude Code version discovers `/comm` before relying on the alias:
+The owner starts each session directly. In the first session, invoke the
+`ai-comm` skill with `start A <subject>`; in the second, invoke it with
+`start B`. Use whatever way the host has for invoking a skill by name (a
+command, a mention or a picker), or say it in plain words, for example
+"ai-comm start A <subject>". Plain words work once the host has discovered the
+skill or the session has read the pinned `SKILL.md`.
 
-```sh
-mkdir -p .claude/skills
-if [ -e .claude/skills/comm ] || [ -L .claude/skills/comm ]; then
-  echo "adapter path already exists; inspect it and do not replace it" >&2
-else
-  ln -sn ../../.tools/ai-comm/skills/ai-comm .claude/skills/comm
-fi
-```
+Run A and B in their respective sessions. A starts its approved listener, if
+any, before waiting for B's join, then performs PING / PONG / ACK and opens the
+subject. B answers a durable PING whether it starts before or after A. The
+commands never create a channel; init remains a separate explicit owner
+request. Use status to inspect the session without consuming inbox receipts,
+and stop to stop only the listener that session started. Neither command can
+wake an idle model. Follow the skill for bounded waits and release questions.
+Use the pinned package as documented; do not modify it, fork it, design changes
+to ai-comm, or build channel tooling unless the owner explicitly asks. Report
+tool problems as evidence-backed FACTs or ASKs and keep using the working
+protocol.
 
-The alias must resolve inside this project's own pinned `.tools/ai-comm`
-checkout. An existing path is preserved, not verified; inspect its target
-before relying on it. Do not replace it or link to another project's pin.
+**Wake guidance.** Nothing in ai-comm wakes an idle model. What is possible
+depends on what the host can do; the session uses only what its host supports
+and what the project activation note approves.
 
-Run A and B in their respective sessions. A starts its approved listener before
-waiting for B's join, then performs PING / PONG / ACK and opens the subject. B
-answers a durable PING whether it starts before or after A. The commands never
-create a channel; init remains a separate explicit owner request. Use status to
-inspect the session without consuming inbox receipts, and stop to stop only the
-listener that session started. Neither command can wake an idle model. Follow
-the skill for host-specific bounded waits and release questions. Use the pinned
-package as documented; do not modify it, fork it, design changes to ai-comm, or
-build channel tooling unless the owner explicitly asks. Report tool problems
-as evidence-backed FACTs or ASKs and keep using the working protocol.
+- *Always:* while a turn is active, the session reads with ordinary bounded
+  `wait --timeout N` (or `inbox`), evaluates the returned page, then
+  acknowledges its `through`. The session never uses `--new-since` to read.
+- *Exit-wake listener (if the host re-invokes the session when a background
+  command it started exits):* only the approved listener named in the project
+  activation note. It loops on notification-mode
+  `wait --timeout 30 --new-since N`, which never changes receipts, and exits on a
+  notification so the host re-invokes the session; the session then reads
+  `inbox` itself and acknowledges. It must be started through the host's own
+  background-command mechanism: a detached shell process wakes nobody. Re-arm it
+  after each event or expiry. This is not permission to build a helper.
+- *Session notifier (if the host has a documented way for another process to
+  queue a message into one existing session):* between turns, a peer may queue
+  only the fixed text "Check the ai-comm inbox from message N.", with no
+  message content, instructions or approvals, and only when the owner approved
+  the exact current target session and that permission is recorded in the
+  project activation note. The owner writes or directly confirms that entry. A
+  session must never create, edit, or carry forward nudge approval on its
+  own authority; an entry alone is not owner consent. The approval is revocable
+  and is not inherited by a takeover. The approved helper reads the target's
+  runtime receipt `ai-comm-runtime/<HANDLE>.json` within the channel, using its
+  integer `read` field, never `seen`. If it cannot safely read and validate that
+  receipt, skip and log the nudge. Do not follow a symlink, change a receipt, or
+  acknowledge on the target's behalf. Also skip and log a nudge when the
+  target's read cursor already covers N; the target reads `inbox` before acting.
 
-**Wake guidance.** Nothing in ai-comm wakes an idle model. For Claude Code, use
-only the approved listener named in the project activation note. That existing
-background helper may loop on `wait --timeout 30 --new-since N`, exit on a
-notification, and let the host re-invoke the session; re-arm after each event
-or expiry. This is not permission to build a helper. For Codex, use bounded
-waits during an active turn. Between turns, a peer may queue only the fixed
-text "Check the ai-comm inbox from message N.", with no message content,
-instructions or approvals, and only when the owner approved the exact current
-thread and that permission is recorded in the project activation note.
-The owner writes or directly confirms that exact-thread entry. A session must
-never create, edit, or carry forward nudge approval on its own authority; an
-entry alone is not owner consent. The approval is revocable and is not inherited
-by a takeover. The approved helper reads the target's runtime receipt
-`ai-comm-runtime/<HANDLE>.json` within the channel, using its integer `read`
-field, never `seen`. If it cannot safely read and validate that receipt, skip
-and log the nudge. Do not follow a symlink, change a receipt, or acknowledge on
-the target's behalf. Also skip and log a nudge when the target's read cursor
-already covers N; the target reads `inbox` before acting. Keep helpers in the
-durable, project-local, git-ignored path named in the project activation note,
-never only in `/tmp`. Do not build a watcher or nudge helper unless the owner
-asks.
+Keep helpers in the durable, project-local, git-ignored path named in the
+project activation note, never only in `/tmp`. Do not build a watcher or nudge
+helper unless the owner asks.
 
 A project activation note can use this role table (fill from owner-confirmed
 values; do not copy another project's identities):
 
-| Role | Handle | Platform | Upgrade notifier | Exact-thread nudge permission |
+| Role | Handle | Host label | Upgrade notifier | Approved notifier target session |
 |---|---|---|---|---|
-| A | <handle> | <host> | <yes/no> | <approved thread or none> |
-| B | <handle> | <host> | <yes/no> | <approved thread or none> |
+| A | <handle> | <host-label> | <yes/no> | <approved session or none> |
+| B | <handle> | <host-label> | <yes/no> | <approved session or none> |
 
 Exactly one role is the notifier for a shared pin. An activation on 1.4.1 or
 older that has no role table must name one bootstrap notifier before using the
@@ -141,8 +140,9 @@ the conventions below never change them.
 
 **4. Handles.**
 Handles are lowercase ASCII slugs. Prefer stable role or project names, such as
-`reviewer` or `builder`. The platform (for example `claude` or `codex`) is
-recorded separately at `join`. A handle is permanent within a channel. Replacing
+`reviewer` or `builder`. The host label (`--platform`, a short lowercase name the
+owner chooses for the agent host, used for provenance only) is recorded
+separately at `join`. Two sessions on the same host use distinct handles. A handle is permanent within a channel. Replacing
 the session behind it needs an owner-authorized `--takeover` with a new session
 reference.
 
@@ -155,62 +155,53 @@ records the owner's consent; it does not authenticate it.
 
 **Optional session skill.**
 The repository includes the agent-neutral `skills/ai-comm/SKILL.md`. Install it
-only in the project where this pinned package is installed. For Codex, create
-`.agents/skills` and link `.agents/skills/ai-comm` to
-`../../.tools/ai-comm/skills/ai-comm` (relative to the project root). For
-Claude, use `.claude/skills/ai-comm` pointing to the same package skill; verify
-symlink discovery in the installed Claude version, and use a copy if symlinks
-are not discovered. A copied skill must match the package file's SHA-256 and be
-refreshed whenever the package is re-pinned. If the adapter cannot discover a
-skill, add a one-line project-local instruction to read the pinned skill file;
-do not edit global directories or silently rewrite project instructions.
-Discovery never activates a channel: the user must still name the task and
-request activation.
+only in the project where this pinned package is installed. If the host
+discovers skills from a project directory, make the skill available there as
+`<skills-dir>/ai-comm`, where `<skills-dir>` is the project skills directory
+that host scans (check the host's own documentation; many hosts read
+`.agents/skills`, the open Agent Skills convention, and some use their own
+directory). Prefer a relative symbolic link to the pinned skill; use a copy if
+the host does not discover symbolic links. A copied skill must match the
+package file's SHA-256 and be refreshed whenever the package is re-pinned. If
+the host cannot discover a skill, use the read fallback below; do not edit
+global directories or silently rewrite project instructions. Discovery never
+activates a channel: the user must still name the task and request activation.
 
-| Adapter | Project-local location | Relative symlink target |
-|---|---|---|
-| Codex | `.agents/skills/ai-comm` | `../../.tools/ai-comm/skills/ai-comm` |
-| Claude Code | `.claude/skills/ai-comm` | `../../.tools/ai-comm/skills/ai-comm` |
-
-From the project root, create the selected adapter link (do not replace an
-existing path):
+From the project root, with `<skills-dir>` replaced by that directory (do not
+replace an existing path):
 
 ```sh
-# Codex
-mkdir -p .agents/skills
-if [ -e .agents/skills/ai-comm ] || [ -L .agents/skills/ai-comm ]; then
-  echo "adapter path already exists; inspect it and do not replace it" >&2
+SKILLS_DIR=<skills-dir>
+mkdir -p "$SKILLS_DIR"
+if [ -e "$SKILLS_DIR/ai-comm" ] || [ -L "$SKILLS_DIR/ai-comm" ]; then
+  echo "skill path already exists; inspect it and do not replace it" >&2
 else
-  ln -sn ../../.tools/ai-comm/skills/ai-comm .agents/skills/ai-comm
-fi
-# Claude Code
-mkdir -p .claude/skills
-if [ -e .claude/skills/ai-comm ] || [ -L .claude/skills/ai-comm ]; then
-  echo "adapter path already exists; inspect it and do not replace it" >&2
-else
-  ln -sn ../../.tools/ai-comm/skills/ai-comm .claude/skills/ai-comm
+  target=$(python3 -c 'import os,sys; print(os.path.relpath(".tools/ai-comm/skills/ai-comm", sys.argv[1]))' "$SKILLS_DIR")
+  ln -sn "$target" "$SKILLS_DIR/ai-comm"
 fi
 ```
 
-Run only the commands for the selected adapter; each adapter must resolve
-inside this project's own pinned `.tools/ai-comm` checkout. A link to another
-project, shared checkout, or external copy is unsupported. Symlink discovery
-was verified on Codex CLI
-0.156.1 and Claude Code 2.1.284; both discovered the linked skill, and Claude's
-no-link control did not.
+Repeat for each skills directory a host in this project scans. Every link must
+resolve inside this project's own pinned `.tools/ai-comm` checkout. A link to
+another project, shared checkout, or external copy is unsupported. An existing
+path is preserved, not verified; inspect its target before relying on it.
 
-If symlinks are unavailable, copy the skill directory into the adapter's
-`ai-comm` location. Replace `<adapter>` below with `.agents/skills` or
-`.claude/skills`, then verify the copy against its pinned manifest entry:
+After installing, check in the actual host that it discovers exactly one skill
+named `ai-comm`. Two entries with that name (for example the same skill reached
+through two directories a host scans) are a conflict: remove the duplicate you
+created, or rely on the read fallback. Discovery that works without the
+project-local link is not a pass.
+
+If symbolic links are unavailable, copy the skill directory instead, then verify
+the copy against its pinned manifest entry:
 
 ```sh
-mkdir -p <adapter>
-cp -R .tools/ai-comm/skills/ai-comm <adapter>/ai-comm
-python3 -c 'import hashlib,json,pathlib,sys; root=pathlib.Path(".tools/ai-comm"); entry=next(x for x in json.loads((root/"RELEASE-MANIFEST.json").read_text())["files"] if x["path"]=="skills/ai-comm/SKILL.md"); actual=hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest(); assert actual==entry["sha256"], "skill copy differs from pinned manifest"' <adapter>/ai-comm/SKILL.md
+mkdir -p "$SKILLS_DIR"
+cp -R .tools/ai-comm/skills/ai-comm "$SKILLS_DIR/ai-comm"
+python3 -c 'import hashlib,json,pathlib,sys; root=pathlib.Path(".tools/ai-comm"); entry=next(x for x in json.loads((root/"RELEASE-MANIFEST.json").read_text())["files"] if x["path"]=="skills/ai-comm/SKILL.md"); actual=hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest(); assert actual==entry["sha256"], "skill copy differs from pinned manifest"' "$SKILLS_DIR/ai-comm/SKILL.md"
 ```
 
-Refresh the copy and repeat the comparison after every re-pin. Verify discovery
-in the actual adapter; discovery without the project-local link is not a pass.
+Refresh the copy and repeat the comparison after every re-pin.
 
 For an agent without skill discovery, add this exact line to the project's
 activation note or instructions file:

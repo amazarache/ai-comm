@@ -97,9 +97,9 @@ class RealBoundaryTests(unittest.TestCase):
         git(self.pin, "fetch", "-q", str(pkg), "refs/heads/release-index:refs/remotes/origin/release-index")
         os.mkdir(self.project / ".ai-comm-local", 0o700)
         cli = [sys.executable, "-I", str(self.pin / "ai_comm.py"), "--channel", str(self.project / ".ai-comm")]
-        subprocess.run(cli + ["init", "--task", "boundary test", "--reviewers", "claude", "codex"], check=True,
+        subprocess.run(cli + ["init", "--task", "boundary test", "--reviewers", "agent-a", "agent-b"], check=True,
                        capture_output=True, env=ENV)
-        subprocess.run(cli + ["join", "--as", "claude", "--platform", "claude", "--session", "s-claude"],
+        subprocess.run(cli + ["join", "--as", "agent-a", "--platform", "host-a", "--session", "s-agent-a"],
                        check=True, capture_output=True, env=ENV)
         sys.path.insert(0, str(ROOT))
         import upgrade_controller as uc
@@ -126,18 +126,18 @@ class RealBoundaryTests(unittest.TestCase):
                              "--evidence", "direct owner yes (test)")
         self.assertEqual(code, 0, ans)
         code, prep = self.ctl(here, "prepare", "--target", self.version, "--consent", ans["consent"],
-                              "--as", "claude", "--session", "s-claude")
+                              "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual(code, 0, prep)
         self.assertTrue(prep["verification"]["checks"]["tests"])
         self.assertGreater(prep["verification"]["tests_ran"], 100)
         frozen = Path(prep["invocation"][2])
-        code, res = self.ctl(frozen, "apply", "--as", "claude", "--session", "s-claude")
+        code, res = self.ctl(frozen, "apply", "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual(res["status"], "integrated_pending_liveness", res)
         self.assertEqual(git(self.pin, "rev-parse", "HEAD").strip(), self.to_commit)
         status = json.loads(subprocess.run([sys.executable, "-I", str(self.pin / "ai_comm.py"), "release-status"],
                                            capture_output=True, env=ENV).stdout)
         self.assertEqual((status["status"], status["pinned_version"]), ("ok", self.version))
-        code, res = self.ctl(frozen, "rollback", "--as", "claude", "--session", "s-claude")
+        code, res = self.ctl(frozen, "rollback", "--as", "agent-a", "--session", "s-agent-a")
         self.assertEqual(res["status"], "rolled_back", res)
         self.assertEqual(git(self.pin, "rev-parse", "HEAD").strip(), self.from_commit)
         self.assertFalse((self.pin / "upgrade_controller.py").exists())

@@ -113,14 +113,16 @@ class SkillTests(unittest.TestCase):
             "recorded no or later",
             "at least daily while the session is already running",
             "Nothing here wakes an idle model",
-            "Claude Code uses only the approved listener named in the project activation note",
+            "use only the approved listener named in the project activation note",
             "This is not permission to build a helper",
             "wait --timeout 30 --new-since N",
-            "Codex uses bounded `wait` calls during an active turn",
-            "codex queue --thread <thread> --message",
+            "during an active turn, read with ordinary bounded `wait --timeout N`",
+            "Never read with `--new-since`",
+            "a detached shell process wakes nobody",
+            "If the host has a documented way for another process to queue a message into one existing session",
             "Check the ai-comm inbox from message N.",
-            "owner approved that exact current thread",
-            "owner writes or directly confirms that exact-thread entry",
+            "owner approved that exact current target session",
+            "owner writes or directly confirms that entry",
             "never create, edit, or carry forward nudge approval on its own authority",
             "an entry alone is not owner consent",
             "a takeover never inherits it",
@@ -145,10 +147,10 @@ class SkillTests(unittest.TestCase):
         activate = " ".join((ROOT / "ACTIVATE.md").read_text(encoding="utf-8").split())
         for phrase in (
             "## Start a two-session exchange",
-            "`$ai-comm start A <subject>`",
-            "`$ai-comm start B`",
-            "`/comm start A <subject>`",
-            "`/ai-comm start A <subject>`",
+            "invoke the `ai-comm` skill with `start A <subject>`",
+            "invoke it with `start B`",
+            "The session never uses `--new-since` to read",
+            "a detached shell process wakes nobody",
             "Exactly one role is the notifier",
             "never authorize another session to fetch or re-pin",
             "does not wake an idle model",
@@ -156,8 +158,8 @@ class SkillTests(unittest.TestCase):
             "do not modify it, fork it, design changes to ai-comm",
             "build channel tooling unless the owner explicitly asks",
             "evidence-backed FACTs or ASKs",
-            "owner approved the exact current thread",
-            "owner writes or directly confirms that exact-thread entry",
+            "owner approved the exact current target session",
+            "owner writes or directly confirms that entry",
             "never create, edit, or carry forward nudge approval on its own authority",
             "an entry alone is not owner consent",
             "revocable and is not inherited by a takeover",
@@ -180,8 +182,9 @@ class SkillTests(unittest.TestCase):
             "Erase removes the rejected credential, which can be valid after a transient 401. "))
 
         readme = " ".join((ROOT / "README.md").read_text(encoding="utf-8").split())
-        self.assertIn("$ai-comm start A <subject>", readme)
-        self.assertIn("/comm start A <subject>", readme)
+        self.assertIn("## How any agent uses ai-comm", readme)
+        self.assertIn("invoke the `ai-comm` skill with `start A <subject>`", readme)
+        self.assertIn("read `.tools/ai-comm/skills/ai-comm/SKILL.md` and follow it", readme)
         self.assertIn("ai-comm itself does not wake idle sessions; separately approved host listeners or nudge helpers must remain available", readme)
 
     def test_skill_channel_commands_run_against_a_scratch_channel(self):
@@ -220,20 +223,31 @@ class SkillTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256(artifact_file.read_bytes()).hexdigest(), artifact["artifact"])
         self.successful("validate")
 
+    def install_block(self):
+        activate = (ROOT / "ACTIVATE.md").read_text(encoding="utf-8")
+        block = activate.split("From the project root", 1)[1].split("```sh", 1)[1].split("```", 1)[0]
+        self.assertIn("SKILLS_DIR=<skills-dir>", block)
+        return block
+
+    def run_block(self, block, project, skills_dir):
+        script = block.replace("SKILLS_DIR=<skills-dir>", "SKILLS_DIR=" + skills_dir)
+        return subprocess.run(["/bin/sh", "-eu", "-c", script], cwd=project,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+
     def test_copy_fallback_hash_command_uses_manifest_entry(self):
         activate = (ROOT / "ACTIVATE.md").read_text(encoding="utf-8")
-        command = re.search(r"python3 -c '([^']+)' <adapter>/ai-comm/SKILL\.md", activate)
+        command = re.search(r"python3 -c '([^']+)' \"\$SKILLS_DIR/ai-comm/SKILL\.md\"", activate)
         self.assertIsNotNone(command)
         pinned = self.project / ".tools" / "ai-comm"
         pinned.mkdir(parents=True)
         shutil.copy2(ROOT / "RELEASE-MANIFEST.json", pinned / "RELEASE-MANIFEST.json")
         shutil.copytree(ROOT / "skills" / "ai-comm", pinned / "skills" / "ai-comm")
-        destination = self.project / ".agents" / "skills" / "ai-comm" / "SKILL.md"
-        activate = (ROOT / "ACTIVATE.md").read_text(encoding="utf-8")
-        block = activate.split("If symlinks are unavailable", 1)[1].split("```sh", 1)[1].split("```", 1)[0]
-        copy_commands = [line.replace("<adapter>", ".agents/skills") for line in block.splitlines()
-                         if line.startswith(("mkdir -p <adapter>", "cp -R .tools/ai-comm/skills/ai-comm"))]
-        copied = subprocess.run(["/bin/sh", "-eu", "-c", "\n".join(copy_commands)],
+        destination = self.project / "host-skills" / "ai-comm" / "SKILL.md"
+        block = activate.split("If symbolic links are unavailable", 1)[1].split("```sh", 1)[1].split("```", 1)[0]
+        copy_commands = [line for line in block.splitlines()
+                         if line.startswith(("mkdir -p ", "cp -R .tools/ai-comm/skills/ai-comm"))]
+        self.assertEqual(2, len(copy_commands))
+        copied = subprocess.run(["/bin/sh", "-eu", "-c", "SKILLS_DIR=host-skills\n" + "\n".join(copy_commands)],
                                 cwd=self.project, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, timeout=30)
         self.assertEqual(0, copied.returncode, copied.stderr.decode("utf-8", "replace"))
@@ -250,83 +264,63 @@ class SkillTests(unittest.TestCase):
                       if row["path"] == "skills/ai-comm/SKILL.md")
         self.assertEqual(hashlib.sha256(SKILL.read_bytes()).hexdigest(), record["sha256"])
 
-    def test_activation_adapters_stay_inside_the_project_pin(self):
+    def test_activation_skill_install_is_generic_and_stays_inside_the_project_pin(self):
         activate = " ".join((ROOT / "ACTIVATE.md").read_text(encoding="utf-8").split())
         for phrase in (
-            "| Codex |", "| Claude Code |", ".agents/skills/ai-comm",
-            ".claude/skills/ai-comm", "../../.tools/ai-comm/skills/ai-comm",
-            "each adapter must resolve inside this project's own pinned",
+            "`<skills-dir>/ai-comm`",
+            "check the host's own documentation",
+            "Every link must resolve inside this project's own pinned `.tools/ai-comm` checkout",
+            "discovers exactly one skill named `ai-comm`",
             "Before using the ai-comm channel, read `.tools/ai-comm/skills/ai-comm/SKILL.md`.",
-            "mkdir -p <adapter>",
-            "cp -R .tools/ai-comm/skills/ai-comm <adapter>/ai-comm",
-            "ln -sn ../../.tools/ai-comm/skills/ai-comm .agents/skills/ai-comm",
-            "ln -sn ../../.tools/ai-comm/skills/ai-comm .claude/skills/ai-comm",
-            "Codex CLI", "0.156.1", "Claude Code", "2.1.284",
+            'cp -R .tools/ai-comm/skills/ai-comm "$SKILLS_DIR/ai-comm"',
         ):
-            self.assertIn(phrase, activate)
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, activate)
         self.assertIn("| `1.4.0` | `3.0` (unchanged)",
                       (ROOT / "README.md").read_text(encoding="utf-8"))
         self.assertIn("| `1.4.2` | `3.0` (unchanged)",
                       (ROOT / "README.md").read_text(encoding="utf-8"))
 
-    def test_activation_symlink_commands_preserve_existing_paths_when_repeated(self):
-        activate = (ROOT / "ACTIVATE.md").read_text(encoding="utf-8")
-        block = activate.split("From the project root", 1)[1].split("```sh", 1)[1].split("```", 1)[0]
+    def test_skill_link_resolves_to_the_pin_from_any_skills_directory(self):
+        block = self.install_block()
         pinned = self.project / ".tools" / "ai-comm" / "skills" / "ai-comm"
         pinned.mkdir(parents=True)
-        first = subprocess.run(["/bin/sh", "-eu", "-c", block], cwd=self.project,
-                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
-        self.assertEqual(0, first.returncode, first.stderr.decode("utf-8", "replace"))
-        codex = self.project / ".agents" / "skills" / "ai-comm"
-        claude = self.project / ".claude" / "skills" / "ai-comm"
-        expected = "../../.tools/ai-comm/skills/ai-comm"
-        self.assertTrue(codex.is_symlink())
-        self.assertTrue(claude.is_symlink())
-        self.assertEqual(expected, os.readlink(codex))
-        self.assertEqual(expected, os.readlink(claude))
-        second = subprocess.run(["/bin/sh", "-eu", "-c", block], cwd=self.project,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
-        self.assertEqual(0, second.returncode, second.stderr.decode("utf-8", "replace"))
+        for skills_dir, expected in ((".agents/skills", "../../.tools/ai-comm/skills/ai-comm"),
+                                     ("host-skills", "../.tools/ai-comm/skills/ai-comm"),
+                                     ("a/b/skills", "../../../.tools/ai-comm/skills/ai-comm")):
+            with self.subTest(skills_dir=skills_dir):
+                link = self.project / skills_dir / "ai-comm"
+                for _ in range(2):
+                    result = self.run_block(block, self.project, skills_dir)
+                    self.assertEqual(0, result.returncode, result.stderr.decode("utf-8", "replace"))
+                    self.assertTrue(link.is_symlink())
+                    self.assertEqual(expected, os.readlink(link))
+                    self.assertEqual(pinned.resolve(), link.resolve())
+                self.assertIn(b"skill path already exists", result.stderr)
         self.assertFalse((pinned / "ai-comm").exists())
-        self.assertEqual(expected, os.readlink(codex))
-        self.assertEqual(expected, os.readlink(claude))
 
-    def test_comm_alias_creates_once_and_preserves_existing_paths(self):
-        activate = (ROOT / "ACTIVATE.md").read_text(encoding="utf-8")
-        section = activate.split("A `.claude/skills/comm` link", 1)[1].split("Run A and B", 1)[0]
-        block = section.split("```sh", 1)[1].split("```", 1)[0]
-        for kind in ("absent", "directory", "dangling"):
+    def test_skill_link_preserves_existing_paths(self):
+        block = self.install_block()
+        for kind in ("directory", "dangling"):
             with self.subTest(kind=kind):
                 project = self.project / kind
-                pinned = project / ".tools" / "ai-comm" / "skills" / "ai-comm"
-                pinned.mkdir(parents=True)
-                parent = project / ".claude" / "skills"
+                (project / ".tools" / "ai-comm" / "skills" / "ai-comm").mkdir(parents=True)
+                parent = project / "host-skills"
                 parent.mkdir(parents=True)
-                link = parent / "comm"
+                link = parent / "ai-comm"
                 if kind == "directory":
                     link.mkdir()
                     (link / "marker").write_text("preserve me", encoding="utf-8")
-                elif kind == "dangling":
+                else:
                     link.symlink_to("keep-this-target")
-                for run in range(2):
-                    result = subprocess.run(["/bin/sh", "-eu", "-c", block], cwd=project,
-                                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                            timeout=30)
-                    self.assertEqual(0, result.returncode,
-                                     result.stderr.decode("utf-8", "replace"))
-                    if kind == "absent":
-                        self.assertTrue(link.is_symlink())
-                        self.assertEqual(pinned, link.resolve())
-                        self.assertFalse((pinned / "comm").exists())
-                    elif kind == "directory":
-                        self.assertFalse(link.is_symlink())
-                        self.assertEqual([link / "marker"], list(link.iterdir()))
-                        self.assertEqual("preserve me", (link / "marker").read_text())
-                    else:
-                        self.assertEqual("keep-this-target", os.readlink(link))
-                    if kind != "absent" or run:
-                        self.assertIn(b"adapter path already exists", result.stderr)
-
+                result = self.run_block(block, project, "host-skills")
+                self.assertEqual(0, result.returncode, result.stderr.decode("utf-8", "replace"))
+                self.assertIn(b"skill path already exists", result.stderr)
+                if kind == "directory":
+                    self.assertFalse(link.is_symlink())
+                    self.assertEqual("preserve me", (link / "marker").read_text())
+                else:
+                    self.assertEqual("keep-this-target", os.readlink(link))
 
 if __name__ == "__main__":
     unittest.main()

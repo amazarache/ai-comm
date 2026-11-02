@@ -10,6 +10,28 @@ hosts the tool. Your channel is a separate local bare Git repository and is neve
 automatically uploaded. There is no telemetry, browser dependency or background
 model service.
 
+## How any agent uses ai-comm
+
+ai-comm works the same way for every AI agent and every host program that runs
+one. An agent needs three things from its host: read files, run local commands,
+and ask its owner a question. Everything else is optional.
+
+1. The owner pins one reviewed revision of this package in the project
+   (`.tools/ai-comm`) and names the task.
+2. One session creates the channel, only when the owner asks for a new one.
+3. Each session joins as itself: its own handle (such as `builder` or
+   `reviewer`), a host label of the owner's choosing, and its own non-secret
+   session reference.
+4. The two sessions exchange PING, PONG and ACK, then work through proposals,
+   reviews, ACCEPT and DECIDE on exact artifacts.
+5. While working, each session reads its inbox and acknowledges what it read.
+   Being woken while idle depends on what the host can do; see the wake
+   guidance in [ACTIVATE.md](ACTIVATE.md).
+
+If the host discovers skills, link the pinned skill into the directory it scans.
+If not, tell the session: "read `.tools/ai-comm/skills/ai-comm/SKILL.md` and
+follow it". Both paths lead to the same instructions.
+
 ## Activate in another session
 
 Point the session at a pinned revision of this repository and [ACTIVATE.md](ACTIVATE.md):
@@ -19,7 +41,7 @@ the [setup decisions](ACTIVATE.md#setup-decisions). It includes prompts for the
 initiator and peer.
 
 > Activate ai-comm from this repository at revision `<commit>`. Read ACTIVATE.md.
-> Use channel `<absolute local path>`, handle `<my handle>`, platform `<platform>`,
+> Use channel `<absolute local path>`, handle `<my handle>`, host label `<host-label>`,
 > session reference `<non-secret conversation ID>`, peers `<handles>`,
 > and task `<authorized task>`. Create the channel only if I asked for a new one.
 
@@ -30,12 +52,9 @@ closed model cannot be woken by a file watcher. [Protocol](PROTOCOL.md) and
 ## Start the exchange from the discovered skill
 
 After both sessions have read this pinned package skill and the project role
-table, the owner starts each session directly:
-
-- Codex: `$ai-comm start A <subject>` and `$ai-comm start B`
-- Claude Code: `/comm start A <subject>` and `/comm start B` when the project
-  provides the optional comm skill link; otherwise use `/ai-comm start A
-  <subject>` and `/ai-comm start B`
+table, the owner starts each session directly: invoke the `ai-comm` skill with
+`start A <subject>` in one session and `start B` in the other, using the host's
+own way of invoking a skill, or in plain words ("ai-comm start A <subject>").
 
 A performs the handshake after B joins, then opens the subject for review. These
 requests never initialize a channel or take over an identity without the
@@ -60,9 +79,9 @@ git checkout <reviewed-commit>
 python3 ai_comm.py --channel /tmp/example-channel init \
   --task 'Review a design together' --reviewers author reviewer
 python3 ai_comm.py --channel /tmp/example-channel join \
-  --as author --platform codex --session author-conversation
+  --as author --platform host-a --session author-conversation
 python3 ai_comm.py --channel /tmp/example-channel join \
-  --as reviewer --platform claude --session reviewer-conversation
+  --as reviewer --platform host-b --session reviewer-conversation
 ```
 
 Each actual session should normally perform its own join. Session references are

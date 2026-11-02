@@ -638,8 +638,8 @@ class ReleaseCheckTests(unittest.TestCase):
         channel_path = Path(self.temp.name) / "state channel"
         checker.ac.Channel.init(channel_path, "state test", ["alpha", "beta"])
         channel = checker.ac.Channel(channel_path)
-        channel.join("alpha", "codex", "alpha-session")
-        channel.join("beta", "claude", "beta-session")
+        channel.join("alpha", "host-b", "alpha-session")
+        channel.join("beta", "host-a", "beta-session")
         state = channel.snapshot()
         state.current["beta"]["tool_version"] = "1.2.0"
         state._local_identity = {"version": "1.2.0", "commit": "a" * 40,

@@ -1,5 +1,22 @@
 # Changes
 
+## 1.5.3
+
+- Make every instruction host-neutral: README, ACTIVATE and the session skill
+  no longer name any agent host or product command. Skill installation uses the
+  skills directory the host scans (`<skills-dir>`) with a one-name check, a
+  verified copy fallback and the unchanged read fallback. Wake guidance is
+  described by host capability: bounded reading while active (ordinary `wait`
+  or `inbox`, then acknowledge), an exit-wake listener for hosts that re-invoke a
+  session when a background command exits, and a session notifier for hosts
+  that let another process queue a message into one session. Approval, receipt,
+  session-ownership and scope rules are unchanged.
+- Add a short "How any agent uses ai-comm" section to the README.
+- Tests use neutral handles and host labels, cover a third participant with an
+  unseen host label and two sessions sharing one host label, and a neutrality
+  test fails if a known agent-host or vendor name appears in the package. No
+  protocol, CLI, output-field, storage or error-code change.
+
 ## 1.5.2
 
 - Fix `ai_comm.py upgrade check` on a pin that is already at the newest verified
@@ -84,7 +101,7 @@
 
 ## 1.4.0
 
-- Add an agent-neutral project skill and document Codex/Claude project-local
+- Add an agent-neutral project skill and document per-host project-local
   installation, discovery checks, and a hash-verified copy fallback.
 - Keep the complete upgrade path owner-gated: separate bounded release-ref
   refresh approval from approval to apply a named version.
