@@ -282,6 +282,82 @@ staging directories holding a valid install journal for this project; it removes
 unpublished staging, completes an install whose verified pin was already published, and
 otherwise only reports.
 
+## Per-user cache, pin verifier and entry skill (1.6.0)
+
+`install.sh --user <command>` runs `scripts/install_user.py`; [INSTALL.md](INSTALL.md)
+is the user guide. The cache lives in `$XDG_DATA_HOME/ai-comm` (default
+`~/.local/share/ai-comm`), private (0700/0600), with immutable
+`releases/X.Y.Z/` checkouts, atomically replaced `current` and `previous` links,
+`state.json`, `bindings.json`, `index.json`, `refresh.json`, `offer.json`, private
+staging and journal directories and a single-writer lock. Changing the cache
+never changes a project's pin, channel, declaration, listener or guidance.
+
+- `install --version X --fetch-permitted` shares its verification with the
+  project installer (`scripts/release_install.py`): exactly `refs/tags/vX` and the
+  release index from the manifest-bound origin, the index record checked against
+  the annotated tag, and, when the running installer is an extracted archive of
+  `X`, its manifest digest equal to both; then `check_tag`, the manifest check,
+  the full suite and the exact tag tree, before an atomic publish. The cache
+  records its origin at the first install; another origin stops with
+  `origin_changed`.
+- Trusted bindings (`version`, `tag`, `tag_object`, `commit`, `manifest_sha256`,
+  `protocol_sha256`) come only from the cache's own verified fetches: `install`
+  binds its own tag; a consented `check --fetch-permitted` rebuilds them for every
+  indexed tag it fetched, keeping an older binding only while it still equals the
+  refreshed record. Offers require exact agreement with the index. `check`
+  reports `verdict` (`update_available`, `up_to_date`, `unknown`) and `metadata`
+  (`refreshed`, `cached`, `stale`, `failed`, `missing`); `up_to_date` needs a
+  refresh within seven days that is not dated in the future and no failed
+  attempt since.
+- A cached release is checked before use by `release_install.verify_tree`: the
+  recorded commit's commit and tree objects are re-hashed, and every working
+  file is compared by path, blob hash and executable bit, with no extra file;
+  index flags, HEAD and `git status` are not consulted.
+- Every multi-object change is journaled (intent before, outcome after,
+  `state.json` last). An unfinished install, activation, uninstall, registration
+  or launcher change blocks every new mutation (`operation_pending`) until
+  `recover`, which resumes a step only from the exact state it left, marks a
+  stale one `superseded`, and resolves what it cannot prove is its own as
+  `abandoned` while keeping it. `uninstall` removes only exactly verified
+  releases, journal-recognized operation directories and unchanged links and
+  launcher; everything else is kept and reported.
+
+`scripts/verify_pin.py --project DIR` checks a project's `.tools/ai-comm` from a
+cached release and runs nothing from the pin. Git is used only for inert reads
+against the pin's object store (`--git-dir`, no work tree or index, no
+replacement objects, every transport disallowed through `GIT_ALLOW_PROTOCOL` and
+`protocol.allow=never`, `GIT_NO_LAZY_FETCH=1`); a pin with alternates or any
+partial-clone or promisor setting in its effective configuration is `unknown`
+before any object is read. HEAD must equal a trusted binding's commit, a pin tag
+`vX` must equal the binding's tag object, the committed manifest must hash to the
+binding's digest, the tree's paths minus the manifest must equal its entries, and
+every entry's working bytes (opened component by component without following
+links) must match its size, digest and executable bit. The class names the
+upgrade path: `controller` (1.5.2 and later), `controller-check-workaround`
+(1.5.0, 1.5.1), `legacy-manual` (1.4.0 to 1.4.2), `unsupported`. Untracked files
+in the pin are outside the check.
+
+`scripts/declare_project.py` writes `.ai-comm-local/upgrade/project.json` for a
+verified pin: `init` writes the unintegrated declaration and never overwrites;
+`install --file F --sha256 H --previous P` validates F's exact bytes with the
+controller's pure `validate_project_manifest` against the live project identity,
+then, under the project's upgrade lock, refuses a guided transaction in progress
+and a live file whose digest is not `P` before replacing it atomically. Nothing
+the declaration names is run.
+
+`entry/ai-comm/SKILL.md` is the per-user entry skill; `register --skills-dir DIR`
+links `DIR/ai-comm` to it only if no other entry in `DIR` or in a directory
+registered earlier has the effective skill name `ai-comm`, read from bounded,
+inert `SKILL.md` front matter (front matter it cannot read exactly counts as a
+conflict). `launcher --bin-dir DIR` writes `DIR/ai-comm`, which resolves
+`current` once and runs that release's `scripts/project_cli.py`; it checks its
+own release first and replaces itself with the project's `ai_comm.py` only for a
+verified pin. While links or a launcher exist, `activate`, `rollback` and an
+activating `install` refuse a release that lacks what they reach. `offer claim`
+makes one session the notifier of the cache's pending offer (a claim lapses after
+24 hours or when a newer release is offered); `offer answer` records the owner's
+answer and lists exactly what it permits.
+
 ## Automation
 
 `ci.yml` runs on main, candidate branches, and pull requests against Linux and

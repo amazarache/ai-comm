@@ -22,13 +22,13 @@
     },
     {
       "path": "ACTIVATE.md",
-      "bytes": 30963,
-      "sha256": "59eb41c52f512a372e7948fcd20bab3489729f4bb0ad865590cbc728f9d917b9"
+      "bytes": 31272,
+      "sha256": "450302a94808952e7f3f0f7eea5ecb48fb8c079471b7e3a38f7f76b0c6191445"
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 13252,
-      "sha256": "c5ed887ad85c4ede35e414536a437ef81e6166acdfbdc00a20879b459fe68d22"
+      "bytes": 16008,
+      "sha256": "430320527da73d789e12b11683c48885e0952a34fb155945bc0eec1aa8903ed6"
     },
     {
       "path": "PROTOCOL.md",
@@ -37,18 +37,18 @@
     },
     {
       "path": "README.md",
-      "bytes": 19659,
-      "sha256": "e415f9194655140daa530f22be78cc4211c501fbd632282c86d573bb9caf96c8"
+      "bytes": 20837,
+      "sha256": "e1a9df0cc1f0d00b2ec5acc5014e428c2b4c1652aa81663291526c39de1b5038"
     },
     {
       "path": "SECURITY.md",
-      "bytes": 6591,
-      "sha256": "419a3119c5424c7314f2e723a023808d122aaf9076722a7df680be1e39e1585b"
+      "bytes": 7939,
+      "sha256": "0666e8fac66a053f4b4f76146f4e51083f2215d7cb73a85b2d1f54bbaa65edb1"
     },
     {
       "path": "ai_comm.py",
       "bytes": 155551,
-      "sha256": "f1056e1ccd3313f2c71b1a136da15da34563cea858e71726fa276fcfdc6d147f"
+      "sha256": "18c04ee81c0d84ee73f5cb04fa2bd6ba8b001bf416a388706b2798ffbaa6e270"
     },
     {
       "path": "docs/ERRORS.md",
@@ -72,8 +72,8 @@
     },
     {
       "path": "docs/RELEASES.md",
-      "bytes": 18724,
-      "sha256": "a2dbcac471871dea467bc71fbe6b4c853f78159f308bb00c3731fc11119139b2"
+      "bytes": 23884,
+      "sha256": "87b8d99944270050e86be8771b19b6fcc4ab29712ce6af40a8f56255b549c5d0"
     },
     {
       "path": "entry/ai-comm/SKILL.md",
@@ -194,6 +194,11 @@
       "path": "tests/test_release_check.py",
       "bytes": 39766,
       "sha256": "dffdea31dcb703cc7c38909543da9cbbc607a3d09367aecfd8014b2ad7b8d837"
+    },
+    {
+      "path": "tests/test_release_documents.py",
+      "bytes": 1909,
+      "sha256": "49ab9d3d3660741c643cc32a00c03b7b868b6274f9221099132b1c6b4aed7c7d"
     },
     {
       "path": "tests/test_skill.py",

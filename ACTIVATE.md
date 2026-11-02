@@ -203,6 +203,11 @@ through two directories a host scans) are a conflict: remove the duplicate you
 created, or rely on the read fallback. Discovery that works without the
 project-local link is not a pass.
 
+If the per-user entry skill is already registered in a directory this host scans
+(`install.sh --user register`, see [docs/INSTALL.md](docs/INSTALL.md)), the host
+already has one `ai-comm` skill: do not add a project link as well. The entry
+skill verifies this project's pin and then follows this same skill.
+
 If symbolic links are unavailable, copy the skill directory instead, then verify
 the copy against its pinned manifest entry:
 

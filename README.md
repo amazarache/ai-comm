@@ -33,6 +33,13 @@ If the host discovers skills, link the pinned skill into the directory it scans.
 If not, tell the session: "read `.tools/ai-comm/skills/ai-comm/SKILL.md` and
 follow it". Both paths lead to the same instructions.
 
+Optionally, keep one verified copy of ai-comm per user: `install.sh --user`
+maintains a cache of verified releases in your home directory, checks a
+project's pin with that trusted copy before anything runs from it, can register
+one entry skill for hosts that read a skills directory, and can add an
+`ai-comm` command. Projects keep their own pins either way. See
+[installing for one user](docs/INSTALL.md).
+
 ## Activate in another session
 
 Point the session at a pinned revision of this repository and [ACTIVATE.md](ACTIVATE.md):
@@ -255,6 +262,11 @@ changing the platform label alone cannot reactivate an old reference.
 | `1.4.0` | `3.0` (unchanged) | Existing protocol-3 channels; adds a project-local, agent-neutral session skill and owner-gated offline upgrade planning. |
 | `1.4.1` | `3.0` (unchanged) | Existing protocol-3 channels; adds an owner-approved, opt-in credential-helper path for private-origin release checks. |
 | `1.4.2` | `3.0` (unchanged) | Existing protocol-3 channels; adds skill-guided start A/B, status, and stop flows, host-specific invocation, and notifier-based release awareness with durable prompt deduplication. |
+| `1.5.0` | `3.0` (unchanged) | Tagged but not published and not in the release index; superseded by `1.5.1`. |
+| `1.5.1` | `3.0` (unchanged) | Existing protocol-3 channels; first published release with the guided, owner-consented upgrade controller and the new-project installer. |
+| `1.5.2` | `3.0` (unchanged) | Existing protocol-3 channels; `upgrade check` reports no offer on an up-to-date pin. |
+| `1.5.3` | `3.0` (unchanged) | Existing protocol-3 channels; every instruction is host-neutral. |
+| `1.6.0` | `3.0` (unchanged) | Existing protocol-3 channels; adds the per-user cache of verified releases, a trusted check of a project's pin, cache-side upgrade declarations, a per-user entry skill, an optional `ai-comm` launcher and the cache's own update offers. |
 
 Package and protocol versions are related but distinct. A protocol MAJOR (for
 example 3.0 to 4.0) always bumps the package MAJOR. A protocol MINOR (3.0 to

@@ -1,5 +1,45 @@
 # Changes
 
+## 1.6.0
+
+- Add a per-user cache of verified releases, `install.sh --user <command>`
+  (`scripts/install_user.py`), under `$XDG_DATA_HOME/ai-comm` (default
+  `~/.local/share/ai-comm`). `install --version X --fetch-permitted` fetches exactly
+  tag `vX` and the release index from the package's manifest-bound origin, checks
+  that the archive it runs from (if any), the annotated tag and the index name the
+  same manifest, runs the tag and manifest checks and the full suite in private
+  staging, and publishes an immutable release; `current` and `previous` links
+  switch with `activate` and `rollback`. `status` and `check` are offline;
+  `check --fetch-permitted` refreshes only the index and `v*` tags and records
+  trusted bindings. `check` reports `up_to_date` only on fresh metadata. The cache
+  follows the origin of its first install. Every change is journaled; an
+  unfinished operation blocks the next one until `recover`, which finishes it only
+  from the state it left and never deletes what it cannot prove is its own.
+  `uninstall --confirm` keeps anything unexpected or changed. `docs/INSTALL.md`
+  describes a verified first install on a new machine.
+- Add `scripts/verify_pin.py`: checks a project's pin with the cache's code and
+  runs nothing from the pin. Git is read without a work tree, with every object
+  re-hashed, every transport disallowed and promisor layouts refused; every
+  released working file is hashed. Reports `verified` (with the upgrade path for
+  its version), `unknown`, `modified` or `absent`.
+- Add `scripts/declare_project.py`: `init` writes a project's unintegrated upgrade
+  declaration; `install` replaces it with exact owner-reviewed bytes, validated
+  against the real project, under the project's lock, with no guided upgrade in
+  progress and the expected previous digest. The controller's declaration check
+  is now the pure `validate_project_manifest`, with `load_project_manifest`
+  unchanged in behaviour.
+- Add the per-user entry skill `entry/ai-comm/SKILL.md` and `register` /
+  `unregister`, which link it into a skills directory the user names after
+  checking the effective skill names already there; the optional `launcher`
+  command writes an `ai-comm` command that runs a project's own pin only when it
+  verifies; `offer status | claim | answer` give the cache's own update offer one
+  notifier at a time, with the project controller's answers and snooze steps.
+  Links and the launcher are removed only while unchanged.
+- The two installers share `scripts/release_install.py`; `install.sh --project`
+  is unchanged in behaviour. The cache commands exit 0 for `--help`.
+- No protocol, channel, existing CLI output or error-code change. PROTOCOL.md is
+  unchanged at the 3.0 contract digest.
+
 ## 1.5.3
 
 - Make every instruction host-neutral: README, ACTIVATE and the session skill

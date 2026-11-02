@@ -97,6 +97,29 @@ fetches only with explicit permission, uses that package's manifest-bound origin
 verifies before publishing, and never writes outside the target project's
 `.tools/ai-comm`, `.ai-comm-local/` and `.gitignore`.
 
+## Per-user cache (1.6.0)
+
+The cache writes only inside `$XDG_DATA_HOME/ai-comm` and, when the user asks,
+one link or one launcher file in a directory the user names; it never creates or
+removes those directories. `declare_project.py` writes a project's
+`.ai-comm-local/upgrade/project.json` under the project's upgrade lock and
+nothing else. Fetches happen only with explicit permission, from the origin
+recorded at the cache's first install, and only for release tags and the index.
+
+`verify_pin.py` never runs code, hooks or helpers from the pin it checks: Git
+reads objects only, with every transport disallowed whatever the Git version, and
+any layout that could fetch a missing object is refused first. The cache's own
+releases are checked against their recorded commits before use, and the launcher
+target checks its release before loading the verifier. These checks establish
+consistency with releases the cache verified, not who published them (releases
+are unsigned), and like the rest of ai-comm they do not isolate the cache from a
+malicious process running as the same user.
+
+Removal is bound to what is recorded: a release, link or launcher is removed only
+while it is exactly as recorded, and anything unexpected or changed is kept and
+reported. An offer answer permits only the commands it lists and never changes a
+project's pin.
+
 ## Runtime liveness records
 
 Package 1.3 writes best-effort heartbeat files beneath the channel runtime directory, outside Git history. They are mode 0600 in a mode 0700 directory and contain only the participant handle, generation, UTC poll time, command name, and package version. A same-OS-user process can forge or replace these files; liveness is advisory process evidence, not authenticated peer or model activity. Symlinks and non-regular target files are refused.
