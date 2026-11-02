@@ -6,10 +6,12 @@ Nothing here chooses where a release is published; callers do that.
 """
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 import sys
 
@@ -155,6 +157,125 @@ def release_refspecs(version):
 
 def real_fetch(repo, origin, version, use_helper):
     isolated_fetch(repo, origin, use_helper, release_refspecs(version))
+
+
+MAX_TREE_FILE = 16 * 1024 * 1024
+MAX_TREE_ENTRIES = 20000
+_COMMIT_OID = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
+
+
+def _inert_git_env():
+    env = uc.clean_env()
+    env.update({"GIT_NO_REPLACE_OBJECTS": "1", "GIT_NO_LAZY_FETCH": "1", "GIT_CONFIG_COUNT": "2",
+                "GIT_CONFIG_KEY_1": "core.fsmonitor", "GIT_CONFIG_VALUE_1": "false"})
+    return env
+
+
+def _git_object(git_dir, kind, oid, code):
+    """Raw bytes of one object, read without a work tree, index or replacement refs,
+    then re-hashed here: the object store itself is not trusted."""
+    try:
+        done = subprocess.run(["git", "--git-dir", str(git_dir), "--no-replace-objects", "cat-file", kind, oid],
+                              capture_output=True, env=_inert_git_env(), timeout=60, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise Stop(code, what="object") from exc
+    need(done.returncode == 0, code, what="object")
+    data = done.stdout
+    algo = hashlib.sha1 if len(oid) == 40 else hashlib.sha256
+    need(algo(kind.encode() + b" %d\x00" % len(data) + data).hexdigest() == oid, code, what="object_hash")
+    return data
+
+
+def _tree_entries(git_dir, tree_oid, prefix, out, code):
+    data = _git_object(git_dir, "tree", tree_oid, code)
+    raw_len = len(tree_oid) // 2
+    pos = 0
+    while pos < len(data):
+        space = data.index(b" ", pos)
+        nul = data.index(b"\x00", space)
+        mode = data[pos:space].decode("ascii")
+        name = data[space + 1:nul].decode("utf-8", "strict")
+        oid = data[nul + 1:nul + 1 + raw_len].hex()
+        need(len(oid) == len(tree_oid), code, what="tree")
+        need(name not in ("", ".", "..", ".git") and "/" not in name, code, what="tree_name")
+        pos = nul + 1 + raw_len
+        path = f"{prefix}{name}"
+        if mode == "40000":
+            _tree_entries(git_dir, oid, path + "/", out, code)
+        else:
+            need(mode in ("100644", "100755"), code, what="tree_mode", path=path)
+            out[path] = (oid, mode == "100755")
+            need(len(out) <= MAX_TREE_ENTRIES, code, what="tree_size")
+
+
+def verify_tree(repo, commit, manifest_sha256, code="release_identity_changed"):
+    """The checkout at `repo` is exactly `commit`: every working file and nothing else.
+
+    Trust comes only from `commit` (a recorded, previously verified id). The commit and
+    tree objects are re-hashed; HEAD, the index, `git status` and per-file flags such as
+    assume-unchanged are never consulted. Working files are opened by safe relative path
+    (no symlinks, regular files, bounded, non-blocking) and their blob hashes compared."""
+    need(_COMMIT_OID.fullmatch(commit or ""), code, what="commit")
+    repo = Path(repo)
+    git_st = os.lstat(repo / ".git") if os.path.lexists(repo / ".git") else None
+    need(git_st is not None and stat.S_ISDIR(git_st.st_mode), code, what="git_dir")
+    body = _git_object(repo / ".git", "commit", commit, code)
+    header = body.split(b"\n\n", 1)[0].split(b"\n")
+    need(header and header[0].startswith(b"tree "), code, what="commit")
+    tree = header[0][5:].decode("ascii", "replace")
+    need(_COMMIT_OID.fullmatch(tree) and len(tree) == len(commit), code, what="commit")
+    expected = {}
+    try:
+        _tree_entries(repo / ".git", tree, "", expected, code)
+    except (ValueError, UnicodeError) as exc:
+        raise Stop(code, what="tree") from exc
+    need("RELEASE-MANIFEST.json" in expected, code, what="manifest")
+    manifest = _git_object(repo / ".git", "blob", expected["RELEASE-MANIFEST.json"][0], code)
+    need(uc.sha256_bytes(manifest) == manifest_sha256, code, what="manifest")
+    algo = hashlib.sha1 if len(commit) == 40 else hashlib.sha256
+    seen = set()
+    root_fd = open_dir_nofollow(str(repo))
+    try:
+        for dirpath, dirnames, filenames, dir_fd in os.fwalk(".", dir_fd=root_fd, follow_symlinks=False):
+            rel = "" if dirpath == "." else dirpath[2:] + "/"
+            if rel == "":
+                need(".git" in dirnames, code, what="git_dir")
+                dirnames.remove(".git")
+            for name in dirnames:
+                st = os.lstat(name, dir_fd=dir_fd)
+                need(stat.S_ISDIR(st.st_mode), code, what="not_regular", path=rel + name)
+                need(any(p.startswith(rel + name + "/") for p in expected), code, what="unexpected", path=rel + name)
+            for name in filenames:
+                path = rel + name
+                need(path in expected, code, what="unexpected", path=path)
+                try:
+                    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
+                except OSError as exc:
+                    raise Stop(code, what="not_regular", path=path) from exc
+                try:
+                    st = os.fstat(fd)
+                    need(stat.S_ISREG(st.st_mode) and st.st_size <= MAX_TREE_FILE, code, what="not_regular",
+                         path=path)
+                    chunks, size = [], 0
+                    while True:
+                        chunk = os.read(fd, 1 << 20)
+                        if not chunk:
+                            break
+                        size += len(chunk)
+                        need(size <= MAX_TREE_FILE, code, what="not_regular", path=path)
+                        chunks.append(chunk)
+                finally:
+                    os.close(fd)
+                data = b"".join(chunks)
+                oid, executable = expected[path]
+                need(algo(b"blob %d\x00" % len(data) + data).hexdigest() == oid, code, what="content", path=path)
+                need(bool(st.st_mode & 0o100) == executable, code, what="mode", path=path)
+                seen.add(path)
+    finally:
+        os.close(root_fd)
+    missing = sorted(set(expected) - seen)
+    need(not missing, code, what="missing", path=missing[0] if missing else None)
+    return {"commit": commit, "files": len(seen)}
 
 
 def open_dir_nofollow(name, dir_fd=None):

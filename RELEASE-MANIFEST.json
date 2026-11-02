@@ -62,8 +62,8 @@
     },
     {
       "path": "docs/INSTALL.md",
-      "bytes": 4062,
-      "sha256": "9dfcb30a2719868733feae7df91ca72edb906152fa428231494c5d781466e306"
+      "bytes": 4683,
+      "sha256": "d60ff146e13bf4ad702dbe2eb221657653da6d1ebc635ffff9676025c3cb2d2d"
     },
     {
       "path": "docs/PERFORMANCE.md",
@@ -117,8 +117,8 @@
     },
     {
       "path": "scripts/install_user.py",
-      "bytes": 27753,
-      "sha256": "72a4c5b873529d6b60fd95f57ba83599ef939f619c49ef4bc4681fd23357a86f"
+      "bytes": 35410,
+      "sha256": "260e52449995134b1fbc42ece66e4d51c5c5c612b9082c67cbf026feefdcfd05"
     },
     {
       "path": "scripts/leak_scan.py",
@@ -127,8 +127,8 @@
     },
     {
       "path": "scripts/release_install.py",
-      "bytes": 7490,
-      "sha256": "ae6032ddc3547865ef41cbdc37f48f34acb6669b2d6f156e2c17340eda75c7f0"
+      "bytes": 13433,
+      "sha256": "b77a877482b87100ae412ce242341bd6ffece7a90ceb6ddb9d6d557abc2fa08a"
     },
     {
       "path": "scripts/test_old_protocol.py",
@@ -152,8 +152,8 @@
     },
     {
       "path": "tests/test_install_user.py",
-      "bytes": 11065,
-      "sha256": "d72f4c89e6b93f8e38a7dd79f1101f759dcc3c5367ef77a7442015e61fc87423"
+      "bytes": 28435,
+      "sha256": "79c7d8a9066659fbad7e05eb9adadbd401b94fad095af87bb184766435390999"
     },
     {
       "path": "tests/test_neutrality.py",

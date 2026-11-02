@@ -44,7 +44,12 @@ uc, Stop, need = ri.uc, ri.Stop, ri.need
 STATE_SCHEMA = "ai-comm-user-cache/1"
 OP_SCHEMA = "ai-comm-user-op/1"
 LINK_RE = re.compile(r"releases/([0-9]+\.[0-9]+\.[0-9]+)\Z")
-OP_DIR_RE = re.compile(r"(install|activate|check)-[0-9a-f]{12}\Z")
+OP_DIR_RE = re.compile(r"(install|activate|check|uninstall)-[0-9a-f]{12}\Z")
+TORN_RE = re.compile(r"torn-[0-9]+\.bin\Z")
+TRASH_RE = re.compile(r"trash-[0-9]+\Z")
+# Operations whose unfinished journal blocks every new mutation until `recover`.
+BLOCKING_OPS = {"install", "activate", "uninstall"}
+RESOLVED = {"installed", "done", "superseded", "removed"}
 TOP_LEVEL = {"releases", "staging", "journal", "state.json", "bindings.json", "index.json", "offer.json",
              "lock", "current", "previous"}
 BINDING_KEYS = ("version", "tag", "tag_object", "commit", "manifest_sha256", "protocol_sha256")
@@ -162,18 +167,19 @@ class Cache:
         return self.root / "releases" / version
 
     def check_release(self, version):
-        """A cached release is still the verified one: recorded, real directory, exact
-        commit, no tracked changes."""
+        """A cached release is still the verified one: recorded, real directory owned by
+        this user, and exactly the recorded commit's files (release_install.verify_tree)."""
         record = self.state()["releases"].get(version)
         need(record is not None, "release_not_installed", version=version)
         path = self.release_dir(version)
         st = os.lstat(path) if os.path.lexists(path) else None
         need(st is not None and stat.S_ISDIR(st.st_mode) and not stat.S_ISLNK(st.st_mode)
              and st.st_uid == os.getuid(), "release_identity_changed", version=version)
-        identity = uc.package_identity(path)
-        need(identity["commit"] == record["commit"] and not identity["dirty"]
-             and identity["manifest_sha256"] == record["manifest_sha256"], "release_identity_changed",
-             version=version)
+        try:
+            ri.verify_tree(path, record["commit"], record["manifest_sha256"])
+        except Stop as exc:
+            raise Stop("release_identity_changed", version=version, what=exc.details.get("what"),
+                       path=exc.details.get("path")) from exc
         return path
 
     def op_journal(self, op, start):
@@ -190,6 +196,12 @@ def binding_from_tag(tag, record):
     return {"version": tag["version"], "tag": tag["tag"], "tag_object": tag["tag_object"],
             "commit": tag["commit"], "manifest_sha256": tag["manifest_sha256"],
             "protocol_sha256": tag["protocol_sha256"]}
+
+
+def binding_agrees(binding, record):
+    """A stored binding still describes exactly this index record."""
+    return (isinstance(binding, dict) and isinstance(record, dict) and binding.get("tag") == record.get("tag")
+            and all(binding.get(k) == record.get(k) for k in ("commit", "manifest_sha256", "protocol_sha256")))
 
 
 def index_records(repo):
@@ -268,6 +280,7 @@ def install(version, *, fetch_permitted, use_helper, activate=None, root=None, s
     src = source or ri.source_identity()
     cache = Cache(root or cache_root()).open(create=True)
     with cache.lock():
+        _gate(cache)
         need(version not in cache.state()["releases"] and not os.path.lexists(cache.release_dir(version)),
              "release_installed", version=version)
         staging = uc.private_dir(cache.root / "staging" / f"install-{secrets.token_hex(6)}")
@@ -275,24 +288,32 @@ def install(version, *, fetch_permitted, use_helper, activate=None, root=None, s
         journal.append("start", {"schema": OP_SCHEMA, "op": "install", "version": version,
                                  "source": src["origin"], "source_kind": src["kind"]})
         repo = staging / "repo"
-        ri.git(staging, "init", "--quiet", "--template=", str(repo))
-        journal.append("intent", {"index": 0, "action": {"op": "fetch"}})
-        (fetch or ri.real_fetch)(repo, src["origin"], version, use_helper)
-        record = ri.select_record(repo, version)
-        if src["kind"] == "archive" and src["version"] == version:
-            # The bridge from a downloaded archive to the cache's Git checkout (850.1):
-            # archive, tag and index must name the same manifest.
-            need(src["manifest_sha256"] == record["manifest_sha256"], "archive_manifest_mismatch")
-        verified = ri.verify_staging(repo, version, record, run_suite, staging_identity(cache, staging))
-        binding = binding_from_tag(verified["tag"], record)
-        journal.append("outcome", {"index": 0, "ok": True, "record": record, "tests_ran": verified["tests_ran"]})
-        staging_identity(cache, staging)(repo, verified["tag"])
-        old = cache.read_link("current")
+        try:
+            ri.git(staging, "init", "--quiet", "--template=", str(repo))
+            journal.append("intent", {"index": 0, "action": {"op": "fetch"}})
+            (fetch or ri.real_fetch)(repo, src["origin"], version, use_helper)
+            record = ri.select_record(repo, version)
+            if src["kind"] == "archive" and src["version"] == version:
+                # The bridge from a downloaded archive to the cache's Git checkout (850.1):
+                # archive, tag and index must name the same manifest.
+                need(src["manifest_sha256"] == record["manifest_sha256"], "archive_manifest_mismatch")
+            verified = ri.verify_staging(repo, version, record, run_suite, staging_identity(cache, staging))
+            binding = binding_from_tag(verified["tag"], record)
+            journal.append("outcome", {"index": 0, "ok": True, "record": record,
+                                       "tests_ran": verified["tests_ran"]})
+            staging_identity(cache, staging)(repo, verified["tag"])
+        except Stop:
+            # A handled refusal before publishing leaves nothing behind. An interruption
+            # (signal, crash) keeps the journal for `recover`.
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
+        old, before_previous = cache.read_link("current"), cache.read_link("previous")
         if activate is None:
             activate = old is None
         if activate:
-            # Recorded before publishing, so recovery knows the switch was intended.
-            journal.append("note", {"activate": version, "previous": old})
+            # Recorded before publishing, so recovery knows the switch was intended and
+            # from which exact state.
+            journal.append("note", {"activate": version, "previous": old, "before_previous": before_previous})
         journal.append("intent", {"index": 1, "action": {"op": "publish"}, "commit": record["commit"]})
         publish_release(cache, staging, version)
         journal.append("outcome", {"index": 1, "ok": True})
@@ -322,6 +343,7 @@ def activate(version, *, root=None):
     need(uc.VERSION_RE.fullmatch(version or ""), "invalid_version")
     cache = Cache(root or cache_root()).open(create=False)
     with cache.lock():
+        _gate(cache)
         cache.check_release(version)
         old = cache.read_link("current")
         need(old != version, "already_current", version=version)
@@ -334,6 +356,7 @@ def activate(version, *, root=None):
 def rollback(*, root=None):
     cache = Cache(root or cache_root()).open(create=False)
     with cache.lock():
+        _gate(cache)
         old, prev = cache.read_link("current"), cache.read_link("previous")
         need(prev is not None and prev != old, "nothing_to_roll_back")
         cache.check_release(prev)
@@ -349,7 +372,9 @@ def status(*, root=None):
     return {"status": "ok", "cache": str(cache.root), "current": cache.read_link("current"),
             "previous": cache.read_link("previous"), "releases": sorted(state["releases"], key=version_key),
             "bindings": sorted(bindings["bindings"], key=version_key),
-            "index_refreshed_at": index.get("refreshed_at") if index else None}
+            "index_refreshed_at": index.get("refreshed_at") if index else None,
+            "pending": [d.name for d in _pending(cache)],
+            "unrecognized": [d.name for d in _op_dirs(cache) if d.kind == "unrecognized"]}
 
 
 def check(*, fetch_permitted=False, use_helper=False, root=None, source=None, fetch=None, now=time.time):
@@ -361,8 +386,10 @@ def check(*, fetch_permitted=False, use_helper=False, root=None, source=None, fe
         current = cache.read_link("current")
         refreshed = None
         if fetch_permitted:
+            _gate(cache)
             src = source or ri.source_identity()
             scratch = uc.private_dir(cache.root / "staging" / f"check-{secrets.token_hex(6)}")
+            uc.Journal(scratch).append("start", {"schema": OP_SCHEMA, "op": "check"})
             try:
                 repo = scratch / "repo"
                 ri.git(scratch, "init", "--quiet", "--template=", str(repo))
@@ -371,30 +398,36 @@ def check(*, fetch_permitted=False, use_helper=False, root=None, source=None, fe
                 else:
                     ri.isolated_fetch(repo, src["origin"], use_helper, ri.release_check_module().REFSPECS)
                 records = index_records(repo)
-                bindings = cache.bindings()
+                old = cache.bindings()["bindings"]
+                rebuilt = {}
                 for record in records:
                     version = record["package_version"]
-                    if not ri.git(repo, "tag", "-l", f"v{version}").strip():
-                        continue
-                    try:
-                        tag = uc.tag_identity(repo, version)
-                        bindings["bindings"][version] = binding_from_tag(tag, record)
-                    except Stop:
-                        bindings["bindings"].pop(version, None)  # never keep a binding the index contradicts
-                cache.write_bindings(bindings)
+                    if ri.git(repo, "tag", "-l", f"v{version}").strip():
+                        try:
+                            rebuilt[version] = binding_from_tag(uc.tag_identity(repo, version), record)
+                        except Stop:
+                            pass  # the fetched tag contradicts the index: unverified
+                    elif binding_agrees(old.get(version), record):
+                        rebuilt[version] = old[version]  # tag not fetched now, but the new record still agrees
+                # Bindings are rebuilt from this refresh only; offers re-check agreement
+                # with the index too, so an interruption between the two writes is safe.
                 refreshed = int(now())
                 cache.write_index(records, refreshed)
+                cache.write_bindings({"v": 1, "bindings": rebuilt})
             finally:
                 shutil.rmtree(scratch, ignore_errors=True)
         index = cache.index()
         bindings = cache.bindings()["bindings"]
-        listed = [r["package_version"] for r in (index or {}).get("releases", [])]
-        newer = [v for v in listed if current is None or version_key(v) > version_key(current)]
-        verified_newer = sorted((v for v in newer if v in bindings), key=version_key)
+        records = {r["package_version"]: r for r in (index or {}).get("releases", [])
+                   if isinstance(r, dict) and isinstance(r.get("package_version"), str)
+                   and uc.VERSION_RE.fullmatch(r["package_version"])}
+        newer = [v for v in records if current is None or version_key(v) > version_key(current)]
+        verified = {v for v in newer if binding_agrees(bindings.get(v), records[v])}
+        verified_newer = sorted(verified, key=version_key)
         return {"status": "ok", "current": current,
                 "latest_verified": verified_newer[-1] if verified_newer else current,
                 "offer": bool(verified_newer),
-                "unverified_newer": sorted((v for v in newer if v not in bindings), key=version_key),
+                "unverified_newer": sorted((v for v in newer if v not in verified), key=version_key),
                 "index_refreshed_at": (index or {}).get("refreshed_at"),
                 "metadata": "refreshed" if refreshed else ("cached" if index else "missing")}
 
@@ -402,58 +435,137 @@ def check(*, fetch_permitted=False, use_helper=False, root=None, source=None, fe
 # --------------------------------------------------------------------------- recovery and removal
 
 
-def _journal_dirs(cache):
-    for parent in (cache.root / "staging", cache.root / "journal"):
-        if not parent.is_dir() or parent.is_symlink():
-            continue
-        for child in sorted(parent.iterdir()):
-            if OP_DIR_RE.fullmatch(child.name) and not child.is_symlink():
-                yield child
+class OpDir:
+    """One directory under staging/ or journal/, classified without changing it.
+
+    kind: "op" (a journal this tool wrote, holding only the entries its operation
+    creates), "empty", or "unrecognized" (anything else: always kept and reported)."""
+
+    def __init__(self, path):
+        self.path, self.name = path, path.name
+        self.kind, self.journal, self.records, self.torn, self.op = "unrecognized", None, [], None, None
+        match = OP_DIR_RE.fullmatch(self.name)
+        try:
+            st = os.lstat(path)
+        except OSError:
+            return
+        if not match or not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid():
+            return
+        entries = os.listdir(path)
+        if not entries:
+            self.kind = "empty"
+            return
+        op = match.group(1)
+        allowed = {"journal.jsonl"} | ({"repo"} if op in ("install", "check") else set())
+        if not all(e in allowed or TORN_RE.fullmatch(e) or (op == "uninstall" and TRASH_RE.fullmatch(e))
+                   for e in entries):
+            return
+        try:
+            uc.private_dir(path, create=False)
+            journal = uc.Journal(path)
+            records, torn = journal.read()
+        except Stop:
+            return
+        if not records or records[0]["kind"] != "start":
+            return
+        data = records[0]["data"]
+        if data.get("schema") != OP_SCHEMA or data.get("op") != op:
+            return
+        self.kind, self.journal, self.records, self.torn, self.op = "op", journal, records, torn, op
+
+    @property
+    def start(self):
+        return self.records[0]["data"]
+
+    @property
+    def resolved(self):
+        return any(r["kind"] == "state" and r["data"].get("state") in RESOLVED for r in self.records)
+
+
+def _op_dirs(cache):
+    for parent in ("staging", "journal"):
+        path = cache.root / parent
+        if path.is_dir() and not path.is_symlink():
+            for child in sorted(path.iterdir()):
+                yield OpDir(child)
+
+
+def _pending(cache):
+    return [d for d in _op_dirs(cache) if d.kind == "op" and d.op in BLOCKING_OPS
+            and (d.torn is not None or not d.resolved)]
+
+
+def _gate(cache):
+    """Never start a new mutation over an unfinished one."""
+    pending = _pending(cache)
+    need(not pending, "operation_pending", dir=pending[0].name if pending else None,
+         hint="run `install.sh --user recover` first")
+
+
+def _links(cache):
+    try:
+        return cache.read_link("current"), cache.read_link("previous")
+    except Stop:
+        return None
+
+
+def _resume_switch(cache, journal, before, after):
+    """Finish an interrupted switch only from the exact state it left behind: the
+    starting links, or `previous` already moved. Any other state means something newer
+    happened; the old operation is marked superseded and nothing is changed."""
+    links = _links(cache)
+    target = (after["current"], after["previous"])
+    if links == target:
+        journal.append("state", {"state": "done"})
+        return "already_complete"
+    if links is not None and links[0] == before["current"] and links[1] in (before["previous"], after["previous"]):
+        for version in target:
+            if version is not None:
+                cache.check_release(version)
+        _switch(cache, journal, *target)
+        return "completed_switch"
+    journal.append("state", {"state": "superseded", "links": list(links) if links else None})
+    return "superseded"
 
 
 def recover(*, root=None):
     cache = Cache(root or cache_root()).open(create=False)
     results = []
     with cache.lock():
-        for directory in _journal_dirs(cache):
-            try:
-                uc.private_dir(directory, create=False)
-                journal = uc.Journal(directory)
-                records, torn = journal.read()
-            except Stop:
-                results.append({"dir": directory.name, "action": "skipped_unrecognized"})
+        for item in list(_op_dirs(cache)):
+            if not os.path.lexists(item.path):
+                continue  # removed by an uninstall completed earlier in this loop
+            if item.kind == "empty":
+                os.rmdir(item.path)
+                results.append({"dir": item.name, "action": "removed_empty"})
                 continue
-            if not records or records[0]["kind"] != "start" or records[0]["data"].get("schema") != OP_SCHEMA:
-                results.append({"dir": directory.name, "action": "skipped_unrecognized"})
+            if item.kind != "op":
+                results.append({"dir": item.name, "action": "skipped_unrecognized"})
                 continue
-            if torn is not None:
-                journal.repair_torn_tail()
-                records, _ = journal.read()
-            states = [r["data"].get("state") for r in records if r["kind"] == "state"]
-            start = records[0]["data"]
-            if "installed" in states or ("done" in states and start["op"] != "install"):
+            if item.torn is not None:
+                item.journal.repair_torn_tail()
+                item = OpDir(item.path)
+            if item.op == "check":
+                shutil.rmtree(item.path)
+                results.append({"dir": item.name, "action": "removed_check_scratch"})
                 continue
-            if start["op"] == "check":
-                shutil.rmtree(directory)
-                results.append({"dir": directory.name, "action": "removed_check_scratch"})
+            if item.resolved:
                 continue
-            if start["op"] == "install":
-                results.append(_recover_install(cache, directory, journal, records, start))
+            if item.op == "install":
+                results.append(_recover_install(cache, item))
+            elif item.op == "activate":
+                results.append({"dir": item.name,
+                                "action": _resume_switch(cache, item.journal, item.start["before"],
+                                                         item.start["after"])})
             else:
-                after = start["after"]
-                if cache.read_link("current") == after["current"] and cache.read_link("previous") == after["previous"]:
-                    journal.append("state", {"state": "done"})
-                    results.append({"dir": directory.name, "action": "already_complete"})
-                    continue
-                for version in (after["current"], after["previous"]):
-                    if version is not None:
-                        cache.check_release(version)
-                _switch(cache, journal, after["current"], after["previous"])
-                results.append({"dir": directory.name, "action": "completed_switch"})
+                out = _uninstall_continue(cache, item)
+                results.append({"dir": item.name, "action": "completed_uninstall", "kept": out["kept"]})
+    _finish_root(cache, results)
     return {"status": "recovery_report", "results": results}
 
 
-def _recover_install(cache, directory, journal, records, start):
+def _recover_install(cache, item):
+    directory, journal, records, start = item.path, item.journal, item.records, item.start
     version = start["version"]
     publish = [r for r in records if r["kind"] == "intent" and r["data"]["action"]["op"] == "publish"]
     release = cache.release_dir(version)
@@ -462,16 +574,24 @@ def _recover_install(cache, directory, journal, records, start):
         return {"dir": directory.name, "action": "removed_unpublished"}
     record = next(r["data"]["record"] for r in records if r["kind"] == "outcome" and r["data"]["index"] == 0)
     if os.path.lexists(release) and not release.is_symlink() and release.is_dir():
-        identity = uc.package_identity(release)
-        if identity["commit"] == record["commit"] and not identity["dirty"]:
-            if version not in cache.state()["releases"]:
-                tag = uc.tag_identity(release, version)
-                _record_release(cache, version, tag, binding_from_tag(tag, record), release)
-            note = [r["data"] for r in records if r["kind"] == "note" and "activate" in r["data"]]
-            if note and "done" not in [r["data"].get("state") for r in records if r["kind"] == "state"]:
-                _switch(cache, journal, note[0]["activate"], note[0]["previous"])
-            journal.append("state", {"state": "installed"})
-            return {"dir": directory.name, "action": "completed_after_publish"}
+        try:
+            ri.verify_tree(release, record["commit"], record["manifest_sha256"])
+        except Stop:
+            return {"dir": directory.name, "action": "report_only",
+                    "detail": "release does not match the verified install; inspect manually"}
+        if version not in cache.state()["releases"]:
+            tag = uc.tag_identity(release, version)
+            _record_release(cache, version, tag, binding_from_tag(tag, record), release)
+        action = "completed_after_publish"
+        note = [r["data"] for r in records if r["kind"] == "note" and "activate" in r["data"]]
+        if note:
+            switched = _resume_switch(cache, journal,
+                                      {"current": note[0]["previous"], "previous": note[0].get("before_previous")},
+                                      {"current": note[0]["activate"], "previous": note[0]["previous"]})
+            if switched == "superseded":
+                action = "completed_after_publish_switch_superseded"
+        journal.append("state", {"state": "installed"})
+        return {"dir": directory.name, "action": action}
     if (directory / "repo").is_dir() and not os.path.lexists(release):
         shutil.rmtree(directory)
         return {"dir": directory.name, "action": "removed_unpublished"}
@@ -482,55 +602,115 @@ def _recover_install(cache, directory, journal, records, start):
 def uninstall(*, confirm, root=None):
     need(confirm, "confirmation_required")
     cache = Cache(root or cache_root()).open(create=False)
-    kept, removed = [], []
     with cache.lock():
-        state = cache.state()
-        need(not state["owned"], "owned_objects_present")  # skill links and launcher: checkpoint (b)
-        for entry in sorted(os.listdir(cache.root)):
-            if entry not in TOP_LEVEL:
-                kept.append(entry)
-        releases = cache.root / "releases"
-        if releases.is_dir() and not releases.is_symlink():
-            for child in sorted(releases.iterdir()):
-                try:
-                    cache.check_release(child.name)
-                except Stop:
-                    kept.append(f"releases/{child.name}")
-                    continue
-                shutil.rmtree(child)
-                removed.append(f"releases/{child.name}")
-        for name in ("current", "previous"):
-            path = cache.root / name
-            if os.path.lexists(path):
-                if path.is_symlink() and LINK_RE.fullmatch(os.readlink(path)):
-                    os.unlink(path)
-                    removed.append(name)
-                else:
-                    kept.append(name)
-        for name in ("staging", "journal"):
-            path = cache.root / name
-            if not path.is_dir() or path.is_symlink():
+        need(not cache.state()["owned"], "owned_objects_present")  # skill links and launcher: checkpoint (b)
+        pending = _pending(cache)
+        others = [d for d in pending if d.op != "uninstall"]
+        need(not others, "operation_pending", dir=others[0].name if others else None,
+             hint="run `install.sh --user recover` first")
+        if pending:
+            item = pending[0]
+            if item.torn is not None:
+                item.journal.repair_torn_tail()
+                item = OpDir(item.path)
+        else:
+            journal = cache.op_journal("uninstall", {})
+            item = OpDir(journal.dir)
+        out = _uninstall_continue(cache, item)
+    _finish_root(cache, [out])
+    return {"status": "uninstalled" if not out["kept"] else "partially_uninstalled", "removed": out["removed"],
+            "kept": out["kept"]}
+
+
+def _uninstall_continue(cache, item):
+    """Idempotent: every removal first moves the object into this operation's own
+    directory (journaled), so an interruption leaves only objects this tool owns there.
+    Only recorded, exactly verified releases and recognized operation directories are
+    removed; anything unexpected or changed is kept and reported."""
+    op_dir, journal = item.path, item.journal
+    kept, removed = set(), []
+    trash = [e for e in os.listdir(op_dir) if TRASH_RE.fullmatch(e)]
+    counter = [max((int(e.split("-")[1]) for e in trash), default=0)]
+
+    def to_trash(path, label):
+        counter[0] += 1
+        name = f"trash-{counter[0]}"
+        journal.append("intent", {"index": counter[0], "action": {"op": "trash", "path": label, "as": name}})
+        os.rename(path, op_dir / name)
+        journal.append("outcome", {"index": counter[0], "ok": True})
+        removed.append(label)
+
+    for entry in sorted(os.listdir(cache.root)):
+        path = cache.root / entry
+        if re.fullmatch(r"\.(current|previous)-[0-9a-f]{12}", entry) and path.is_symlink() \
+                and LINK_RE.fullmatch(os.readlink(path)):
+            os.unlink(path)  # a temporary link from an interrupted switch
+        elif entry not in TOP_LEVEL:
+            kept.add(entry)
+    for name in ("current", "previous"):
+        path = cache.root / name
+        if os.path.lexists(path):
+            if path.is_symlink() and LINK_RE.fullmatch(os.readlink(path)):
+                os.unlink(path)
+                removed.append(name)
+            else:
+                kept.add(name)
+    releases = cache.root / "releases"
+    if releases.is_dir() and not releases.is_symlink():
+        for child in sorted(releases.iterdir()):
+            try:
+                cache.check_release(child.name)
+            except Stop:
+                kept.add(f"releases/{child.name}")
                 continue
-            for child in sorted(path.iterdir()):
-                if OP_DIR_RE.fullmatch(child.name) and child.is_dir() and not child.is_symlink():
-                    shutil.rmtree(child)
-                else:
-                    kept.append(f"{name}/{child.name}")
-        for name in ("state.json", "bindings.json", "index.json", "offer.json"):
-            path = cache.root / name
+            to_trash(child, f"releases/{child.name}")
+            state = cache.state()
+            state["releases"].pop(child.name, None)
+            cache.write_state(state)
+    for parent in ("staging", "journal"):
+        path = cache.root / parent
+        if not path.is_dir() or path.is_symlink():
+            continue
+        for child in sorted(path.iterdir()):
+            if child == op_dir:
+                continue
+            other = OpDir(child)
+            if other.kind == "empty":
+                os.rmdir(child)
+            elif other.kind == "op":
+                to_trash(child, f"{parent}/{child.name}")
+            else:
+                kept.add(f"{parent}/{child.name}")
+    for name in ("bindings.json", "index.json", "offer.json", "state.json"):  # state last
+        path = cache.root / name
+        if os.path.lexists(path):
             if path.is_file() and not path.is_symlink():
                 os.unlink(path)
                 removed.append(name)
-        for name in ("releases", "staging", "journal"):
-            with contextlib.suppress(OSError):
-                os.rmdir(cache.root / name)
-    if not kept:
+            else:
+                kept.add(name)
+    for entry in sorted(os.listdir(op_dir)):
+        if TRASH_RE.fullmatch(entry):
+            shutil.rmtree(op_dir / entry)
+    journal.append("state", {"state": "removed", "kept": sorted(kept)})
+    for entry in sorted(os.listdir(op_dir), key=lambda e: e == "journal.jsonl"):  # journal last
+        os.unlink(op_dir / entry)
+    os.rmdir(op_dir)
+    for name in ("releases", "staging", "journal"):
+        with contextlib.suppress(OSError):
+            os.rmdir(cache.root / name)
+    return {"removed": removed, "kept": sorted(kept)}
+
+
+def _finish_root(cache, results):
+    """After a complete uninstall, remove the lock and the empty cache directory."""
+    if not any(r.get("action") == "completed_uninstall" or "removed" in r for r in results):
+        return
+    if set(os.listdir(cache.root)) <= {"lock"}:
         with contextlib.suppress(FileNotFoundError):
             os.unlink(cache.root / "lock")
         with contextlib.suppress(OSError):
             os.rmdir(cache.root)
-    return {"status": "uninstalled" if not kept else "partially_uninstalled", "removed": removed,
-            "kept": sorted(set(kept))}
 
 
 # --------------------------------------------------------------------------- CLI

@@ -27,14 +27,23 @@ sha256sum -c SHA256SUMS        # must print "ai-comm-X.tar.gz: OK"; stop otherwi
 On macOS use `shasum -a 256 -c SHA256SUMS`. If the repository becomes public, `curl -fLO` with the two explicit asset
 URLs of release `vX` replaces the download command; the checks stay the same.
 
-Extract with Python's safe extraction filter, which refuses absolute paths, `..`, links leaving the directory and
-device files:
+Extract it. A release archive contains only regular files and directories, so the command first checks every
+member and refuses the whole archive, before anything is written, if any name is absolute, contains a `..`
+component or appears twice, or if any member is a symbolic link, hard link, device or other special file. It then
+extracts with Python's `data` filter as a second layer:
 
 ```sh
 mkdir pkg && python3 -I -c 'import sys, tarfile
 assert hasattr(tarfile, "data_filter"), "this Python lacks safe tar extraction; use a newer patch release"
 with tarfile.open(sys.argv[1]) as archive:
-    archive.extractall(sys.argv[2], filter="data")' "ai-comm-X.tar.gz" pkg
+    members, names = archive.getmembers(), set()
+    for m in members:
+        parts = m.name.split("/")
+        if (not m.name or m.name.startswith("/") or ".." in parts or m.name in names
+                or not (m.isreg() or m.isdir())):
+            sys.exit("refusing the archive: unexpected member " + repr(m.name))
+        names.add(m.name)
+    archive.extractall(sys.argv[2], members=members, filter="data")' "ai-comm-X.tar.gz" pkg
 ```
 
 Then install into the per-user cache. `--fetch-permitted` is your consent to fetch exactly tag `vX` and the release
