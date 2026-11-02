@@ -49,7 +49,7 @@ TORN_RE = re.compile(r"torn-[0-9]+\.bin\Z")
 TRASH_RE = re.compile(r"trash-[0-9]+\Z")
 # Operations whose unfinished journal blocks every new mutation until `recover`.
 BLOCKING_OPS = {"install", "activate", "uninstall"}
-RESOLVED = {"installed", "done", "superseded", "removed"}
+RESOLVED = {"installed", "done", "superseded", "removed", "abandoned"}
 TOP_LEVEL = {"releases", "staging", "journal", "state.json", "bindings.json", "index.json", "offer.json",
              "lock", "current", "previous"}
 BINDING_KEYS = ("version", "tag", "tag_object", "commit", "manifest_sha256", "protocol_sha256")
@@ -183,6 +183,7 @@ class Cache:
         return path
 
     def op_journal(self, op, start):
+        uc.private_dir(self.root / "journal")  # a partial uninstall may have removed the empty parent
         directory = uc.private_dir(self.root / "journal" / f"{op}-{secrets.token_hex(6)}")
         journal = uc.Journal(directory)
         journal.append("start", {"schema": OP_SCHEMA, "op": op, **start})
@@ -293,6 +294,7 @@ def install(version, *, fetch_permitted, use_helper, activate=None, root=None, s
             journal.append("intent", {"index": 0, "action": {"op": "fetch"}})
             (fetch or ri.real_fetch)(repo, src["origin"], version, use_helper)
             record = ri.select_record(repo, version)
+            journal.append("note", {"record": record})  # lets recovery identify the staged checkout
             if src["kind"] == "archive" and src["version"] == version:
                 # The bridge from a downloaded archive to the cache's Git checkout (850.1):
                 # archive, tag and index must name the same manifest.
@@ -374,7 +376,7 @@ def status(*, root=None):
             "bindings": sorted(bindings["bindings"], key=version_key),
             "index_refreshed_at": index.get("refreshed_at") if index else None,
             "pending": [d.name for d in _pending(cache)],
-            "unrecognized": [d.name for d in _op_dirs(cache) if d.kind == "unrecognized"]}
+            "unrecognized": [d.name for d in _op_dirs(cache) if d.kind == "unrecognized" or d.unexpected]}
 
 
 def check(*, fetch_permitted=False, use_helper=False, root=None, source=None, fetch=None, now=time.time):
@@ -388,6 +390,7 @@ def check(*, fetch_permitted=False, use_helper=False, root=None, source=None, fe
         if fetch_permitted:
             _gate(cache)
             src = source or ri.source_identity()
+            uc.private_dir(cache.root / "staging")  # a partial uninstall may have removed the empty parent
             scratch = uc.private_dir(cache.root / "staging" / f"check-{secrets.token_hex(6)}")
             uc.Journal(scratch).append("start", {"schema": OP_SCHEMA, "op": "check"})
             try:
@@ -438,27 +441,31 @@ def check(*, fetch_permitted=False, use_helper=False, root=None, source=None, fe
 class OpDir:
     """One directory under staging/ or journal/, classified without changing it.
 
-    kind: "op" (a journal this tool wrote, holding only the entries its operation
-    creates), "empty", or "unrecognized" (anything else: always kept and reported)."""
+    kind: "op" (a valid journal this tool wrote), "empty", or "unrecognized". Whether an
+    operation is pending depends only on its journal, so unexpected contents never hide
+    an unfinished operation from the mutation gate. Whether its directory may be removed
+    is separate: only when every entry is one its operation creates in its current
+    journal state (`unexpected` is empty). `op` names the operation when the directory
+    no longer carries its original name (an object moved into an uninstall's directory)."""
 
-    def __init__(self, path):
+    def __init__(self, path, op=None):
         self.path, self.name = path, path.name
         self.kind, self.journal, self.records, self.torn, self.op = "unrecognized", None, [], None, None
-        match = OP_DIR_RE.fullmatch(self.name)
+        self.unexpected = []
+        if op is None:
+            match = OP_DIR_RE.fullmatch(self.name)
+            if not match:
+                return
+            op = match.group(1)
         try:
             st = os.lstat(path)
         except OSError:
             return
-        if not match or not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid():
+        if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid():
             return
         entries = os.listdir(path)
         if not entries:
             self.kind = "empty"
-            return
-        op = match.group(1)
-        allowed = {"journal.jsonl"} | ({"repo"} if op in ("install", "check") else set())
-        if not all(e in allowed or TORN_RE.fullmatch(e) or (op == "uninstall" and TRASH_RE.fullmatch(e))
-                   for e in entries):
             return
         try:
             uc.private_dir(path, create=False)
@@ -472,6 +479,7 @@ class OpDir:
         if data.get("schema") != OP_SCHEMA or data.get("op") != op:
             return
         self.kind, self.journal, self.records, self.torn, self.op = "op", journal, records, torn, op
+        self.unexpected = sorted(e for e in entries if not _entry_expected(path, op, records, e))
 
     @property
     def start(self):
@@ -480,6 +488,45 @@ class OpDir:
     @property
     def resolved(self):
         return any(r["kind"] == "state" and r["data"].get("state") in RESOLVED for r in self.records)
+
+    @property
+    def removable(self):
+        return self.kind == "op" and not self.unexpected
+
+    @property
+    def pending(self):
+        return self.kind == "op" and self.op in BLOCKING_OPS and (self.torn is not None or not self.resolved)
+
+
+def _states(records):
+    return {r["data"].get("state") for r in records if r["kind"] == "state"}
+
+
+def _published(records):
+    return any(r["kind"] == "outcome" and r["data"].get("index") == 1 and r["data"].get("ok") for r in records)
+
+
+def _real_dir(path):
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return False
+    return stat.S_ISDIR(st.st_mode) and st.st_uid == os.getuid()
+
+
+def _entry_expected(path, op, records, entry):
+    """Whether `entry` is something this operation creates, in this journal state.
+    A name alone never qualifies: `repo` exists only in an unpublished install or in a
+    check (whose clone never checks out files), `trash-N` only in an unfinished uninstall."""
+    if entry == "journal.jsonl" or TORN_RE.fullmatch(entry):
+        return True
+    if entry == "repo" and op == "install":
+        return _real_dir(path / entry) and not (_states(records) & RESOLVED) and not _published(records)
+    if entry == "repo" and op == "check":
+        return _real_dir(path / entry) and set(os.listdir(path / entry)) <= {".git"}
+    if TRASH_RE.fullmatch(entry) and op == "uninstall":
+        return "removed" not in _states(records)
+    return False
 
 
 def _op_dirs(cache):
@@ -491,8 +538,7 @@ def _op_dirs(cache):
 
 
 def _pending(cache):
-    return [d for d in _op_dirs(cache) if d.kind == "op" and d.op in BLOCKING_OPS
-            and (d.torn is not None or not d.resolved)]
+    return [d for d in _op_dirs(cache) if d.pending]
 
 
 def _gate(cache):
@@ -546,8 +592,11 @@ def recover(*, root=None):
                 item.journal.repair_torn_tail()
                 item = OpDir(item.path)
             if item.op == "check":
-                shutil.rmtree(item.path)
-                results.append({"dir": item.name, "action": "removed_check_scratch"})
+                if item.removable:
+                    shutil.rmtree(item.path)
+                    results.append({"dir": item.name, "action": "removed_check_scratch"})
+                else:
+                    results.append({"dir": item.name, "action": "kept_unexpected", "entries": item.unexpected})
                 continue
             if item.resolved:
                 continue
@@ -570,8 +619,7 @@ def _recover_install(cache, item):
     publish = [r for r in records if r["kind"] == "intent" and r["data"]["action"]["op"] == "publish"]
     release = cache.release_dir(version)
     if not publish:
-        shutil.rmtree(directory)
-        return {"dir": directory.name, "action": "removed_unpublished"}
+        return _remove_unpublished(item)
     record = next(r["data"]["record"] for r in records if r["kind"] == "outcome" and r["data"]["index"] == 0)
     if os.path.lexists(release) and not release.is_symlink() and release.is_dir():
         try:
@@ -593,10 +641,39 @@ def _recover_install(cache, item):
         journal.append("state", {"state": "installed"})
         return {"dir": directory.name, "action": action}
     if (directory / "repo").is_dir() and not os.path.lexists(release):
-        shutil.rmtree(directory)
-        return {"dir": directory.name, "action": "removed_unpublished"}
+        return _remove_unpublished(item)
     return {"dir": directory.name, "action": "report_only",
             "detail": "release does not match the verified install; inspect manually"}
+
+
+def _remove_unpublished(item):
+    """Remove an interrupted, unpublished install only when its staged checkout is
+    provably the installer's own: an empty clone (only `.git`), or exactly the tree of
+    the journaled record (plus bytecode an interrupted test run leaves). Otherwise the
+    operation is resolved as abandoned and its directory is kept and reported."""
+    repo = item.path / "repo"
+    if item.unexpected:
+        return _abandon(item, "unexpected entries in the operation directory")
+    if os.path.lexists(repo):
+        records = [r["data"]["record"] for r in item.records if r["kind"] == "note" and "record" in r["data"]]
+        ok = _real_dir(repo) and set(os.listdir(repo)) <= {".git"}
+        if not ok and records:
+            try:
+                ri.verify_tree(repo, records[0]["commit"], records[0]["manifest_sha256"], allow_bytecode=True)
+                ok = True
+            except Stop:
+                ok = False
+        if not ok:
+            return _abandon(item, "staging checkout has unexpected contents")
+    shutil.rmtree(item.path)
+    return {"dir": item.name, "action": "removed_unpublished"}
+
+
+def _abandon(item, why):
+    """Nothing was published, but the staging cannot be proven to be only the
+    installer's own: resolve the operation (it no longer blocks) and keep everything."""
+    item.journal.append("state", {"state": "abandoned", "reason": why})
+    return {"dir": item.name, "action": "kept_for_inspection", "detail": why}
 
 
 def uninstall(*, confirm, root=None):
@@ -629,13 +706,13 @@ def _uninstall_continue(cache, item):
     removed; anything unexpected or changed is kept and reported."""
     op_dir, journal = item.path, item.journal
     kept, removed = set(), []
-    trash = [e for e in os.listdir(op_dir) if TRASH_RE.fullmatch(e)]
-    counter = [max((int(e.split("-")[1]) for e in trash), default=0)]
+    counter = [len(_trash_intents(journal))]
 
-    def to_trash(path, label):
+    def to_trash(path, label, identity):
         counter[0] += 1
         name = f"trash-{counter[0]}"
-        journal.append("intent", {"index": counter[0], "action": {"op": "trash", "path": label, "as": name}})
+        journal.append("intent", {"index": counter[0],
+                                  "action": {"op": "trash", "path": label, "as": name, "identity": identity}})
         os.rename(path, op_dir / name)
         journal.append("outcome", {"index": counter[0], "ok": True})
         removed.append(label)
@@ -663,7 +740,9 @@ def _uninstall_continue(cache, item):
             except Stop:
                 kept.add(f"releases/{child.name}")
                 continue
-            to_trash(child, f"releases/{child.name}")
+            record = cache.state()["releases"][child.name]
+            to_trash(child, f"releases/{child.name}",
+                     {"kind": "release", "commit": record["commit"], "manifest_sha256": record["manifest_sha256"]})
             state = cache.state()
             state["releases"].pop(child.name, None)
             cache.write_state(state)
@@ -677,8 +756,8 @@ def _uninstall_continue(cache, item):
             other = OpDir(child)
             if other.kind == "empty":
                 os.rmdir(child)
-            elif other.kind == "op":
-                to_trash(child, f"{parent}/{child.name}")
+            elif other.removable and not other.pending:
+                to_trash(child, f"{parent}/{child.name}", {"kind": "op", "op": other.op})
             else:
                 kept.add(f"{parent}/{child.name}")
     for name in ("bindings.json", "index.json", "offer.json", "state.json"):  # state last
@@ -689,17 +768,59 @@ def _uninstall_continue(cache, item):
                 removed.append(name)
             else:
                 kept.add(name)
+    intents = _trash_intents(journal)
     for entry in sorted(os.listdir(op_dir)):
-        if TRASH_RE.fullmatch(entry):
+        if not TRASH_RE.fullmatch(entry):
+            continue
+        action = intents.get(entry)
+        if action is not None and _trash_still_owned(op_dir / entry, action["identity"]):
             shutil.rmtree(op_dir / entry)
-    journal.append("state", {"state": "removed", "kept": sorted(kept)})
-    for entry in sorted(os.listdir(op_dir), key=lambda e: e == "journal.jsonl"):  # journal last
-        os.unlink(op_dir / entry)
-    os.rmdir(op_dir)
+            continue
+        # Changed after it was moved here: put it back where it came from and keep it;
+        # if that path is taken, keep it here, inside this operation's directory.
+        original = cache.root / action["path"] if action is not None else None
+        if original is not None and not os.path.lexists(original) and _real_dir(original.parent):
+            journal.append("note", {"restored": entry, "to": action["path"]})
+            os.rename(op_dir / entry, original)
+            kept.add(action["path"])
+        else:
+            kept.add(f"journal/{op_dir.name}/{entry}")
+        if action is not None and action["path"] in removed:
+            removed.remove(action["path"])
+    leftovers = [e for e in os.listdir(op_dir) if e != "journal.jsonl" and not TORN_RE.fullmatch(e)]
+    journal.append("state", {"state": "removed", "kept": sorted(kept | {f"journal/{op_dir.name}/{e}" for e in leftovers})})
+    if leftovers:
+        # Something here is not accounted for: keep the directory and its journal, which
+        # explains it. The operation is resolved and no longer blocks anything.
+        kept.update(f"journal/{op_dir.name}/{e}" for e in leftovers)
+    else:
+        for entry in sorted(os.listdir(op_dir), key=lambda e: e == "journal.jsonl"):  # journal last
+            os.unlink(op_dir / entry)
+        os.rmdir(op_dir)
     for name in ("releases", "staging", "journal"):
         with contextlib.suppress(OSError):
             os.rmdir(cache.root / name)
     return {"removed": removed, "kept": sorted(kept)}
+
+
+def _trash_intents(journal):
+    records, _ = journal.read()
+    return {r["data"]["action"]["as"]: r["data"]["action"] for r in records
+            if r["kind"] == "intent" and r["data"].get("action", {}).get("op") == "trash"}
+
+
+def _trash_still_owned(path, identity):
+    """Revalidate a moved object against the identity journaled when it was moved."""
+    if identity.get("kind") == "release":
+        try:
+            ri.verify_tree(path, identity["commit"], identity["manifest_sha256"])
+            return True
+        except Stop:
+            return False
+    if identity.get("kind") == "op":
+        moved = OpDir(path, op=identity.get("op"))
+        return moved.removable and not moved.pending
+    return False
 
 
 def _finish_root(cache, results):

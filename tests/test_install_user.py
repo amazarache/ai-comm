@@ -502,6 +502,146 @@ class UserCacheTests(unittest.TestCase):
         self.assertTrue((done / "sentinel.txt").exists())
 
 
+    # -- review 931 (049) regressions: removal needs journal state plus identity
+
+    def assert_stable(self, kept):
+        """Repeated uninstall and recover keep the same objects and never fail."""
+        for _ in range(2):
+            self.assertEqual(iu.recover(root=self.root)["status"], "recovery_report")
+            self.assertEqual(iu.status(root=self.root)["pending"], [])
+            self.assertEqual(iu.uninstall(confirm=True, root=self.root)["kept"], kept)
+
+    def test_new_repo_in_a_completed_install_directory_is_kept(self):
+        self.install()
+        done = next((self.root / "staging").iterdir())
+        (done / "repo").mkdir()
+        (done / "repo" / "personal.txt").write_text("mine\n")
+        out = iu.uninstall(confirm=True, root=self.root)
+        self.assertEqual((out["status"], out["kept"]), ("partially_uninstalled", [f"staging/{done.name}"]))
+        self.assert_stable([f"staging/{done.name}"])
+        self.assertTrue((done / "repo" / "personal.txt").exists())
+
+    def interrupted_uninstall(self):
+        with mock.patch.object(iu.Cache, "write_state", side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                iu.uninstall(confirm=True, root=self.root)
+        return next((self.root / "journal").glob("uninstall-*"))
+
+    def test_changed_trash_is_restored_to_its_original_path(self):
+        self.install()
+        op_dir = self.interrupted_uninstall()
+        (op_dir / "trash-1" / "personal.txt").write_text("mine\n")
+        out = iu.recover(root=self.root)
+        self.assertEqual(out["results"][0]["kept"], ["releases/1.5.1"])
+        self.assertTrue((self.root / "releases" / "1.5.1" / "personal.txt").exists())
+        self.assert_stable(["releases/1.5.1"])
+        self.assertTrue((self.root / "releases" / "1.5.1" / "personal.txt").exists())
+
+    def test_changed_trash_whose_original_path_is_taken_stays_in_the_operation_directory(self):
+        self.install()
+        op_dir = self.interrupted_uninstall()
+        (op_dir / "trash-1" / "personal.txt").write_text("mine\n")
+        (self.root / "releases" / "1.5.1").mkdir()
+        out = iu.recover(root=self.root)
+        self.assertEqual(out["results"][0]["kept"], [f"journal/{op_dir.name}/trash-1", "releases/1.5.1"])
+        self.assertTrue((op_dir / "trash-1" / "personal.txt").exists())
+        self.assertEqual(iu.status(root=self.root)["pending"], [], "resolved; nothing is blocked")
+        self.assert_stable([f"journal/{op_dir.name}", "releases/1.5.1"])
+        self.assertTrue((op_dir / "trash-1" / "personal.txt").exists())
+
+    def test_changed_moved_operation_directory_is_restored(self):
+        self.install()
+        staging_name = next((self.root / "staging").iterdir()).name
+        real, calls = iu.shutil.rmtree, []
+
+        def flaky(path, *a, **kw):
+            calls.append(path)
+            if len(calls) == 1:
+                raise KeyboardInterrupt  # before deleting any moved object
+            return real(path, *a, **kw)
+        with mock.patch.object(iu.shutil, "rmtree", flaky):
+            with self.assertRaises(KeyboardInterrupt):
+                iu.uninstall(confirm=True, root=self.root)
+        op_dir = next((self.root / "journal").glob("uninstall-*"))
+        intents = iu._trash_intents(iu.uc.Journal(op_dir))
+        moved = next(n for n, a in intents.items() if a["identity"]["kind"] == "op")
+        (op_dir / moved / "sentinel.txt").write_text("mine\n")
+        out = iu.recover(root=self.root)
+        self.assertEqual(out["results"][0]["kept"], [f"staging/{staging_name}"])
+        self.assertTrue((self.root / "staging" / staging_name / "sentinel.txt").exists())
+
+    def test_unexpected_entries_never_hide_an_unfinished_operation(self):
+        self.install("1.5.1")
+        self.install("1.5.0")
+        self.interrupt_activate("1.5.0")
+        op_dir = next((self.root / "journal").glob("activate-*"))
+        (op_dir / "sentinel.txt").write_text("mine\n")
+        self.assertEqual(self.stop(iu.rollback, root=self.root).code, "operation_pending")
+        self.assertEqual([r["action"] for r in iu.recover(root=self.root)["results"]], ["completed_switch"])
+        self.assertIn(f"journal/{op_dir.name}", iu.uninstall(confirm=True, root=self.root)["kept"])
+        self.assertTrue((op_dir / "sentinel.txt").exists())
+
+    def test_sentinel_in_an_unfinished_uninstall_directory_is_kept_after_completion(self):
+        self.install()
+        op_dir = self.interrupted_uninstall()
+        (op_dir / "sentinel.txt").write_text("mine\n")
+        self.assertEqual(self.stop(self.install, version="1.5.0").code, "operation_pending")
+        out = iu.recover(root=self.root)
+        self.assertEqual(out["results"][0]["kept"], [f"journal/{op_dir.name}/sentinel.txt"])
+        self.assertTrue((op_dir / "sentinel.txt").exists())
+        self.assertFalse((self.root / "releases" / "1.5.1").exists())
+        self.assert_stable([f"journal/{op_dir.name}"])
+
+    def interrupted_staging(self, debris):
+        def suite(repo):
+            debris(repo)
+            raise KeyboardInterrupt
+        with self.assertRaises(KeyboardInterrupt):
+            self.install(suite=suite)
+        return next((self.root / "staging").glob("install-*"))
+
+    def test_interrupted_staging_with_only_test_bytecode_is_removed(self):
+        def debris(repo):
+            (repo / "scripts" / "__pycache__").mkdir()
+            (repo / "scripts" / "__pycache__" / "x.cpython-312.pyc").write_bytes(b"\x00")
+        self.interrupted_staging(debris)
+        self.assertEqual([r["action"] for r in iu.recover(root=self.root)["results"]], ["removed_unpublished"])
+        self.assertEqual(list((self.root / "staging").iterdir()), [])
+
+    def test_interrupted_staging_with_user_files_is_kept_and_no_longer_blocks(self):
+        staging = self.interrupted_staging(lambda repo: (repo / "personal.txt").write_text("mine\n"))
+        self.assertEqual(self.stop(self.install).code, "operation_pending")
+        self.assertEqual([r["action"] for r in iu.recover(root=self.root)["results"]], ["kept_for_inspection"])
+        self.assertTrue((staging / "repo" / "personal.txt").exists())
+        self.assertEqual(iu.recover(root=self.root)["results"], [], "resolved: nothing to do again")
+        self.assertEqual(self.install()["status"], "installed")
+        self.assertIn(f"staging/{staging.name}", iu.uninstall(confirm=True, root=self.root)["kept"])
+        self.assertTrue((staging / "repo" / "personal.txt").exists())
+
+    def test_commands_work_after_a_partial_uninstall(self):
+        self.install()
+        (self.root / "notes.txt").write_text("mine\n")
+        self.assertEqual(iu.uninstall(confirm=True, root=self.root)["kept"], ["notes.txt"])
+        self.assertEqual(iu.check(fetch_permitted=True, root=self.root, source=self.src())["metadata"], "refreshed")
+        self.assertEqual(self.install()["status"], "installed")
+        self.assertEqual(iu.uninstall(confirm=True, root=self.root)["kept"], ["notes.txt"])
+
+    def test_check_scratch_with_extra_files_is_kept(self):
+        self.install()
+
+        def fetch(repo, origin, use_helper):
+            (repo / "personal.txt").write_text("mine\n")
+            raise KeyboardInterrupt
+        with self.assertRaises(KeyboardInterrupt):
+            with mock.patch.object(iu.shutil, "rmtree"):  # the scratch is normally removed on the way out
+                iu.check(fetch_permitted=True, root=self.root, source=self.src(), fetch=fetch)
+        scratch = next((self.root / "staging").glob("check-*"))
+        self.assertEqual([r["action"] for r in iu.recover(root=self.root)["results"]], ["kept_unexpected"])
+        self.assertIn(scratch.name, iu.status(root=self.root)["unrecognized"])
+        self.assertIn(f"staging/{scratch.name}", iu.uninstall(confirm=True, root=self.root)["kept"])
+        self.assertTrue((scratch / "repo" / "personal.txt").exists())
+
+
 class BootstrapExtractionTests(unittest.TestCase):
     """The extraction command in docs/INSTALL.md, run exactly as documented."""
 

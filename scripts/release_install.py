@@ -208,13 +208,16 @@ def _tree_entries(git_dir, tree_oid, prefix, out, code):
             need(len(out) <= MAX_TREE_ENTRIES, code, what="tree_size")
 
 
-def verify_tree(repo, commit, manifest_sha256, code="release_identity_changed"):
+def verify_tree(repo, commit, manifest_sha256, code="release_identity_changed", allow_bytecode=False):
     """The checkout at `repo` is exactly `commit`: every working file and nothing else.
 
     Trust comes only from `commit` (a recorded, previously verified id). The commit and
     tree objects are re-hashed; HEAD, the index, `git status` and per-file flags such as
     assume-unchanged are never consulted. Working files are opened by safe relative path
-    (no symlinks, regular files, bounded, non-blocking) and their blob hashes compared."""
+    (no symlinks, regular files, bounded, non-blocking) and their blob hashes compared.
+    `allow_bytecode` (only for an installer's own interrupted staging checkout) also
+    accepts untracked `__pycache__` directories holding nothing but regular `.pyc` files,
+    which an interrupted test run leaves behind."""
     need(_COMMIT_OID.fullmatch(commit or ""), code, what="commit")
     repo = Path(repo)
     git_st = os.lstat(repo / ".git") if os.path.lexists(repo / ".git") else None
@@ -241,10 +244,14 @@ def verify_tree(repo, commit, manifest_sha256, code="release_identity_changed"):
             if rel == "":
                 need(".git" in dirnames, code, what="git_dir")
                 dirnames.remove(".git")
-            for name in dirnames:
+            for name in list(dirnames):
                 st = os.lstat(name, dir_fd=dir_fd)
                 need(stat.S_ISDIR(st.st_mode), code, what="not_regular", path=rel + name)
-                need(any(p.startswith(rel + name + "/") for p in expected), code, what="unexpected", path=rel + name)
+                if any(p.startswith(rel + name + "/") for p in expected):
+                    continue
+                need(allow_bytecode and name == "__pycache__" and _only_bytecode(name, dir_fd), code,
+                     what="unexpected", path=rel + name)
+                dirnames.remove(name)
             for name in filenames:
                 path = rel + name
                 need(path in expected, code, what="unexpected", path=path)
@@ -276,6 +283,18 @@ def verify_tree(repo, commit, manifest_sha256, code="release_identity_changed"):
     missing = sorted(set(expected) - seen)
     need(not missing, code, what="missing", path=missing[0] if missing else None)
     return {"commit": commit, "files": len(seen)}
+
+
+def _only_bytecode(name, parent_fd):
+    fd = open_dir_nofollow(name, parent_fd)
+    try:
+        for entry in os.listdir(fd):
+            st = os.lstat(entry, dir_fd=fd)
+            if not (stat.S_ISREG(st.st_mode) and entry.endswith(".pyc")):
+                return False
+        return True
+    finally:
+        os.close(fd)
 
 
 def open_dir_nofollow(name, dir_fd=None):
