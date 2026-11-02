@@ -62,8 +62,8 @@
     },
     {
       "path": "docs/INSTALL.md",
-      "bytes": 4683,
-      "sha256": "d60ff146e13bf4ad702dbe2eb221657653da6d1ebc635ffff9676025c3cb2d2d"
+      "bytes": 9660,
+      "sha256": "07a51f206471b5c2fcdf8bc88aba9f707cf0f1b458e17b40a0d2e71c12f17c92"
     },
     {
       "path": "docs/PERFORMANCE.md",
@@ -74,6 +74,11 @@
       "path": "docs/RELEASES.md",
       "bytes": 18724,
       "sha256": "a2dbcac471871dea467bc71fbe6b4c853f78159f308bb00c3731fc11119139b2"
+    },
+    {
+      "path": "entry/ai-comm/SKILL.md",
+      "bytes": 5144,
+      "sha256": "dab720005006e9b0a873d5d9786416915faf1fb32190613f65410435c7cddb90"
     },
     {
       "path": "examples/ask.json",
@@ -106,19 +111,24 @@
       "sha256": "a20f8b0e33bb4f0b4c54c176cfc973b6df3927b432d3a4827620c5fd64cbd580"
     },
     {
+      "path": "scripts/declare_project.py",
+      "bytes": 6345,
+      "sha256": "fbc7f9bab84039a3cdee92816a4ba219aaa7631c06ad84a944105ed119cacbcc"
+    },
+    {
       "path": "scripts/extract_release_notes.py",
       "bytes": 1086,
       "sha256": "b57d32bc6533c8cf157b0bc6d2f9634188bdbd201d1d607dc2d2f4f6be6dc250"
     },
     {
       "path": "scripts/install_project.py",
-      "bytes": 15152,
-      "sha256": "2d69f94b90ce0b82e9cc29bb6ab0492679c86b507857a4769155004b00870af0"
+      "bytes": 15011,
+      "sha256": "f953eb0fc4b867c42372a6b0d9ecc71082c45f4afad85ff1fe353e7f0f121677"
     },
     {
       "path": "scripts/install_user.py",
-      "bytes": 41195,
-      "sha256": "5905dc04a3415494727db44603ca33c13456adc339f314d16c321e27effac022"
+      "bytes": 66260,
+      "sha256": "4dd905b43211fb5a5e2242cdf28db86026d7990e8a48b480ae423d1c9af256eb"
     },
     {
       "path": "scripts/leak_scan.py",
@@ -126,9 +136,14 @@
       "sha256": "622fe13b1e67b6715b40cbcb3b4861c53da2e6b6f99e7fb5d886a363af44f2af"
     },
     {
+      "path": "scripts/project_cli.py",
+      "bytes": 3481,
+      "sha256": "257350b1f96bc3dc9e94db95f090778e7b6fc9a738ccce807458959e73ee7735"
+    },
+    {
       "path": "scripts/release_install.py",
-      "bytes": 14197,
-      "sha256": "36183bd805365fe16c0af6eff9ef21d6ec1b0e4d176fb98d08aa6d18d357c9b7"
+      "bytes": 14896,
+      "sha256": "4c6c487b3ef6fb574fb4880da288eeacd90613d8d29c5a69401e51ce2731b105"
     },
     {
       "path": "scripts/test_old_protocol.py",
@@ -136,9 +151,19 @@
       "sha256": "84ce3149a471b604d023637c6d35cc10da3615581a1aa7b3f49994e75c2f49f0"
     },
     {
+      "path": "scripts/verify_pin.py",
+      "bytes": 14541,
+      "sha256": "1f171433e47b2c38562afd32641c20730cce38d3252793a9e28e26c78ff1cd28"
+    },
+    {
       "path": "skills/ai-comm/SKILL.md",
       "bytes": 22211,
       "sha256": "41a97275f4b48f9e5caec3a28f02ec1aacdac6fe3f68cf718211b5fd9db69896"
+    },
+    {
+      "path": "tests/test_declare_project.py",
+      "bytes": 9336,
+      "sha256": "890805744697accfd4d9c4a87fb95fd737b5f16e2ac15ef2dca135abd2c43ded"
     },
     {
       "path": "tests/test_host_neutral_channel.py",
@@ -152,8 +177,8 @@
     },
     {
       "path": "tests/test_install_user.py",
-      "bytes": 36320,
-      "sha256": "4e27a29aa1301508678b0458c759b70268b90b8ad501174a69d80bd375b55b43"
+      "bytes": 36497,
+      "sha256": "15121e3b2e5494bc4aed03253779486c93a040f9960112e0d96172450e5594e5"
     },
     {
       "path": "tests/test_neutrality.py",
@@ -191,9 +216,19 @@
       "sha256": "f5efb1f986d13d638f547d203e6b0a97f29e57afb453b6ff2dfec3bd5755869f"
     },
     {
+      "path": "tests/test_user_objects.py",
+      "bytes": 25926,
+      "sha256": "c22d971dced5c3552a3b21a123d4e01bdec3c27c6ebed128a9b0afbb3fb27c6a"
+    },
+    {
+      "path": "tests/test_verify_pin.py",
+      "bytes": 14032,
+      "sha256": "c06c08e53444e90dafa1f5f8588614619fe7a5c6826d46fa19c2ecca4cf76cce"
+    },
+    {
       "path": "upgrade_controller.py",
-      "bytes": 74545,
-      "sha256": "1cafdb1ad0535608d08b31837b84b9bca6f31b2d2bc91374a07b2c5dfce23f34"
+      "bytes": 75329,
+      "sha256": "ff30c0e30cce2120a3d0532b86d984a341c028800a6ad3f2cb250e9d8d9346f2"
     }
   ],
   "format": "ai-comm-review-manifest/1",

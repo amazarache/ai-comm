@@ -395,10 +395,13 @@ class UserCacheTests(unittest.TestCase):
         src, origin = self.own_source()
         self.install("1.5.0", source=src)
         before = {n: (self.root / n).read_bytes() for n in ("bindings.json", "index.json")}
-        bad = dict(src, origin=str(Path(self.temp.name) / "no-such-origin"))
-        self.assertEqual(self.stop(iu.check, fetch_permitted=True, root=self.root, source=bad).code, "fetch_failed")
+        def unreachable(repo, origin, use_helper):
+            raise iu.Stop("fetch_failed", helper_error="network")
+        self.assertEqual(self.stop(iu.check, fetch_permitted=True, root=self.root, source=src,
+                                   fetch=unreachable).code, "fetch_failed")
         self.assertEqual({n: (self.root / n).read_bytes() for n in before}, before)
-        self.assertFalse(iu.check(root=self.root)["offer"])
+        out = iu.check(root=self.root)
+        self.assertEqual((out["offer"], out["metadata"], out["verdict"]), (False, "failed", "unknown"))
 
     def test_index_flags_and_symlinked_directories_cannot_hide_changes(self):
         self.install("1.5.1")

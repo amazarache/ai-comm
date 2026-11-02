@@ -77,6 +77,12 @@ def trusted_source(root=ROOT):
     return source_identity(root)["origin"]
 
 
+def unintegrated_declaration(project):
+    """The bytes both installers write for a project with no declared integrations."""
+    return uc.canonical({"v": 1, "schema": uc.PROJECT_SCHEMA, "status": "unintegrated",
+                         "project_id": {"path": str(project), "channel": None}, "integrations": []})
+
+
 def select_record(repo, version):
     raw = git(repo, "show", "refs/remotes/origin/release-index:RELEASES.json").encode()
     index = uc.parse_json(raw, "release_index_invalid")
@@ -208,6 +214,23 @@ def _tree_entries(git_dir, tree_oid, prefix, out, code):
             need(len(out) <= MAX_TREE_ENTRIES, code, what="tree_size")
 
 
+def commit_tree(git_dir, commit, code):
+    """{path: (blob id, executable)} for every file of `commit`, read from `git_dir`
+    with every commit and tree object re-hashed (see `git_object`)."""
+    need(_COMMIT_OID.fullmatch(commit or ""), code, what="commit")
+    body = _git_object(git_dir, "commit", commit, code)
+    header = body.split(b"\n\n", 1)[0].split(b"\n")
+    need(header and header[0].startswith(b"tree "), code, what="commit")
+    tree = header[0][5:].decode("ascii", "replace")
+    need(_COMMIT_OID.fullmatch(tree) and len(tree) == len(commit), code, what="commit")
+    expected = {}
+    try:
+        _tree_entries(git_dir, tree, "", expected, code)
+    except (ValueError, UnicodeError) as exc:
+        raise Stop(code, what="tree") from exc
+    return expected
+
+
 def verify_tree(repo, commit, manifest_sha256, code="release_identity_changed", allow_bytecode=False):
     """The checkout at `repo` is exactly `commit`: every working file and nothing else.
 
@@ -218,22 +241,12 @@ def verify_tree(repo, commit, manifest_sha256, code="release_identity_changed", 
     `allow_bytecode` (only for an installer's own interrupted staging checkout) also
     accepts untracked `__pycache__` directories holding nothing but regular `.pyc` files,
     which an interrupted test run leaves behind."""
-    need(_COMMIT_OID.fullmatch(commit or ""), code, what="commit")
     repo = Path(repo)
     git_st = os.lstat(repo / ".git") if os.path.lexists(repo / ".git") else None
     need(git_st is not None and stat.S_ISDIR(git_st.st_mode), code, what="git_dir")
-    body = _git_object(repo / ".git", "commit", commit, code)
-    header = body.split(b"\n\n", 1)[0].split(b"\n")
-    need(header and header[0].startswith(b"tree "), code, what="commit")
-    tree = header[0][5:].decode("ascii", "replace")
-    need(_COMMIT_OID.fullmatch(tree) and len(tree) == len(commit), code, what="commit")
-    expected = {}
-    try:
-        _tree_entries(repo / ".git", tree, "", expected, code)
-    except (ValueError, UnicodeError) as exc:
-        raise Stop(code, what="tree") from exc
+    expected = commit_tree(repo / ".git", commit, code)
     need("RELEASE-MANIFEST.json" in expected, code, what="manifest")
-    manifest = _git_object(repo / ".git", "blob", expected["RELEASE-MANIFEST.json"][0], code)
+    manifest = git_object(repo / ".git", "blob", expected["RELEASE-MANIFEST.json"][0], code)
     need(uc.sha256_bytes(manifest) == manifest_sha256, code, what="manifest")
     algo = hashlib.sha1 if len(commit) == 40 else hashlib.sha256
     seen = set()
@@ -283,6 +296,11 @@ def verify_tree(repo, commit, manifest_sha256, code="release_identity_changed", 
     missing = sorted(set(expected) - seen)
     need(not missing, code, what="missing", path=missing[0] if missing else None)
     return {"commit": commit, "files": len(seen)}
+
+
+# Public names for the other trusted checkers (verify_pin.py).
+git_object = _git_object
+inert_git_env = _inert_git_env
 
 
 def _only_bytecode(name, parent_fd):

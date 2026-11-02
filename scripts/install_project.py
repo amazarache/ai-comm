@@ -188,9 +188,7 @@ def finish(project, staging, journal, record):
         uc.private_dir(upgrade / name)
     manifest = upgrade / "project.json"
     if not manifest.exists():
-        uc.write_private_atomic(manifest, uc.canonical({
-            "v": 1, "schema": uc.PROJECT_SCHEMA, "status": "unintegrated",
-            "project_id": {"path": str(project), "channel": None}, "integrations": []}))
+        uc.write_private_atomic(manifest, ri.unintegrated_declaration(project))
     uc.write_private_atomic(upgrade / "install.json", uc.canonical({
         "v": 1, "schema": INSTALL_SCHEMA, "version": record["package_version"], "commit": record["commit"],
         "manifest_sha256": record["manifest_sha256"], "staging": staging.name}))

@@ -44,14 +44,22 @@ uc, Stop, need = ri.uc, ri.Stop, ri.need
 STATE_SCHEMA = "ai-comm-user-cache/1"
 OP_SCHEMA = "ai-comm-user-op/1"
 LINK_RE = re.compile(r"releases/([0-9]+\.[0-9]+\.[0-9]+)\Z")
-OP_DIR_RE = re.compile(r"(install|activate|check|uninstall)-[0-9a-f]{12}\Z")
+OP_DIR_RE = re.compile(r"(install|activate|check|uninstall|register|unregister|launcher)-[0-9a-f]{12}\Z")
 TORN_RE = re.compile(r"torn-[0-9]+\.bin\Z")
 TRASH_RE = re.compile(r"trash-[0-9]+\Z")
 # Operations whose unfinished journal blocks every new mutation until `recover`.
-BLOCKING_OPS = {"install", "activate", "uninstall"}
+BLOCKING_OPS = {"install", "activate", "uninstall", "register", "unregister", "launcher"}
 RESOLVED = {"installed", "done", "superseded", "removed", "abandoned"}
 TOP_LEVEL = {"releases", "staging", "journal", "state.json", "bindings.json", "index.json", "offer.json",
-             "lock", "current", "previous"}
+             "refresh.json", "lock", "current", "previous"}
+OFFER_SCHEMA = "ai-comm-user-offer/1"
+CLAIM_TTL = 24 * 3600           # an older notifier claim is abandoned (section 8.3)
+STALE_AFTER = 7 * 24 * 3600     # cached release metadata older than this is stale
+FUTURE_SKEW = 300               # a refresh time this far in the future is stale (clock skew)
+SESSION_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
+MAX_SKILL_FILE = 64 * 1024
+MAX_DIR_ENTRIES = 10000
+ENTRY_SKILL = ("entry", "ai-comm", "SKILL.md")
 BINDING_KEYS = ("version", "tag", "tag_object", "commit", "manifest_sha256", "protocol_sha256")
 
 
@@ -129,6 +137,22 @@ class Cache:
 
     def write_index(self, releases, refreshed_at):
         self._write("index.json", {"v": 1, "refreshed_at": refreshed_at, "releases": releases})
+
+    def refresh(self):
+        return self._read("refresh.json", None)
+
+    def write_refresh(self, attempted_at, ok, code=None):
+        self._write("refresh.json", {"v": 1, "attempted_at": attempted_at, "ok": ok, "code": code})
+
+    def offer(self):
+        value = self._read("offer.json", {"v": 1, "schema": OFFER_SCHEMA, "versions": {}, "never": False,
+                                          "claim": None})
+        need(value.get("schema") == OFFER_SCHEMA and isinstance(value.get("versions"), dict),
+             "cache_state_invalid", file="offer.json")
+        return value
+
+    def write_offer(self, value):
+        self._write("offer.json", value)
 
     # -- links
 
@@ -282,6 +306,7 @@ def install(version, *, fetch_permitted, use_helper, activate=None, root=None, s
     cache = Cache(root or cache_root()).open(create=True)
     with cache.lock():
         _gate(cache)
+        _require_origin(cache, src["origin"])
         need(version not in cache.state()["releases"] and not os.path.lexists(cache.release_dir(version)),
              "release_installed", version=version)
         staging = uc.private_dir(cache.root / "staging" / f"install-{secrets.token_hex(6)}")
@@ -313,13 +338,18 @@ def install(version, *, fetch_permitted, use_helper, activate=None, root=None, s
         if activate is None:
             activate = old is None
         if activate:
+            try:
+                _require_owned_support(cache, version, release=repo)
+            except Stop:
+                shutil.rmtree(staging, ignore_errors=True)  # nothing published yet
+                raise
             # Recorded before publishing, so recovery knows the switch was intended and
             # from which exact state.
             journal.append("note", {"activate": version, "previous": old, "before_previous": before_previous})
         journal.append("intent", {"index": 1, "action": {"op": "publish"}, "commit": record["commit"]})
         publish_release(cache, staging, version)
         journal.append("outcome", {"index": 1, "ok": True})
-        _record_release(cache, version, verified["tag"], binding, cache.release_dir(version))
+        _record_release(cache, version, verified["tag"], binding, cache.release_dir(version), src["origin"])
         if activate:
             _switch(cache, journal, version, old)
         journal.append("state", {"state": "installed"})
@@ -328,8 +358,16 @@ def install(version, *, fetch_permitted, use_helper, activate=None, root=None, s
                 "current": cache.read_link("current"), "previous": cache.read_link("previous")}
 
 
-def _record_release(cache, version, tag, binding, path):
+def _require_origin(cache, origin):
+    """The cache follows one release origin, recorded at its first install; a
+    different one stops (section 8.3)."""
+    recorded = cache.state().get("origin")
+    need(recorded is None or recorded == origin, "origin_changed", recorded=recorded, origin=origin)
+
+
+def _record_release(cache, version, tag, binding, path, origin):
     state = cache.state()
+    state.setdefault("origin", origin)
     state["releases"][version] = {"commit": tag["commit"], "tag": tag["tag"], "tag_object": tag["tag_object"],
                                   "manifest_sha256": tag["manifest_sha256"],
                                   "protocol_sha256": tag["protocol_sha256"], "cli_sha256": tag["cli_sha256"]}
@@ -337,8 +375,22 @@ def _record_release(cache, version, tag, binding, path):
     bindings["bindings"][version] = binding
     cache.write_bindings(bindings)
     if cache.index() is None:
-        cache.write_index(index_records(path), None)
+        # The installer fetched this index from the origin just now.
+        cache.write_index(index_records(path), int(time.time()))
     cache.write_state(state)  # state last (section 10.3)
+
+
+def _require_owned_support(cache, version, release=None):
+    """Registered skill links and the launcher reach `current`; never switch it to a
+    release that lacks what they point at (releases before the entry skill existed)."""
+    owned = {o.get("kind") for o in cache.state()["owned"] if isinstance(o, dict)}
+    release = release or cache.release_dir(version)
+    if "skill_link" in owned:
+        need((release / Path(*ENTRY_SKILL)).is_file(), "release_has_no_entry_skill", version=version,
+             hint="unregister the skill first, or choose a release that provides it")
+    if "launcher" in owned:
+        need((release / "scripts" / "project_cli.py").is_file(), "release_has_no_launcher", version=version,
+             hint="remove the launcher first, or choose a release that provides it")
 
 
 def activate(version, *, root=None):
@@ -349,6 +401,7 @@ def activate(version, *, root=None):
         cache.check_release(version)
         old = cache.read_link("current")
         need(old != version, "already_current", version=version)
+        _require_owned_support(cache, version)
         journal = cache.op_journal("activate", {"before": {"current": old, "previous": cache.read_link("previous")},
                                                 "after": {"current": version, "previous": old}})
         _switch(cache, journal, version, old)
@@ -362,6 +415,7 @@ def rollback(*, root=None):
         old, prev = cache.read_link("current"), cache.read_link("previous")
         need(prev is not None and prev != old, "nothing_to_roll_back")
         cache.check_release(prev)
+        _require_owned_support(cache, prev)
         journal = cache.op_journal("activate", {"before": {"current": old, "previous": prev},
                                                 "after": {"current": prev, "previous": old}})
         _switch(cache, journal, prev, old)
@@ -375,6 +429,8 @@ def status(*, root=None):
             "previous": cache.read_link("previous"), "releases": sorted(state["releases"], key=version_key),
             "bindings": sorted(bindings["bindings"], key=version_key),
             "index_refreshed_at": index.get("refreshed_at") if index else None,
+            "metadata": _freshness(cache, int(time.time())), "origin": state.get("origin"),
+            "owned": [{"kind": o.get("kind"), "path": o.get("path")} for o in state["owned"]],
             "pending": [d.name for d in _pending(cache)],
             "unrecognized": [d.name for d in _op_dirs(cache) if d.kind == "unrecognized" or d.unexpected]}
 
@@ -385,54 +441,519 @@ def check(*, fetch_permitted=False, use_helper=False, root=None, source=None, fe
     need(not use_helper or fetch_permitted, "credential_helper_requires_fetch_permission")
     cache = Cache(root or cache_root()).open(create=False)
     with cache.lock():
-        current = cache.read_link("current")
-        refreshed = None
+        refreshed = False
         if fetch_permitted:
             _gate(cache)
             src = source or ri.source_identity()
-            uc.private_dir(cache.root / "staging")  # a partial uninstall may have removed the empty parent
-            scratch = uc.private_dir(cache.root / "staging" / f"check-{secrets.token_hex(6)}")
-            uc.Journal(scratch).append("start", {"schema": OP_SCHEMA, "op": "check"})
+            _require_origin(cache, src["origin"])
+            _refresh(cache, src, use_helper, fetch, int(now()))
+            refreshed = True
+        return _evaluate(cache, int(now()), refreshed)
+
+
+def _refresh(cache, src, use_helper, fetch, at):
+    uc.private_dir(cache.root / "staging")  # a partial uninstall may have removed the empty parent
+    scratch = uc.private_dir(cache.root / "staging" / f"check-{secrets.token_hex(6)}")
+    uc.Journal(scratch).append("start", {"schema": OP_SCHEMA, "op": "check"})
+    try:
+        repo = scratch / "repo"
+        ri.git(scratch, "init", "--quiet", "--template=", str(repo))
+        try:
+            if fetch:
+                fetch(repo, src["origin"], use_helper)
+            else:
+                ri.isolated_fetch(repo, src["origin"], use_helper, ri.release_check_module().REFSPECS)
+            records = index_records(repo)
+        except Stop as exc:
+            cache.write_refresh(at, False, exc.code)  # later offline checks report the failure
+            raise
+        old = cache.bindings()["bindings"]
+        rebuilt = {}
+        for record in records:
+            version = record["package_version"]
+            if ri.git(repo, "tag", "-l", f"v{version}").strip():
+                try:
+                    rebuilt[version] = binding_from_tag(uc.tag_identity(repo, version), record)
+                except Stop:
+                    pass  # the fetched tag contradicts the index: unverified
+            elif binding_agrees(old.get(version), record):
+                rebuilt[version] = old[version]  # tag not fetched now, but the new record still agrees
+        # Bindings are rebuilt from this refresh only; offers re-check agreement
+        # with the index too, so an interruption between the two writes is safe.
+        cache.write_index(records, at)
+        cache.write_bindings({"v": 1, "bindings": rebuilt})
+        cache.write_refresh(at, True)
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def _freshness(cache, at):
+    """How far cached release metadata can be trusted to be current: `cached`
+    (refreshed within STALE_AFTER), `stale` (older, never dated, or dated in the
+    future), `failed` (the last refresh attempt failed) or `missing`."""
+    index = cache.index()
+    if index is None:
+        return "missing"
+    refreshed = index.get("refreshed_at")
+    if not isinstance(refreshed, int) or isinstance(refreshed, bool):
+        return "stale"
+    attempt = cache.refresh()
+    if attempt and attempt.get("ok") is False and isinstance(attempt.get("attempted_at"), int) \
+            and attempt["attempted_at"] >= refreshed:
+        return "failed"
+    if refreshed > at + FUTURE_SKEW or at - refreshed > STALE_AFTER:
+        return "stale"
+    return "cached"
+
+
+def _evaluate(cache, at, refreshed=False):
+    current = cache.read_link("current")
+    index = cache.index()
+    bindings = cache.bindings()["bindings"]
+    records = {r["package_version"]: r for r in (index or {}).get("releases", [])
+               if isinstance(r, dict) and isinstance(r.get("package_version"), str)
+               and uc.VERSION_RE.fullmatch(r["package_version"])}
+    newer = [v for v in records if current is None or version_key(v) > version_key(current)]
+    verified = {v for v in newer if binding_agrees(bindings.get(v), records[v])}
+    verified_newer = sorted(verified, key=version_key)
+    unverified = sorted((v for v in newer if v not in verified), key=version_key)
+    metadata = "refreshed" if refreshed else _freshness(cache, at)
+    if verified_newer:
+        verdict = "update_available"
+    elif metadata in ("refreshed", "cached") and not unverified and current is not None:
+        verdict = "up_to_date"
+    else:
+        verdict = "unknown"  # never claim to be current on missing, stale or failed metadata
+    return {"status": "ok", "current": current,
+            "latest_verified": verified_newer[-1] if verified_newer else current,
+            "offer": bool(verified_newer), "unverified_newer": unverified,
+            "index_refreshed_at": (index or {}).get("refreshed_at"), "metadata": metadata,
+            "verdict": verdict,
+            "advisory": records[verified_newer[-1]].get("advisory", "optional") if verified_newer else None}
+
+
+# --------------------------------------------------------------------------- owned objects outside the cache
+#
+# Skill links and the launcher live in directories the user names. state.json
+# records each one with its exact link target or content digest; only an object that
+# still matches is ever removed (section 10.2). Containing directories are never
+# created or removed, and links are never followed recursively.
+
+
+def _user_dir(path, code):
+    """A directory the user named: absolute, existing, a real directory, safe ancestors."""
+    need(path and os.path.isabs(path), code, path=path)
+    directory = Path(os.path.abspath(path))
+    try:
+        st = os.lstat(directory)
+    except OSError as exc:
+        raise Stop(code, path=str(directory)) from exc
+    need(stat.S_ISDIR(st.st_mode), code, path=str(directory))
+    uc.check_ancestry(directory)
+    return directory
+
+
+def frontmatter_name(data):
+    """The `name` field of a SKILL.md YAML front matter block, or None."""
+    lines = data.decode("utf-8", "replace").splitlines()
+    if not lines or lines[0].strip() != "---":
+        return None
+    for line in lines[1:]:
+        if line.strip() == "---":
+            return None
+        match = re.match(r"name\s*:\s*(.*?)\s*\Z", line)
+        if match:
+            value = match.group(1)
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+                value = value[1:-1]
+            return value or None
+    return None
+
+
+def _read_bounded(path, own=False):
+    """A small regular file's bytes, never through a final link and never blocking;
+    None if it is anything else (or, with `own`, not this user's)."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_size > MAX_SKILL_FILE or (own and st.st_uid != os.getuid()):
+            return None
+        return os.read(fd, MAX_SKILL_FILE)
+    finally:
+        os.close(fd)
+
+
+def _read_skill_file(skill_dir):
+    return _read_bounded(Path(skill_dir) / "SKILL.md")
+
+
+def effective_names(directory):
+    """[(entry path, effective skill name or None)] for every immediate child of
+    `directory`: a directory's own SKILL.md, or for a link the SKILL.md of the
+    directory it names (one level only: a link to a link is not followed). Bounded,
+    inert reads; nothing found there is executed."""
+    out = []
+    names = sorted(os.listdir(directory))
+    need(len(names) <= MAX_DIR_ENTRIES, "skills_dir_too_large", path=str(directory))
+    for name in names:
+        entry = Path(directory) / name
+        try:
+            st = os.lstat(entry)
+        except OSError:
+            continue
+        skill_dir = None
+        if stat.S_ISLNK(st.st_mode):
+            target = os.readlink(entry)
+            resolved = Path(os.path.normpath(target if os.path.isabs(target) else Path(directory) / target))
             try:
-                repo = scratch / "repo"
-                ri.git(scratch, "init", "--quiet", "--template=", str(repo))
-                if fetch:
-                    fetch(repo, src["origin"], use_helper)
-                else:
-                    ri.isolated_fetch(repo, src["origin"], use_helper, ri.release_check_module().REFSPECS)
-                records = index_records(repo)
-                old = cache.bindings()["bindings"]
-                rebuilt = {}
-                for record in records:
-                    version = record["package_version"]
-                    if ri.git(repo, "tag", "-l", f"v{version}").strip():
-                        try:
-                            rebuilt[version] = binding_from_tag(uc.tag_identity(repo, version), record)
-                        except Stop:
-                            pass  # the fetched tag contradicts the index: unverified
-                    elif binding_agrees(old.get(version), record):
-                        rebuilt[version] = old[version]  # tag not fetched now, but the new record still agrees
-                # Bindings are rebuilt from this refresh only; offers re-check agreement
-                # with the index too, so an interruption between the two writes is safe.
-                refreshed = int(now())
-                cache.write_index(records, refreshed)
-                cache.write_bindings({"v": 1, "bindings": rebuilt})
-            finally:
-                shutil.rmtree(scratch, ignore_errors=True)
-        index = cache.index()
-        bindings = cache.bindings()["bindings"]
-        records = {r["package_version"]: r for r in (index or {}).get("releases", [])
-                   if isinstance(r, dict) and isinstance(r.get("package_version"), str)
-                   and uc.VERSION_RE.fullmatch(r["package_version"])}
-        newer = [v for v in records if current is None or version_key(v) > version_key(current)]
-        verified = {v for v in newer if binding_agrees(bindings.get(v), records[v])}
-        verified_newer = sorted(verified, key=version_key)
-        return {"status": "ok", "current": current,
-                "latest_verified": verified_newer[-1] if verified_newer else current,
-                "offer": bool(verified_newer),
-                "unverified_newer": sorted((v for v in newer if v not in verified), key=version_key),
-                "index_refreshed_at": (index or {}).get("refreshed_at"),
-                "metadata": "refreshed" if refreshed else ("cached" if index else "missing")}
+                if stat.S_ISDIR(os.lstat(resolved).st_mode):
+                    skill_dir = resolved
+            except OSError:
+                pass
+        elif stat.S_ISDIR(st.st_mode):
+            skill_dir = entry
+        else:
+            continue
+        data = _read_skill_file(skill_dir) if skill_dir is not None else None
+        out.append((entry, frontmatter_name(data) if data else None))
+    return out
+
+
+def _owned(state, kind):
+    return [o for o in state["owned"] if isinstance(o, dict) and o.get("kind") == kind]
+
+
+def _is_owned_link(path, target):
+    try:
+        return stat.S_ISLNK(os.lstat(path).st_mode) and os.readlink(path) == target
+    except OSError:
+        return False
+
+
+def _file_digest(path):
+    """sha256 of a regular file owned by this user (never through a link), or None."""
+    data = _read_bounded(path, own=True)
+    return None if data is None else uc.sha256_bytes(data)
+
+
+def _still_owned(obj):
+    path = Path(obj["path"])
+    if obj["kind"] == "skill_link":
+        return _is_owned_link(path, obj["target"])
+    if obj["kind"] == "launcher":
+        return _file_digest(path) == obj["sha256"]
+    return False
+
+
+def _remove_owned(journal, obj, index):
+    """Remove one recorded object only if it is still exactly what was recorded.
+    Returns removed, absent or kept (changed, replaced or behind unsafe ancestors)."""
+    path = Path(obj["path"])
+    try:
+        uc.check_ancestry(path.parent)
+    except Stop:
+        return "kept"
+    if not os.path.lexists(path):
+        return "absent"
+    if not _still_owned(obj):
+        return "kept"
+    journal.append("intent", {"index": index, "action": {"op": "unlink", "path": str(path), "object": obj}})
+    os.unlink(path)
+    uc.fsync_dir(path.parent)
+    journal.append("outcome", {"index": index, "ok": True})
+    return "removed"
+
+
+def _drop_owned(cache, obj):
+    state = cache.state()
+    state["owned"] = [o for o in state["owned"] if o != obj]
+    cache.write_state(state)
+
+
+def _add_owned(cache, obj):
+    state = cache.state()
+    if obj not in state["owned"]:
+        state["owned"].append(obj)
+        cache.write_state(state)
+
+
+def entry_target(cache):
+    return str(cache.root / "current" / Path(*ENTRY_SKILL).parent)
+
+
+def register(skills_dir, *, root=None):
+    """Link DIR/ai-comm to the cache's entry skill, if no other entry in DIR or in any
+    registered directory already has the effective name `ai-comm` (section 8.2)."""
+    cache = Cache(root or cache_root()).open(create=False)
+    with cache.lock():
+        _gate(cache)
+        directory = _user_dir(skills_dir, "skills_dir_invalid")
+        current = cache.read_link("current")
+        need(current is not None, "no_current_release")
+        cache.check_release(current)
+        need((cache.release_dir(current) / Path(*ENTRY_SKILL)).is_file(), "release_has_no_entry_skill",
+             version=current)
+        target = entry_target(cache)
+        path = directory / "ai-comm"
+        state = cache.state()
+        links = _owned(state, "skill_link")
+        ours = {o["path"] for o in links if _is_owned_link(o["path"], o["target"])}
+        if str(path) in ours:
+            return _registered(cache, "already_registered")
+        conflicts = set()
+        for scanned in sorted({str(directory)} | {str(Path(o["path"]).parent) for o in links}):
+            if not os.path.isdir(scanned):
+                continue
+            for entry, name in effective_names(scanned):
+                if name == "ai-comm" and str(entry) not in ours:
+                    conflicts.add(str(entry))
+        if os.path.lexists(path):
+            conflicts.add(str(path))
+        need(not conflicts, "skill_name_conflict", entries=sorted(conflicts),
+             hint="nothing was changed; resolve or rename the listed entries, or use another directory")
+        obj = {"kind": "skill_link", "path": str(path), "target": target}
+        journal = cache.op_journal("register", {"object": obj})
+        journal.append("intent", {"index": 0, "action": {"op": "symlink", "object": obj}})
+        os.symlink(target, path)  # creates only: an entry that appeared meanwhile is never replaced
+        uc.fsync_dir(directory)
+        journal.append("outcome", {"index": 0, "ok": True})
+        _add_owned(cache, obj)
+        journal.append("state", {"state": "done"})
+        return _registered(cache, "registered")
+
+
+def _registered(cache, status):
+    paths = sorted(o["path"] for o in _owned(cache.state(), "skill_link"))
+    out = {"status": status, "registered": paths}
+    if len(paths) > 1:
+        out["warning"] = ("ai-comm is registered in more than one directory; a host that scans several of them "
+                          "would show duplicate entries. Confirm in each host that exactly one ai-comm skill "
+                          "appears, and unregister the others if not.")
+    return out
+
+
+def unregister(skills_dir=None, *, root=None):
+    cache = Cache(root or cache_root()).open(create=False)
+    with cache.lock():
+        _gate(cache)
+        links = _owned(cache.state(), "skill_link")
+        if skills_dir is not None:
+            directory = str(Path(os.path.abspath(skills_dir)))
+            links = [o for o in links if str(Path(o["path"]).parent) == directory]
+        need(links, "not_registered")
+        journal = cache.op_journal("unregister", {"objects": links})
+        return _remove_recorded(cache, journal, links)
+
+
+def _remove_recorded(cache, journal, objects):
+    removed, kept, absent = [], [], []
+    for index, obj in enumerate(objects):
+        result = _remove_owned(journal, obj, index)
+        {"removed": removed, "kept": kept, "absent": absent}[result].append(obj["path"])
+        _drop_owned(cache, obj)  # a changed object is no longer ours: kept, and no longer recorded
+    journal.append("state", {"state": "done"})
+    return {"status": "removed" if not kept else "partially_removed", "removed": removed, "kept": kept,
+            "absent": absent}
+
+
+def launcher_script(cache_root_path):
+    """A POSIX sh launcher. It resolves `current` once, accepts only a direct
+    `releases/X.Y.Z` child, and runs that release's project_cli.py, which verifies
+    the project's pin before running anything from it."""
+    quoted = "'" + str(cache_root_path).replace("'", "'\"'\"'") + "'"
+    return (
+        "#!/bin/sh\n"
+        "# ai-comm launcher written by `install.sh --user launcher`: it runs the current project's own\n"
+        "# verified pin. Remove it with `install.sh --user launcher --remove` or `uninstall`.\n"
+        f"cache={quoted}\n"
+        'link=$(readlink "$cache/current") || {\n'
+        "  printf '%s\\n' '{\"status\": \"stopped\", \"code\": \"cache_current_missing\"}' >&2; exit 2; }\n"
+        'case $link in\n'
+        "  releases/*/*|*..*) link= ;;\n"
+        "  releases/[0-9]*.[0-9]*.[0-9]*) ;;\n"
+        "  *) link= ;;\n"
+        "esac\n"
+        '[ -n "$link" ] || {\n'
+        "  printf '%s\\n' '{\"status\": \"stopped\", \"code\": \"cache_link_invalid\"}' >&2; exit 2; }\n"
+        'exec python3 -I "$cache/$link/scripts/project_cli.py" "$@"\n'
+    ).encode()
+
+
+def install_launcher(bin_dir, *, root=None):
+    cache = Cache(root or cache_root()).open(create=False)
+    with cache.lock():
+        _gate(cache)
+        directory = _user_dir(bin_dir, "bin_dir_invalid")
+        current = cache.read_link("current")
+        need(current is not None, "no_current_release")
+        need((cache.release_dir(current) / "scripts" / "project_cli.py").is_file(), "release_has_no_launcher",
+             version=current)
+        path = directory / "ai-comm"
+        need(not os.path.lexists(path), "launcher_path_taken", path=str(path))
+        data = launcher_script(cache.root)
+        obj = {"kind": "launcher", "path": str(path), "sha256": uc.sha256_bytes(data)}
+        tmp = directory / f".ai-comm-{secrets.token_hex(6)}.tmp"
+        journal = cache.op_journal("launcher", {"action": "create", "object": obj, "tmp": str(tmp)})
+        journal.append("intent", {"index": 0, "action": {"op": "write", "object": obj, "tmp": str(tmp)}})
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o700)
+        try:
+            os.fchmod(fd, 0o755)
+            os.write(fd, data)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        try:
+            os.link(tmp, path)  # creates only: an entry that appeared meanwhile is never replaced
+        except FileExistsError as exc:
+            os.unlink(tmp)
+            journal.append("state", {"state": "superseded"})
+            raise Stop("launcher_path_taken", path=str(path)) from exc
+        finally:
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(tmp)
+        uc.fsync_dir(directory)
+        journal.append("outcome", {"index": 0, "ok": True})
+        _add_owned(cache, obj)
+        journal.append("state", {"state": "done"})
+        return {"status": "launcher_installed", "path": str(path)}
+
+
+def remove_launcher(bin_dir=None, *, root=None):
+    cache = Cache(root or cache_root()).open(create=False)
+    with cache.lock():
+        _gate(cache)
+        objects = _owned(cache.state(), "launcher")
+        if bin_dir is not None:
+            directory = str(Path(os.path.abspath(bin_dir)))
+            objects = [o for o in objects if str(Path(o["path"]).parent) == directory]
+        need(objects, "no_launcher")
+        journal = cache.op_journal("launcher", {"action": "remove", "objects": objects})
+        return _remove_recorded(cache, journal, objects)
+
+
+def _recover_owned(cache, item):
+    """Finish an interrupted register, unregister or launcher operation by probing
+    the object it names; never guesses (section 10.3)."""
+    start = item.start
+    if item.op == "unregister" or start.get("action") == "remove":
+        objects = [o for o in start.get("objects", []) if o in cache.state()["owned"]]
+        _remove_recorded(cache, item.journal, objects)
+        return "completed_removal"
+    obj = start["object"]
+    if item.op == "launcher":
+        tmp = Path(start["tmp"])
+        expected = launcher_script(cache.root)
+        if os.path.lexists(tmp) and uc.sha256_bytes(expected) == obj["sha256"]:
+            data = _read_bounded(tmp, own=True)
+            if data is not None and expected.startswith(data):
+                os.unlink(tmp)  # this operation's own, possibly partial, temporary file
+    if os.path.lexists(obj["path"]):
+        if _still_owned(obj):
+            _add_owned(cache, obj)
+            item.journal.append("state", {"state": "done"})
+            return "completed"
+        item.journal.append("state", {"state": "superseded"})
+        return "not_ours"  # something else is there now: kept, not recorded
+    _drop_owned(cache, obj)
+    item.journal.append("state", {"state": "done"})
+    return "nothing_created"
+
+
+# --------------------------------------------------------------------------- the cache's own update offers
+
+
+def _offer_entry_suppressed(state, version, advisory, at):
+    entry = state["versions"].get(version, {})
+    if entry.get("accepted"):
+        return "answered"
+    if not uc.should_ask(state, version, advisory, at):
+        return "never" if state.get("never") else ("skipped" if entry.get("skip") else "snoozed")
+    return None
+
+
+def offer_status(*, root=None, now=time.time):
+    """Read-only: the pending cache offer, if any, and who is its notifier."""
+    cache = Cache(root or cache_root()).open(create=False)
+    at = int(now())
+    evaluation = _evaluate(cache, at)
+    state = cache.offer()
+    out = {"status": "ok", "evaluation": evaluation, "claim": state.get("claim"), "never": state.get("never")}
+    if evaluation["offer"]:
+        out["suppressed"] = _offer_entry_suppressed(state, evaluation["latest_verified"],
+                                                    evaluation["advisory"], at)
+    return out
+
+
+def _claim_valid(claim, version, at):
+    return (isinstance(claim, dict) and claim.get("version") == version and isinstance(claim.get("at"), int)
+            and 0 <= at - claim["at"] < CLAIM_TTL)
+
+
+def offer_claim(session, *, root=None, now=time.time):
+    """Make one session the notifier of the pending offer, so concurrent and
+    sequential sessions do not repeat it. A claim older than 24 hours, or for an
+    older offered version, is abandoned and may be re-claimed."""
+    need(SESSION_RE.fullmatch(session or ""), "invalid_session")
+    cache = Cache(root or cache_root()).open(create=False)
+    with cache.lock():
+        at = int(now())
+        evaluation = _evaluate(cache, at)
+        if not evaluation["offer"]:
+            return {"status": "no_offer", "verdict": evaluation["verdict"], "metadata": evaluation["metadata"]}
+        version = evaluation["latest_verified"]
+        state = cache.offer()
+        why = _offer_entry_suppressed(state, version, evaluation["advisory"], at)
+        if why:
+            return {"status": "suppressed", "version": version, "reason": why}
+        claim = state.get("claim")
+        if _claim_valid(claim, version, at):
+            if claim.get("session") == session:
+                return {"status": "claimed", "version": version, "answers": list(uc.ANSWERS)}
+            return {"status": "claimed_by_other", "version": version}
+        state["claim"] = {"session": session, "version": version, "at": at}
+        cache.write_offer(state)
+        return {"status": "claimed", "version": version, "current": evaluation["current"],
+                "answers": list(uc.ANSWERS)}
+
+
+def offer_answer(session, version, answer, *, root=None, now=time.time):
+    """Record the owner's direct answer, relayed by the notifier session. `fetch_only`
+    permits `install --version V --fetch-permitted --no-activate`; `yes` also permits
+    `activate V`. Neither is consent for anything else; no project pin changes."""
+    need(SESSION_RE.fullmatch(session or ""), "invalid_session")
+    need(uc.VERSION_RE.fullmatch(version or ""), "invalid_version")
+    need(answer in uc.ANSWERS, "invalid_answer")
+    cache = Cache(root or cache_root()).open(create=False)
+    with cache.lock():
+        at = int(now())
+        state = cache.offer()
+        claim = state.get("claim")
+        need(_claim_valid(claim, version, at) and claim.get("session") == session, "offer_not_claimed")
+        evaluation = _evaluate(cache, at)
+        need(evaluation["offer"] and evaluation["latest_verified"] == version, "offer_changed")
+        entry = state["versions"].setdefault(version, {})
+        result = {"status": "answered", "version": version, "answer": answer, "permits": []}
+        if answer == "not_now":
+            level = min(entry.get("snooze_level", 0), len(uc.SNOOZE_STEPS) - 1)
+            entry["snooze_until"] = at + uc.SNOOZE_STEPS[level]
+            entry["snooze_level"] = level + 1
+            result["snooze_until"] = entry["snooze_until"]
+        elif answer == "skip":
+            entry["skip"] = True
+        elif answer == "never":
+            state["never"] = True
+        else:
+            entry["accepted"] = answer
+            result["permits"] = [f"install --version {version} --fetch-permitted --no-activate"]
+            if answer == "yes":
+                result["permits"].append(f"activate {version}")
+        entry["answered_at"] = at
+        state["claim"] = None
+        cache.write_offer(state)
+        return result
 
 
 # --------------------------------------------------------------------------- recovery and removal
@@ -606,6 +1127,8 @@ def recover(*, root=None):
                 results.append({"dir": item.name,
                                 "action": _resume_switch(cache, item.journal, item.start["before"],
                                                          item.start["after"])})
+            elif item.op in ("register", "unregister", "launcher"):
+                results.append({"dir": item.name, "action": _recover_owned(cache, item)})
             else:
                 out = _uninstall_continue(cache, item)
                 results.append({"dir": item.name, "action": "completed_uninstall", "kept": out["kept"]})
@@ -629,7 +1152,7 @@ def _recover_install(cache, item):
                     "detail": "release does not match the verified install; inspect manually"}
         if version not in cache.state()["releases"]:
             tag = uc.tag_identity(release, version)
-            _record_release(cache, version, tag, binding_from_tag(tag, record), release)
+            _record_release(cache, version, tag, binding_from_tag(tag, record), release, start["source"])
         action = "completed_after_publish"
         note = [r["data"] for r in records if r["kind"] == "note" and "activate" in r["data"]]
         if note:
@@ -680,7 +1203,6 @@ def uninstall(*, confirm, root=None):
     need(confirm, "confirmation_required")
     cache = Cache(root or cache_root()).open(create=False)
     with cache.lock():
-        need(not cache.state()["owned"], "owned_objects_present")  # skill links and launcher: checkpoint (b)
         pending = _pending(cache)
         others = [d for d in pending if d.op != "uninstall"]
         need(not others, "operation_pending", dir=others[0].name if others else None,
@@ -717,6 +1239,15 @@ def _uninstall_continue(cache, item):
         journal.append("outcome", {"index": counter[0], "ok": True})
         removed.append(label)
 
+    # Owned objects outside the cache first, each only if still exactly as recorded.
+    for number, obj in enumerate(list(cache.state()["owned"])):
+        result = _remove_owned(journal, obj, f"owned-{number}") if obj.get("kind") in (
+            "skill_link", "launcher") else "kept"
+        if result == "removed":
+            removed.append(obj["path"])
+        elif result == "kept":
+            kept.add(obj.get("path", "?"))
+        _drop_owned(cache, obj)
     for entry in sorted(os.listdir(cache.root)):
         path = cache.root / entry
         if re.fullmatch(r"\.(current|previous)-[0-9a-f]{12}", entry) and path.is_symlink() \
@@ -857,9 +1388,29 @@ def main(argv=None):
     sub.add_parser("recover")
     p = sub.add_parser("uninstall")
     p.add_argument("--confirm", action="store_true")
+    p = sub.add_parser("register", help="link SKILLS_DIR/ai-comm to the cache's entry skill")
+    p.add_argument("--skills-dir", required=True)
+    p = sub.add_parser("unregister")
+    p.add_argument("--skills-dir")
+    p = sub.add_parser("launcher", help="write or remove the optional `ai-comm` command")
+    group = p.add_mutually_exclusive_group(required=True)
+    group.add_argument("--bin-dir")
+    group.add_argument("--remove", action="store_true")
+    p.add_argument("--remove-from", dest="remove_from", help="with --remove: only the launcher in this directory")
+    p = sub.add_parser("offer", help="the cache's own update offer")
+    offer = p.add_subparsers(dest="offer_command", required=True)
+    offer.add_parser("status")
+    q = offer.add_parser("claim")
+    q.add_argument("--session", required=True)
+    q = offer.add_parser("answer")
+    q.add_argument("--session", required=True)
+    q.add_argument("--version", required=True)
+    q.add_argument("--answer", required=True, choices=uc.ANSWERS)
     try:
         args = parser.parse_args(argv)
-    except SystemExit:
+    except SystemExit as exc:
+        if exc.code == 0:
+            return 0  # --help
         print(json.dumps({"status": "stopped", "code": "invalid_arguments"}))
         return 2
     try:
@@ -878,12 +1429,26 @@ def main(argv=None):
             result = check(fetch_permitted=args.fetch_permitted, use_helper=args.use_git_credential_helper)
         elif args.command == "recover":
             result = recover()
+        elif args.command == "register":
+            result = register(args.skills_dir)
+        elif args.command == "unregister":
+            result = unregister(args.skills_dir)
+        elif args.command == "launcher":
+            result = remove_launcher(args.remove_from) if args.remove else install_launcher(args.bin_dir)
+        elif args.command == "offer":
+            if args.offer_command == "status":
+                result = offer_status()
+            elif args.offer_command == "claim":
+                result = offer_claim(args.session)
+            else:
+                result = offer_answer(args.session, args.version, args.answer)
         else:
             result = uninstall(confirm=args.confirm)
         print(json.dumps(result, sort_keys=True))
         return 0
     except Stop as exc:
-        safe = {k: v for k, v in exc.details.items() if isinstance(v, (str, int, bool)) or v is None}
+        safe = {k: v for k, v in exc.details.items() if isinstance(v, (str, int, bool)) or v is None
+                or (isinstance(v, list) and all(isinstance(i, str) for i in v))}
         print(json.dumps({"status": "stopped", "code": exc.code, **safe}, sort_keys=True))
         return 2
     except (OSError, ValueError, KeyError, TypeError):

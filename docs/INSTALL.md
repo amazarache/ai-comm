@@ -76,7 +76,80 @@ All commands print JSON and stop with a code on any problem.
 | `install.sh --user activate X` | switch `current` to an installed release; the old one becomes `previous` |
 | `install.sh --user rollback` | switch back to `previous` |
 | `install.sh --user recover` | finish or undo an operation that was interrupted |
-| `install.sh --user uninstall --confirm` | remove the cache; anything unexpected or changed is kept and reported |
+| `install.sh --user register --skills-dir DIR` | link `DIR/ai-comm` to the cache's entry skill (below) |
+| `install.sh --user unregister [--skills-dir DIR]` | remove those links, only where they are unchanged |
+| `install.sh --user launcher --bin-dir DIR` | write the optional `ai-comm` command (below) |
+| `install.sh --user launcher --remove` | remove it, only if unchanged |
+| `install.sh --user offer status`, `offer claim`, `offer answer` | the cache's own update offer (below) |
+| `install.sh --user uninstall --confirm` | remove the cache, its links and launcher; anything unexpected or changed is kept and reported |
 
-`check` never claims a release is current when the release metadata is missing or was not refreshed; it reports when
-the index was last refreshed.
+`check` reports `verdict`: `update_available`, `up_to_date`, or `unknown`. It says `up_to_date` only when the release
+metadata is fresh (refreshed within seven days, not dated in the future, last refresh attempt successful); otherwise
+`metadata` says `missing`, `stale` or `failed`, and the verdict is `unknown`. The cache follows the release origin of
+its first install; a different origin stops with `origin_changed`.
+
+While an operation is unfinished (for example after an interruption), every command that changes something stops with
+`operation_pending` until `recover` has run. Recovery finishes an operation only from the exact state it left behind;
+anything it cannot prove is the cache's own is kept and reported, never deleted.
+
+## Checking a project's pin
+
+A project uses its own pinned copy of ai-comm in `.tools/ai-comm`. Before anything runs from it, check it with the
+cache's code, never with the pin's own:
+
+```sh
+REL=$(cd "${XDG_DATA_HOME:-$HOME/.local/share}/ai-comm/current" && pwd -P)
+python3 -I "$REL/scripts/verify_pin.py" --project /path/to/project
+```
+
+The result is `verified` (exactly a release the cache knows, with its upgrade `class`), `unknown` (no trusted record
+for its commit), `modified` (a trusted commit whose files differ; `what` and `path` say where) or `absent`. The check
+reads Git objects without a work tree and re-hashes them, and hashes every released file in the working tree, so Git
+index flags such as `assume-unchanged` cannot hide a change and no repository hook or helper runs. The cache knows a
+release once it installed it, or after a consented `check --fetch-permitted`, which records every indexed release.
+Untracked files in the pin (for example `__pycache__`) are outside this check. Hash agreement is consistency, not proof
+of who published a release.
+
+## The entry skill
+
+`install.sh --user register --skills-dir DIR` makes the cache's entry skill (`entry/ai-comm/SKILL.md`) visible to agent
+hosts that read skill directories. Name a directory your hosts read; `~/.agents/skills`, from the open Agent Skills
+convention, is one example. Nothing is registered unless you name a directory, and the directory must already exist.
+
+Registration checks the skill names hosts would see, not just file names: if any other entry in `DIR`, or in a
+directory registered earlier, already declares `name: ai-comm`, or `DIR/ai-comm` holds something else, it reports the
+conflict and changes nothing. ai-comm cannot know which other directories a host scans or how it ranks duplicates; if
+you register in more than one directory, confirm in each host that exactly one `ai-comm` skill appears.
+
+The entry skill verifies the project's pin first and then hands over to the pin's own instructions.
+
+## The `ai-comm` command (optional)
+
+`install.sh --user launcher --bin-dir DIR` writes `DIR/ai-comm`, a short shell script. Run from inside a project, it
+resolves the cache's `current` release once, checks that release, verifies the project's pin with it, and only then
+runs the pin's own `ai_comm.py` with your arguments. An unverified pin is never run; the command prints the report
+instead. It never replaces an existing `DIR/ai-comm`.
+
+## Cache update offers
+
+The cache's offer is separate from each project's own offer. One session at a time is the notifier: `offer claim
+--session REF` returns `claimed` to exactly one session (a claim lapses after 24 hours or when a newer release is
+offered) and `claimed_by_other` to the rest. That session asks you once and records your answer with `offer answer
+--session REF --version V --answer A`, where `A` is `yes`, `fetch_only`, `not_now` (24 hours, then 48 hours, then 7
+days), `skip` or `never`. `fetch_only` permits installing that release without activating it; `yes` also permits
+activating it. Neither permits anything else, and no project's pin is changed.
+
+## Declaring a project's listeners
+
+Guided upgrades of a project's pin read `.ai-comm-local/upgrade/project.json`. For a verified pin, the cache can write
+it, so this works even for pins that predate the command:
+
+```sh
+python3 -I "$REL/scripts/declare_project.py" init --project DIR
+python3 -I "$REL/scripts/declare_project.py" install --project DIR --file F --sha256 H --previous P
+```
+
+`init` writes the unintegrated starting file and never overwrites one. `install` replaces the declaration with the
+exact reviewed bytes of `F`: their digest must be `H`, they must validate against the real project, no guided upgrade
+may be in progress, and the live file must still have digest `P` (or be absent, `--previous absent`). Nothing the
+declaration names is run.

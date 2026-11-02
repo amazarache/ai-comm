@@ -504,15 +504,30 @@ class Journal:
 
 
 def load_project_manifest(project):
+    """The live declaration, validated against the live project identity."""
     data = read_private(project.root / "project.json", missing=None)
+
+    def identity():
+        live = project.project_id()
+        return {"path": live["path"], "channel": live["channel"]}
+    return validate_project_manifest(data, identity)
+
+
+def validate_project_manifest(data, project_identity):
+    """Validate declaration bytes without reading any file, running any declared
+    command or writing anything. `project_identity` is the expected
+    {"path", "channel"} identity, or a callable returning it; it is consulted only
+    for a declared manifest, after the schema and status checks, so the error order
+    of `load_project_manifest` is unchanged."""
     value = parse_json(data, "project_manifest_invalid")
     need(isinstance(value, dict) and value.get("v") == 1 and value.get("schema") == PROJECT_SCHEMA,
          "project_manifest_invalid")
     need(value.get("status") in {"declared", "unintegrated"}, "project_manifest_invalid")
     need(value.get("status") == "declared", "project_integration_undeclared")
     pid = value.get("project_id")
-    live = project.project_id()
-    need(pid == {"path": live["path"], "channel": live["channel"]}, "project_identity_mismatch")
+    expected = project_identity() if callable(project_identity) else project_identity
+    need(isinstance(expected, dict) and pid == {"path": expected.get("path"), "channel": expected.get("channel")},
+         "project_identity_mismatch")
     guidance = value.get("guidance", [])
     need(isinstance(guidance, list) and all(isinstance(g, str) and g for g in guidance), "project_manifest_invalid")
     integrations = value.get("integrations")
