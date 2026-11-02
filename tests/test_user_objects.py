@@ -81,7 +81,14 @@ class ObjectTests(unittest.TestCase):
                  # review 943: an indented root mapping is still the root; nested mappings are not
                  b"---\n  name: ai-comm\n  description: fixture\n---\n": "ai-comm",
                  b"---\nmetadata:\n  name: ai-comm\n---\n": None,
-                 b"---\nname: ai-comm\ndescription: >\n  long\n  text\n---\n": "ai-comm"}
+                 b"---\nname: ai-comm\ndescription: >\n  long\n  text\n---\n": "ai-comm",
+                 # review 946: only a column-zero marker ends the block
+                 b"---\ndescription: |\n  ---\nname: ai-comm\n---\n": "ai-comm",
+                 b"---\ndescription: |\n  ...\nname: ai-comm\n---\n": "ai-comm",
+                 b"---\nname: ai-comm\n...\n": "ai-comm", b"---  \nname: ai-comm\n---  \n": "ai-comm",
+                 b"---\ntags: [a, b]\nname: ai-comm\n---\n": "ai-comm",
+                 b'---\ndescription: "a # b"\nname: ai-comm\n---\n': "ai-comm",
+                 b"plain text\n---\n": None, b"# heading\nname: ai-comm\n": None}
         unsupported = (b"---\nname: |\n  ai-comm\n---\n", b"---\nname: [ai-comm]\n---\n",
                        b"---\nname: &a ai-comm\n---\n", b"---\nname: !!str ai-comm\n---\n",
                        b'---\nname: "ai-comm" trailing\n---\n', b'---\nname: "\\u0061i-comm"\n---\n',
@@ -89,7 +96,13 @@ class ObjectTests(unittest.TestCase):
                        # review 943: a continued value, and forms this parser does not read exactly
                        b"---\nname:\n  ai-comm\ndescription: fixture\n---\n", b"---\nname: ai\n  -comm\n---\n",
                        b"---\n  name: x\nother: y\n---\n", b"---\n\tname: x\n---\n", b"---\n- a\n---\n",
-                       b"---\n{name: ai-comm}\n---\n", b"---\n? name\n: ai-comm\n---\n", b"---\nname: a: b\n---\n")
+                       b"---\n{name: ai-comm}\n---\n", b"---\n? name\n: ai-comm\n---\n", b"---\nname: a: b\n---\n",
+                       b"---\nname: ai-comm\n--- x\n", b"---\nname: ai-comm\n... x\n",
+                       # irregular openers a YAML reader may still accept, and values spanning lines
+                       "\ufeff---\nname: ai-comm\n---\n".encode(), b"\n---\nname: ai-comm\n---\n",
+                       b"%YAML 1.2\n---\nname: ai-comm\n---\n", b"--- # c\nname: ai-comm\n---\n",
+                       b'---\ndescription: "abc\nname: ai-comm"\n---\n', b"---\ndescription: 'abc\nname: x'\n---\n",
+                       b"---\ntags: [a,\nname: ai-comm]\n---\n")
         for data in unsupported:
             cases[data] = iu.UNSUPPORTED_NAME
         for data, name in cases.items():
@@ -117,6 +130,15 @@ class ObjectTests(unittest.TestCase):
                     corpus.append(f"{indent}description: d\n{entry}\n")
                     corpus.append(f"{entry}\n{indent}other: o\n")
                     corpus.append(f"{indent}metadata:\n{indent}  {key}{sep}{value}\n")
+                    # review 946: indented document markers inside another key's block scalar
+                    for block in ("|", ">", "|-"):
+                        corpus.append(f"{indent}description: {block}\n{indent}  ---\n{indent}  ...\n"
+                                      f"{indent}  text\n{entry}\n")
+                        corpus.append(f"{entry}\n{indent}description: {block}\n{indent}  ---\n")
+                    # values of another key that span lines
+                    for opener, closer in (('"', '"'), ("'", "'"), ("[a,", "]"), ("{a: 1,", "}")):
+                        corpus.append(f"{indent}description: {opener}x\n{entry}{closer}\n")
+                        corpus.append(f"{indent}description: {opener}x\n{indent}  y{closer}\n{entry}\n")
         for body in corpus:
             with self.subTest(body=body):
                 try:
@@ -170,6 +192,8 @@ class ObjectTests(unittest.TestCase):
         err = self.stop(iu.register, str(self.skills), root=self.root)
         self.assertEqual((err.code, err.details["entries"]), ("skill_name_conflict", [str(alias)]))
         for front in ("---\nname: >-\n  ai-comm\n---\n",
+                      "---\ndescription: |\n  ---\nname: ai-comm\n---\n",  # review 946
+                      "---\ndescription: |\n  ...\nname: ai-comm\n---\n",  # review 946
                       "---\n  name: ai-comm\n  description: fixture\n---\n",  # review 943, form 1
                       "---\nname:\n  ai-comm\ndescription: fixture\n---\n"):  # review 943, form 2
             with self.subTest(front=front):

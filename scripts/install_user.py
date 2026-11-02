@@ -621,16 +621,40 @@ def frontmatter_name(data):
     not a simple `key:` entry, a `name` whose value continues on further lines, or
     more than one root `name`, are all unsupported."""
     lines = data.decode("utf-8", "replace").splitlines()
-    if not lines or lines[0].strip() != "---":
+    if not lines or lines[0].rstrip() != "---":
+        # Not plain front matter. If a marker follows a byte-order mark, blank, comment
+        # or directive lines, or the opener carries more text, a YAML reader might
+        # still find a name there: unsupported rather than "no name".
+        for line in lines:
+            text = line.lstrip("\ufeff")
+            if text.startswith("---"):
+                return UNSUPPORTED_NAME
+            if text.strip() and not text.lstrip().startswith(("#", "%")):
+                break
         return None
     body = []
     for line in lines[1:]:
-        if line.strip() in ("---", "..."):
+        # Only a marker in column zero ends the block; an indented `---` or `...` is
+        # content of a scalar. A column-zero marker followed by more text is unsupported.
+        if re.match(r"(?:---|\.\.\.)(?:\s|\Z)", line):
+            if line.rstrip() not in ("---", "..."):
+                return UNSUPPORTED_NAME
             break
         body.append(line)
     else:
         return None if _root_name(body) is None else UNSUPPORTED_NAME  # unterminated block
     return _root_name(body)
+
+
+def _spans_lines(value):
+    """A root value that opens a quoted scalar or a flow collection without closing
+    it on its own line: its content continues on lines this reader does not track."""
+    value = value.strip()
+    if value[:1] in ("'", '"'):
+        return _yaml_scalar(value) == UNSUPPORTED_NAME and value.count(value[0]) < 2
+    if value[:1] in ("[", "{"):
+        return value.count("[") + value.count("{") != value.count("]") + value.count("}")
+    return False
 
 
 def _root_name(body):
@@ -648,7 +672,7 @@ def _root_name(body):
         if indent > root:
             continue  # part of the previous root key's value
         match = ROOT_KEY.match(line[root:])
-        if not match:
+        if not match or _spans_lines(match.group(4) or ""):
             return UNSUPPORTED_NAME
         key = next(group for group in match.groups()[:3] if group is not None)
         if key != "name":
