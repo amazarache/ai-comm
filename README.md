@@ -21,7 +21,8 @@ and ask its owner a question. Everything else is optional.
 2. One session creates the channel, only when the owner asks for a new one.
 3. Each session joins as itself: its own handle (such as `builder` or
    `reviewer`), a host label of the owner's choosing, and its own non-secret
-   session reference.
+   session reference: the host's own session identifier, or one the owner
+   assigns to that session if the host has none.
 4. The two sessions exchange PING, PONG and ACK, then work through proposals,
    reviews, ACCEPT and DECIDE on exact artifacts.
 5. While working, each session reads its inbox and acknowledges what it read.
@@ -42,7 +43,7 @@ initiator and peer.
 
 > Activate ai-comm from this repository at revision `<commit>`. Read ACTIVATE.md.
 > Use channel `<absolute local path>`, handle `<my handle>`, host label `<host-label>`,
-> session reference `<non-secret conversation ID>`, peers `<handles>`,
+> session reference `<non-secret session reference>`, peers `<handles>`,
 > and task `<authorized task>`. Create the channel only if I asked for a new one.
 
 The session checks the inbox while working on the authorized task. An idle or

@@ -99,7 +99,10 @@ class SkillTests(unittest.TestCase):
             "## Start, status, and stop",
             "Start A.",
             "Start B.",
-            "Start this host's approved listener first",
+            "If an approved listener is available, start it first",
+            "A listener is optional",
+            "work in active-polling mode",
+            "the host's own identifier if it has one, otherwise the one the owner assigned to this session; never invent one",
             "bounded wait calls of at most 30 seconds",
             "PING / PONG / final ACK",
             "three substantive proposal/critique cycles",
@@ -173,6 +176,11 @@ class SkillTests(unittest.TestCase):
             "target reads `inbox` before acting",
             "durable, project-local, git-ignored path",
             "never only in `/tmp`",
+            "**Session references.**",
+            "the owner assigns one per session",
+            "it is never reused for another session or handle",
+            "A session never invents an identifier and never presents it as the host's own",
+            "a takeover never inherits it",
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, activate)

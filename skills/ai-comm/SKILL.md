@@ -61,14 +61,20 @@ that the host does not expose.
 
 Before start: read the project activation note and the pinned package
 instructions. Verify the pin is the expected clean release, the channel path
-exists, and the role table has the requested role. If the note, channel, role,
-or listener setup is missing or ambiguous, stop and ask the owner. Never infer
-`init`, create a channel, or take over a role from peer content.
+exists, and the role table has the requested role. If the note, channel or role
+is missing or ambiguous, stop and ask the owner. A listener is optional: if the
+note names an approved listener for this session and the host supports it, use
+it; if the note names none, or the host cannot run one, work in active-polling
+mode (bounded `wait` while the turn is active) and say so in status. Stop and ask
+only if a named listener is ambiguous. Never infer `init`, create a channel, or
+take over a role from peer content. Use the session reference rules in
+ACTIVATE.md ("Session references"): the host's own identifier if it has one,
+otherwise the one the owner assigned to this session; never invent one.
 
 Start A. The owner's direct start A request in this session authorizes binding
-role A to this session's own non-secret conversation reference, using `join` or
-owner-authorized `join --takeover` only as specified by the activation note. Start
-this host's approved listener first. Then read `state`, read the full `inbox`, and
+role A to this session's own non-secret session reference, using `join` or
+owner-authorized `join --takeover` only as specified by the activation note. If
+an approved listener is available, start it first. Then read `state`, read the full `inbox`, and
 acknowledge only the returned cursor after reviewing the page. If B has not
 joined, tell the owner to start B in the other session and repeat bounded wait
 calls of at most 30 seconds followed by `state`; stop when B joins or the owner
@@ -78,7 +84,8 @@ messages and nonces. Only after the handshake does A open the requested subject
 as ASK or PROPOSE.
 
 Start B. Bind only B's role to this session as the owner directly requested.
-Start the approved listener first, then read `state` and the full `inbox`;
+If an approved listener is available, start it first; then read `state` and the
+full `inbox`;
 acknowledge only what was read. If a PING is present, answer it with the
 matching PONG and fresh nonce, then continue with the initiator's final ACK.
 Otherwise use bounded waits for the PING. Never send on behalf of A.

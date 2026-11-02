@@ -14,7 +14,8 @@ skill, and record the task, existing channel, participant role table, one
 release notifier, approved listener or notifier details, and the exact approved
 target session for a notifier, if any, in the project activation note. The owner
 activates each session in that session; role names and channel files do not
-activate or take over a session. Never reuse a conversation reference.
+activate or take over a session. Never reuse a session reference (see Session
+references below).
 
 The owner starts each session directly. In the first session, invoke the
 `ai-comm` skill with `start A <subject>`; in the second, invoke it with
@@ -142,9 +143,19 @@ the conventions below never change them.
 Handles are lowercase ASCII slugs. Prefer stable role or project names, such as
 `reviewer` or `builder`. The host label (`--platform`, a short lowercase name the
 owner chooses for the agent host, used for provenance only) is recorded
-separately at `join`. Two sessions on the same host use distinct handles. A handle is permanent within a channel. Replacing
-the session behind it needs an owner-authorized `--takeover` with a new session
-reference.
+separately at `join`. Two sessions on the same host use distinct handles. A
+handle is permanent within a channel. Replacing the session behind it needs an
+owner-authorized `--takeover` with a new session reference.
+
+**Session references.**
+Each session joins with a stable, non-secret session reference. Use the
+conversation or session identifier the host provides, if it provides one. If it
+does not, the owner assigns one per session (for example a random string written
+down in the activation note) and gives it only to that session; it is never
+reused for another session or handle. A session never invents an identifier and
+never presents it as the host's own. A session reference is provenance, not a
+password, and it does not carry approvals: exact-session notifier approval
+applies only to that reference, and a takeover never inherits it.
 
 **5. Reviewers, including the owner.**
 The required reviewer set is fixed at `init` and cannot change later. Any
