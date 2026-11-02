@@ -553,21 +553,71 @@ def _user_dir(path, code):
     return directory
 
 
+UNSUPPORTED_NAME = "<unsupported front matter>"  # never a valid skill name; treated as a conflict
+
+
+def _yaml_scalar(text):
+    """The value of a one-line YAML scalar, or UNSUPPORTED_NAME for anything this
+    bounded parser does not handle exactly (block, flow, tagged, anchored or aliased
+    values, unknown escapes, text after a closing quote other than a comment)."""
+    text = text.strip()
+    if not text or text.startswith("#"):
+        return None
+    if text[0] in "|>[{&*!%@`":
+        return UNSUPPORTED_NAME
+    if text[0] == "'":
+        out, i = [], 1
+        while i < len(text):
+            if text[i] == "'":
+                if text[i + 1:i + 2] == "'":
+                    out.append("'")
+                    i += 2
+                    continue
+                rest = text[i + 1:]
+                return "".join(out) if not rest.strip() or re.match(r"\s+#", rest) else UNSUPPORTED_NAME
+            out.append(text[i])
+            i += 1
+        return UNSUPPORTED_NAME
+    if text[0] == '"':
+        out, i = [], 1
+        while i < len(text):
+            char = text[i]
+            if char == "\\":
+                nxt = text[i + 1:i + 2]
+                if nxt not in ('"', "\\"):
+                    return UNSUPPORTED_NAME
+                out.append(nxt)
+                i += 2
+                continue
+            if char == '"':
+                rest = text[i + 1:]
+                return "".join(out) if not rest.strip() or re.match(r"\s+#", rest) else UNSUPPORTED_NAME
+            out.append(char)
+            i += 1
+        return UNSUPPORTED_NAME
+    value = re.split(r"\s+#", text, maxsplit=1)[0].strip()  # a comment needs whitespace before `#`
+    return value or None
+
+
 def frontmatter_name(data):
-    """The `name` field of a SKILL.md YAML front matter block, or None."""
+    """The top-level `name` of a SKILL.md YAML front matter block: the name hosts
+    would see. None when there is no front matter or no name; UNSUPPORTED_NAME when
+    the block cannot be read exactly (then registration treats it as a conflict)."""
     lines = data.decode("utf-8", "replace").splitlines()
     if not lines or lines[0].strip() != "---":
         return None
+    found = []
     for line in lines[1:]:
-        if line.strip() == "---":
-            return None
-        match = re.match(r"name\s*:\s*(.*?)\s*\Z", line)
+        if line.strip() in ("---", "..."):
+            break
+        match = re.match(r"""(?:name|"name"|'name')\s*:(?:\s(.*)|)\Z""", line)
         if match:
-            value = match.group(1)
-            if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
-                value = value[1:-1]
-            return value or None
-    return None
+            found.append(_yaml_scalar(match.group(1) or ""))
+    else:
+        return UNSUPPORTED_NAME if found else None  # unterminated block
+    if len(found) > 1:
+        return UNSUPPORTED_NAME
+    return found[0] if found else None
 
 
 def _read_bounded(path, own=False):
@@ -708,12 +758,13 @@ def register(skills_dir, *, root=None):
             if not os.path.isdir(scanned):
                 continue
             for entry, name in effective_names(scanned):
-                if name == "ai-comm" and str(entry) not in ours:
+                if name in ("ai-comm", UNSUPPORTED_NAME) and str(entry) not in ours:
                     conflicts.add(str(entry))
         if os.path.lexists(path):
             conflicts.add(str(path))
         need(not conflicts, "skill_name_conflict", entries=sorted(conflicts),
-             hint="nothing was changed; resolve or rename the listed entries, or use another directory")
+             hint="nothing was changed; the listed entries are named ai-comm, occupy DIR/ai-comm, or have "
+                  "front matter this check cannot read exactly; resolve or rename them, or use another directory")
         obj = {"kind": "skill_link", "path": str(path), "target": target}
         journal = cache.op_journal("register", {"object": obj})
         journal.append("intent", {"index": 0, "action": {"op": "symlink", "object": obj}})
@@ -855,6 +906,7 @@ def _recover_owned(cache, item):
             _add_owned(cache, obj)
             item.journal.append("state", {"state": "done"})
             return "completed"
+        _drop_owned(cache, obj)  # recorded before the interruption, but no longer ours
         item.journal.append("state", {"state": "superseded"})
         return "not_ours"  # something else is there now: kept, not recorded
     _drop_owned(cache, obj)
@@ -1291,7 +1343,8 @@ def _uninstall_continue(cache, item):
                 to_trash(child, f"{parent}/{child.name}", {"kind": "op", "op": other.op})
             else:
                 kept.add(f"{parent}/{child.name}")
-    for name in ("bindings.json", "index.json", "offer.json", "state.json"):  # state last
+    # Every state file the layout defines (TOP_LEVEL), state.json last.
+    for name in sorted(n for n in TOP_LEVEL if n.endswith(".json") and n != "state.json") + ["state.json"]:
         path = cache.root / name
         if os.path.lexists(path):
             if path.is_file() and not path.is_symlink():

@@ -72,7 +72,18 @@ class ObjectTests(unittest.TestCase):
     def test_frontmatter_name(self):
         cases = {b"---\nname: ai-comm\n---\n": "ai-comm", b"---\nname: 'ai-comm'\n---\n": "ai-comm",
                  b'---\ndescription: d\nname: "x y"\n---\n': "x y", b"name: ai-comm\n": None,
-                 b"---\ndescription: d\n---\nname: ai-comm\n": None, b"": None}
+                 b"---\ndescription: d\n---\nname: ai-comm\n": None, b"": None,
+                 # review 939: real YAML scalar and comment semantics
+                 b'---\nname: "ai-comm" # existing skill\n---\n': "ai-comm",
+                 b"---\nname: ai-comm # c\n---\n": "ai-comm", b"---\nname: ai-comm#x\n---\n": "ai-comm#x",
+                 b"---\nname: 'it''s'\n---\n": "it's", b'---\n"name": ai-comm\n---\n': "ai-comm",
+                 b"---\n  name: nested\n---\n": None, b"---\nname:\n---\n": None}
+        unsupported = (b"---\nname: |\n  ai-comm\n---\n", b"---\nname: [ai-comm]\n---\n",
+                       b"---\nname: &a ai-comm\n---\n", b"---\nname: !!str ai-comm\n---\n",
+                       b'---\nname: "ai-comm" trailing\n---\n', b'---\nname: "\\u0061i-comm"\n---\n',
+                       b"---\nname: a\nname: b\n---\n", b"---\nname: ai-comm\n")
+        for data in unsupported:
+            cases[data] = iu.UNSUPPORTED_NAME
         for data, name in cases.items():
             with self.subTest(data=data):
                 self.assertEqual(iu.frontmatter_name(data), name)
@@ -110,6 +121,17 @@ class ObjectTests(unittest.TestCase):
         err = self.stop(iu.register, str(other), root=self.root)
         self.assertEqual(err.details["entries"], [str(other / "ai-comm")])
         self.assertEqual(self.owned(), [])
+
+    def test_yaml_alias_with_a_comment_or_unreadable_front_matter_is_a_conflict(self):
+        self.install()
+        alias = self.skills / "comm"
+        alias.mkdir()
+        (alias / "SKILL.md").write_text('---\nname: "ai-comm" # existing skill\ndescription: x\n---\n')
+        err = self.stop(iu.register, str(self.skills), root=self.root)
+        self.assertEqual((err.code, err.details["entries"]), ("skill_name_conflict", [str(alias)]))
+        (alias / "SKILL.md").write_text("---\nname: >-\n  ai-comm\n---\n")
+        self.assertEqual(self.stop(iu.register, str(self.skills), root=self.root).details["entries"], [str(alias)])
+        self.assertFalse(os.path.lexists(self.skills / "ai-comm"))
 
     def test_second_directory_gets_its_link_with_a_warning_and_aliases_anywhere_conflict(self):
         self.install()
@@ -455,6 +477,53 @@ class ObjectTests(unittest.TestCase):
             self.assertFalse(os.path.lexists(self.skills / "ai-comm") or os.path.lexists(self.bin / "ai-comm"))
         self.assertGreater(self.interrupt_each(lambda: self.fresh(register=True, launcher=True),
                                                lambda: iu.uninstall(confirm=True, root=self.root), finish), 4)
+
+    def test_uninstall_after_a_refresh_leaves_nothing(self):
+        self.install()
+        iu.check(fetch_permitted=True, root=self.root, source=self.src())
+        self.assertTrue((self.root / "refresh.json").exists())
+        self.assertEqual(iu.uninstall(confirm=True, root=self.root)["status"], "uninstalled")
+        self.assertFalse(self.root.exists())
+
+    def test_uninstall_after_a_failed_refresh_leaves_nothing(self):
+        self.install()
+
+        def unreachable(repo, origin, use_helper):
+            raise iu.Stop("fetch_failed")
+        self.stop(iu.check, fetch_permitted=True, root=self.root, source=self.src(), fetch=unreachable)
+        self.assertEqual(json.loads((self.root / "refresh.json").read_text())["ok"], False)
+        self.assertEqual(iu.uninstall(confirm=True, root=self.root)["status"], "uninstalled")
+        self.assertFalse(self.root.exists(), "the empty cache and its lock are gone")
+
+    def test_replacement_after_the_record_was_written_drops_the_record(self):
+        cases = {
+            "skill link": (lambda: iu.register(str(self.skills), root=self.root), self.skills / "ai-comm",
+                           lambda path: os.symlink(self.base, path), lambda path: os.readlink(path)),
+            "launcher": (lambda: iu.install_launcher(str(self.bin), root=self.root), self.bin / "ai-comm",
+                         lambda path: path.write_text("#!/bin/sh\necho mine\n"), lambda path: path.read_text()),
+        }
+        real = iu.uc.Journal.append
+
+        def stop_at_done(journal, kind, data):
+            if kind == "state" and data.get("state") == "done":
+                raise KeyboardInterrupt  # after _add_owned persisted the record
+            return real(journal, kind, data)
+        for label, (create, path, replace, read) in cases.items():
+            with self.subTest(object=label):
+                self.fresh()
+                with mock.patch.object(iu.uc.Journal, "append", stop_at_done):
+                    with self.assertRaises(KeyboardInterrupt):
+                        create()
+                self.assertEqual(len(iu.status(root=self.root)["owned"]), 1)
+                os.unlink(path)
+                replace(path)
+                before = read(path)
+                self.assertEqual([r["action"] for r in iu.recover(root=self.root)["results"]], ["not_ours"])
+                for _ in range(2):  # repeated recovery stays consistent
+                    status = iu.status(root=self.root)
+                    self.assertEqual((status["owned"], status["pending"]), ([], []))
+                    self.assertEqual(read(path), before)
+                    self.assertEqual(iu.recover(root=self.root)["results"], [])
 
     def test_replacement_between_interruption_and_recovery_is_kept(self):
         self.fresh()

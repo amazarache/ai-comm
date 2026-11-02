@@ -127,8 +127,8 @@
     },
     {
       "path": "scripts/install_user.py",
-      "bytes": 66260,
-      "sha256": "4dd905b43211fb5a5e2242cdf28db86026d7990e8a48b480ae423d1c9af256eb"
+      "bytes": 68533,
+      "sha256": "5754879bcc60651308c82b36aabf150b4b5c7439cf4f88d2a84717899ab04405"
     },
     {
       "path": "scripts/leak_scan.py",
@@ -142,8 +142,8 @@
     },
     {
       "path": "scripts/release_install.py",
-      "bytes": 14896,
-      "sha256": "4c6c487b3ef6fb574fb4880da288eeacd90613d8d29c5a69401e51ce2731b105"
+      "bytes": 15636,
+      "sha256": "e0c1e41a105c48b7cbb3ef0fa44456c484d50e5135b45a671b63782d2af52487"
     },
     {
       "path": "scripts/test_old_protocol.py",
@@ -152,8 +152,8 @@
     },
     {
       "path": "scripts/verify_pin.py",
-      "bytes": 14541,
-      "sha256": "1f171433e47b2c38562afd32641c20730cce38d3252793a9e28e26c78ff1cd28"
+      "bytes": 15326,
+      "sha256": "65f9340ad875f0a841ff50db415cbea94e8f241a2a472d6ec4631cb2ef55f8eb"
     },
     {
       "path": "skills/ai-comm/SKILL.md",
@@ -217,13 +217,13 @@
     },
     {
       "path": "tests/test_user_objects.py",
-      "bytes": 25926,
-      "sha256": "c22d971dced5c3552a3b21a123d4e01bdec3c27c6ebed128a9b0afbb3fb27c6a"
+      "bytes": 30190,
+      "sha256": "0355033d1db5ca1248390728a92260af01be4bddb9afa5600390b4b81ca2f0cf"
     },
     {
       "path": "tests/test_verify_pin.py",
-      "bytes": 14032,
-      "sha256": "c06c08e53444e90dafa1f5f8588614619fe7a5c6826d46fa19c2ecca4cf76cce"
+      "bytes": 18789,
+      "sha256": "442ecf123f6568690bd5bd466c965d00a821921e915291f50c0115fdd779807e"
     },
     {
       "path": "upgrade_controller.py",

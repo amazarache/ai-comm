@@ -22,6 +22,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import stat
 import subprocess
 import sys
@@ -82,6 +83,24 @@ def pin_git(pin, *args):
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise Stop("git_unavailable") from exc
     return done.returncode, done.stdout
+
+
+PROMISOR_KEY = re.compile(r"(?:extensions\.partialclone|core\.partialclonefilter|remote\..*\.(?:promisor|partialclonefilter))\Z")
+
+
+def promisor_layout(pin):
+    """Fail closed, before any object read, for every layout in which a missing
+    object could make Git fetch: any partial-clone or promisor setting in the pin's
+    effective configuration (including included files). Reading configuration starts
+    no transport. Returns the reason, or None."""
+    code, out = pin_git(pin, "config", "--list", "-z")
+    if code != 0:
+        return "config_unreadable"
+    for entry in out.split(b"\x00"):
+        key = entry.split(b"\n", 1)[0].decode("utf-8", "replace").lower()
+        if key and PROMISOR_KEY.match(key):
+            return "promisor_remote"
+    return None
 
 
 def _ref(pin, name):
@@ -187,11 +206,12 @@ def _verify(pin, bindings, report):
     git_st = os.lstat(git_dir) if os.path.lexists(git_dir) else None
     if git_st is None or not stat.S_ISDIR(git_st.st_mode):
         return _unknown(report, "not_a_git_checkout")
-    if os.path.lexists(git_dir / "objects" / "info" / "alternates"):
-        return _unknown(report, "alternate_object_store")
-    code, _ = pin_git(pin, "config", "--get", "extensions.partialclone")
-    if code == 0:
-        return _unknown(report, "partial_clone")
+    for name in ("alternates", "http-alternates"):
+        if os.path.lexists(git_dir / "objects" / "info" / name):
+            return _unknown(report, "alternate_object_store")
+    layout = promisor_layout(pin)
+    if layout:
+        return _unknown(report, layout)
     head = _ref(pin, "HEAD")
     if head is None:
         return _unknown(report, "no_head")

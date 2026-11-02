@@ -170,10 +170,22 @@ MAX_TREE_ENTRIES = 20000
 _COMMIT_OID = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 
 
+# A protocol name no transport has: with GIT_ALLOW_PROTOCOL set to it, Git refuses
+# every transport (and so every remote helper), whatever the repository configures.
+NO_PROTOCOL = "ai-comm-no-transport"
+
+
 def _inert_git_env():
+    """Environment for object reads that must never reach a transport. Besides the
+    controller's clean environment (no global/system config, hooks disabled):
+    replacement objects off, lazy fetching off where Git supports the flag, and,
+    independently of the Git version, every protocol disallowed, so a repository
+    that names a promisor remote or a helper URL cannot start anything."""
     env = uc.clean_env()
-    env.update({"GIT_NO_REPLACE_OBJECTS": "1", "GIT_NO_LAZY_FETCH": "1", "GIT_CONFIG_COUNT": "2",
-                "GIT_CONFIG_KEY_1": "core.fsmonitor", "GIT_CONFIG_VALUE_1": "false"})
+    env.update({"GIT_NO_REPLACE_OBJECTS": "1", "GIT_NO_LAZY_FETCH": "1", "GIT_ALLOW_PROTOCOL": NO_PROTOCOL,
+                "GIT_CONFIG_COUNT": "3",
+                "GIT_CONFIG_KEY_1": "core.fsmonitor", "GIT_CONFIG_VALUE_1": "false",
+                "GIT_CONFIG_KEY_2": "protocol.allow", "GIT_CONFIG_VALUE_2": "never"})
     return env
 
 

@@ -215,7 +215,7 @@ class VerifyPinTests(unittest.TestCase):
     def test_unsupported_layouts_are_unknown(self):
         pin = self.pin()
         tip.git(pin, "config", "extensions.partialclone", "origin")
-        self.assertEqual(self.check()["reason"], "partial_clone")
+        self.assertEqual(self.check()["reason"], "promisor_remote")
         tip.git(pin, "config", "--unset", "extensions.partialclone")
         (pin / ".git" / "objects" / "info" / "alternates").write_text(str(self.origin / ".git" / "objects") + "\n")
         self.assertEqual(self.check()["reason"], "alternate_object_store")
@@ -223,6 +223,90 @@ class VerifyPinTests(unittest.TestCase):
         shutil.rmtree(pin / ".git")
         (pin / ".git").write_text("gitdir: /elsewhere\n")
         self.assertEqual(self.check()["reason"], "not_a_git_checkout")
+
+    # -- review 940: no transport, whatever the Git version
+
+    def promisor_pin(self):
+        """A trusted pin whose configuration names a promisor remote reached through a
+        helper that would write a sentinel, the upstream Git 2.43.0 reproduction."""
+        pin = self.pin()
+        sentinel = self.base / "helper-ran"
+        helper = self.base / "helper.sh"
+        helper.write_text(f"#!/bin/sh\necho ran > '{sentinel}'\nexit 1\n")
+        helper.chmod(0o700)
+        tip.git(pin, "config", "remote.origin.url", f"ext::{helper}")
+        tip.git(pin, "config", "protocol.ext.allow", "always")
+        return pin, sentinel
+
+    def test_every_promisor_layout_fails_closed_before_object_reads(self):
+        settings = (("remote.origin.promisor", "true"), ("remote.origin.partialclonefilter", "blob:none"),
+                    ("extensions.partialclone", "origin"), ("core.partialclonefilter", "blob:none"))
+        for key, value in settings:
+            with self.subTest(key=key):
+                pin, sentinel = self.promisor_pin()
+                tip.git(pin, "config", key, value)
+                with mock.patch.object(vp.ri, "git_object", side_effect=AssertionError("object read")):
+                    report = self.check()
+                self.assertEqual((report["status"], report["reason"]), ("unknown", "promisor_remote"))
+                self.assertFalse(sentinel.exists())
+                shutil.rmtree(self.project / ".tools")
+        pin, sentinel = self.promisor_pin()
+        included = self.base / "included.config"
+        included.write_text("[remote \"origin\"]\n\tpromisor = true\n")
+        tip.git(pin, "config", "include.path", str(included))
+        self.assertEqual(self.check()["reason"], "promisor_remote", "settings from included files count")
+        self.assertFalse(sentinel.exists())
+
+    def test_review_053_reproduction_through_verify_itself(self):
+        """Review 053 B1 exactly: promisor remote without extensions.partialclone, ext helper,
+        the committed manifest's loose object removed, then verify(). Also with the
+        layout check bypassed, so only the transport ban stands between the missing
+        object and the helper."""
+        pin, sentinel = self.promisor_pin()
+        tip.git(pin, "config", "remote.origin.promisor", "true")
+        blob = tip.git(pin, "rev-parse", "HEAD:RELEASE-MANIFEST.json").strip()
+        loose = pin / ".git" / "objects" / blob[:2] / blob[2:]
+        if not loose.exists():
+            self.skipTest("the fixture clone packed its objects")
+        loose.unlink()
+        report = self.check()
+        self.assertEqual((report["status"], report["reason"]), ("unknown", "promisor_remote"))
+        self.assertFalse(sentinel.exists())
+        with mock.patch.object(vp, "promisor_layout", return_value=None):
+            env = vp.ri.inert_git_env()
+            env.pop("GIT_NO_LAZY_FETCH")  # as a Git that does not implement the flag
+            with mock.patch.object(vp.ri, "_inert_git_env", return_value=env), \
+                    mock.patch.object(vp.ri, "inert_git_env", return_value=env):
+                report = self.check()
+        self.assertEqual((report["status"], report["what"]), ("modified", "object"))
+        self.assertFalse(sentinel.exists(), "the missing object must not start a transport")
+
+    def test_no_transport_even_where_the_lazy_fetch_flag_is_ignored(self):
+        """Upstream Git 2.43.0 ignores GIT_NO_LAZY_FETCH. Remove the flag, as such a Git
+        effectively does, and ask for a missing object in a promisor layout: the
+        protocol ban alone must keep the helper from running. A control without the
+        ban shows that this Git really would run it."""
+        pin, sentinel = self.promisor_pin()
+        tip.git(pin, "config", "remote.origin.promisor", "true")
+        missing = "1" * 40
+
+        def cat_file(env):
+            return subprocess.run(["git", "--git-dir", str(pin / ".git"), "--no-replace-objects", "cat-file",
+                                   "blob", missing], env=env, capture_output=True, timeout=60, check=False)
+        upstream_like = vp.ri.inert_git_env()
+        upstream_like.pop("GIT_NO_LAZY_FETCH")
+        control = dict(upstream_like)
+        control.pop("GIT_ALLOW_PROTOCOL")
+        control["GIT_CONFIG_COUNT"] = "2"  # drop protocol.allow=never
+        cat_file(control)
+        control_ran = sentinel.exists()
+        if control_ran:
+            sentinel.unlink()
+        done = cat_file(upstream_like)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertFalse(sentinel.exists(), "no transport or helper may start")
+        if not control_ran:
+            self.skipTest("this Git did not attempt a lazy fetch even without the guards; ban shown inert only")
 
     def test_verifier_inside_the_checked_pin_stops(self):
         pin = self.pin()
