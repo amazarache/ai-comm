@@ -127,8 +127,8 @@
     },
     {
       "path": "scripts/install_user.py",
-      "bytes": 68533,
-      "sha256": "5754879bcc60651308c82b36aabf150b4b5c7439cf4f88d2a84717899ab04405"
+      "bytes": 70219,
+      "sha256": "3b49ce954815d178c552850e6229cc2e890f28cbd27f3702fcaf5e0ba78e7374"
     },
     {
       "path": "scripts/leak_scan.py",
@@ -217,8 +217,8 @@
     },
     {
       "path": "tests/test_user_objects.py",
-      "bytes": 30190,
-      "sha256": "0355033d1db5ca1248390728a92260af01be4bddb9afa5600390b4b81ca2f0cf"
+      "bytes": 33091,
+      "sha256": "6d3f3418fb10a1713009e5951fcabed77199f54ba68d1d18d55fdb28a74c9813"
     },
     {
       "path": "tests/test_verify_pin.py",

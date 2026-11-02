@@ -77,16 +77,56 @@ class ObjectTests(unittest.TestCase):
                  b'---\nname: "ai-comm" # existing skill\n---\n': "ai-comm",
                  b"---\nname: ai-comm # c\n---\n": "ai-comm", b"---\nname: ai-comm#x\n---\n": "ai-comm#x",
                  b"---\nname: 'it''s'\n---\n": "it's", b'---\n"name": ai-comm\n---\n': "ai-comm",
-                 b"---\n  name: nested\n---\n": None, b"---\nname:\n---\n": None}
+                 b"---\nname:\n---\n": None,
+                 # review 943: an indented root mapping is still the root; nested mappings are not
+                 b"---\n  name: ai-comm\n  description: fixture\n---\n": "ai-comm",
+                 b"---\nmetadata:\n  name: ai-comm\n---\n": None,
+                 b"---\nname: ai-comm\ndescription: >\n  long\n  text\n---\n": "ai-comm"}
         unsupported = (b"---\nname: |\n  ai-comm\n---\n", b"---\nname: [ai-comm]\n---\n",
                        b"---\nname: &a ai-comm\n---\n", b"---\nname: !!str ai-comm\n---\n",
                        b'---\nname: "ai-comm" trailing\n---\n', b'---\nname: "\\u0061i-comm"\n---\n',
-                       b"---\nname: a\nname: b\n---\n", b"---\nname: ai-comm\n")
+                       b"---\nname: a\nname: b\n---\n", b"---\nname: ai-comm\n",
+                       # review 943: a continued value, and forms this parser does not read exactly
+                       b"---\nname:\n  ai-comm\ndescription: fixture\n---\n", b"---\nname: ai\n  -comm\n---\n",
+                       b"---\n  name: x\nother: y\n---\n", b"---\n\tname: x\n---\n", b"---\n- a\n---\n",
+                       b"---\n{name: ai-comm}\n---\n", b"---\n? name\n: ai-comm\n---\n", b"---\nname: a: b\n---\n")
         for data in unsupported:
             cases[data] = iu.UNSUPPORTED_NAME
         for data, name in cases.items():
             with self.subTest(data=data):
                 self.assertEqual(iu.frontmatter_name(data), name)
+
+    def test_names_agree_with_a_yaml_parser_or_are_unsupported(self):
+        """Differential check against PyYAML, when installed: for every generated front
+        matter block, the name read here is either exactly the name a YAML parser reads
+        from the root mapping, or UNSUPPORTED_NAME (a conflict). Never a different name."""
+        try:
+            import yaml
+        except ImportError:
+            self.skipTest("PyYAML is not installed; the fixed cases above still run")
+        values = ["ai-comm", '"ai-comm"', "'ai-comm'", "ai-comm # c", '"ai-comm" # c', "ai-comm#x", "",
+                  "\n  ai-comm", "|\n  ai-comm", ">-\n  ai-comm", "[ai-comm]", "&a ai-comm", "!!str ai-comm",
+                  '"ai\\u002dcomm"', "'it''s'", "ai: comm", "ai-comm\n  continued"]
+        keys = ["name", '"name"', "'name'", "Name"]
+        corpus = []
+        for indent in ("", "  "):
+            for key in keys:
+                for value in values:
+                    sep = ":" if value.startswith("\n") or not value else ": "
+                    entry = f"{indent}{key}{sep}{value}"
+                    corpus.append(f"{indent}description: d\n{entry}\n")
+                    corpus.append(f"{entry}\n{indent}other: o\n")
+                    corpus.append(f"{indent}metadata:\n{indent}  {key}{sep}{value}\n")
+        for body in corpus:
+            with self.subTest(body=body):
+                try:
+                    parsed = yaml.safe_load(body)
+                    expected = parsed.get("name") if isinstance(parsed, dict) else None
+                    expected = expected if isinstance(expected, str) else None
+                except yaml.YAMLError:
+                    expected = None
+                ours = iu.frontmatter_name(f"---\n{body}---\n".encode())
+                self.assertIn(ours, {iu.UNSUPPORTED_NAME, expected})
 
     def test_effective_names_follow_one_link_level_only(self):
         real = self.skill(self.base, "real", "ai-comm")
@@ -129,8 +169,13 @@ class ObjectTests(unittest.TestCase):
         (alias / "SKILL.md").write_text('---\nname: "ai-comm" # existing skill\ndescription: x\n---\n')
         err = self.stop(iu.register, str(self.skills), root=self.root)
         self.assertEqual((err.code, err.details["entries"]), ("skill_name_conflict", [str(alias)]))
-        (alias / "SKILL.md").write_text("---\nname: >-\n  ai-comm\n---\n")
-        self.assertEqual(self.stop(iu.register, str(self.skills), root=self.root).details["entries"], [str(alias)])
+        for front in ("---\nname: >-\n  ai-comm\n---\n",
+                      "---\n  name: ai-comm\n  description: fixture\n---\n",  # review 943, form 1
+                      "---\nname:\n  ai-comm\ndescription: fixture\n---\n"):  # review 943, form 2
+            with self.subTest(front=front):
+                (alias / "SKILL.md").write_text(front)
+                self.assertEqual(self.stop(iu.register, str(self.skills), root=self.root).details["entries"],
+                                 [str(alias)])
         self.assertFalse(os.path.lexists(self.skills / "ai-comm"))
 
     def test_second_directory_gets_its_link_with_a_warning_and_aliases_anywhere_conflict(self):

@@ -596,25 +596,65 @@ def _yaml_scalar(text):
             i += 1
         return UNSUPPORTED_NAME
     value = re.split(r"\s+#", text, maxsplit=1)[0].strip()  # a comment needs whitespace before `#`
+    if re.search(r":(\s|\Z)", value):
+        return UNSUPPORTED_NAME  # `a: b` is not a plain scalar
     return value or None
 
 
+ROOT_KEY = re.compile(r"""(?:"([^"\\]*)"|'([^']*)'|([A-Za-z0-9_][A-Za-z0-9_.-]*))[ ]*:(?:[ ]+(.*)|)\Z""")
+
+
+def _indent(line):
+    return len(line) - len(line.lstrip(" "))
+
+
 def frontmatter_name(data):
-    """The top-level `name` of a SKILL.md YAML front matter block: the name hosts
-    would see. None when there is no front matter or no name; UNSUPPORTED_NAME when
-    the block cannot be read exactly (then registration treats it as a conflict)."""
+    """The root mapping's `name` in a SKILL.md YAML front matter block: the name hosts
+    would see. None when there is no front matter or the root mapping has no name;
+    UNSUPPORTED_NAME whenever the block cannot be read exactly (registration then
+    treats the entry as a conflict, so an unread name can never become a duplicate).
+
+    The root mapping's indentation is that of its first content line (it need not
+    be column zero). Only lines at exactly that indentation are root keys; deeper
+    lines belong to the key before them (a nested mapping, or a continued value).
+    Tabs in indentation, a line indented less than the root, a root line that is
+    not a simple `key:` entry, a `name` whose value continues on further lines, or
+    more than one root `name`, are all unsupported."""
     lines = data.decode("utf-8", "replace").splitlines()
     if not lines or lines[0].strip() != "---":
         return None
-    found = []
+    body = []
     for line in lines[1:]:
         if line.strip() in ("---", "..."):
             break
-        match = re.match(r"""(?:name|"name"|'name')\s*:(?:\s(.*)|)\Z""", line)
-        if match:
-            found.append(_yaml_scalar(match.group(1) or ""))
+        body.append(line)
     else:
-        return UNSUPPORTED_NAME if found else None  # unterminated block
+        return None if _root_name(body) is None else UNSUPPORTED_NAME  # unterminated block
+    return _root_name(body)
+
+
+def _root_name(body):
+    content = [line for line in body if line.strip() and not line.lstrip().startswith("#")]
+    if not content:
+        return None
+    if any("\t" in line[:len(line) - len(line.lstrip())] for line in content):
+        return UNSUPPORTED_NAME
+    root = _indent(content[0])
+    found = []
+    for number, line in enumerate(content):
+        indent = _indent(line)
+        if indent < root:
+            return UNSUPPORTED_NAME
+        if indent > root:
+            continue  # part of the previous root key's value
+        match = ROOT_KEY.match(line[root:])
+        if not match:
+            return UNSUPPORTED_NAME
+        key = next(group for group in match.groups()[:3] if group is not None)
+        if key != "name":
+            continue
+        continued = number + 1 < len(content) and _indent(content[number + 1]) > root
+        found.append(UNSUPPORTED_NAME if continued else _yaml_scalar(match.group(4) or ""))
     if len(found) > 1:
         return UNSUPPORTED_NAME
     return found[0] if found else None
