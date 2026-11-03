@@ -126,11 +126,17 @@ class BootstrapTests(unittest.TestCase):
         cls.pki = tempfile.TemporaryDirectory(prefix="bootstrap-pki-")
         d = Path(cls.pki.name)
         run = lambda *a: subprocess.run(a, cwd=d, check=True, capture_output=True, timeout=60)
+        # A standards-complete CA and server certificate: Python 3.13 verifies with
+        # VERIFY_X509_STRICT by default, which requires these extensions.
+        (d / "ca.cnf").write_text("[req]\ndistinguished_name=dn\n[dn]\n[v3_ca]\nbasicConstraints=critical,CA:TRUE\n"
+                                  "keyUsage=critical,keyCertSign,cRLSign\nsubjectKeyIdentifier=hash\n")
         run(OPENSSL, "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", "ca.key", "-out", "ca.pem",
-            "-days", "2", "-subj", "/CN=bootstrap test CA")
+            "-days", "2", "-subj", "/CN=bootstrap test CA", "-config", "ca.cnf", "-extensions", "v3_ca")
         run(OPENSSL, "req", "-newkey", "rsa:2048", "-nodes", "-keyout", "srv.key", "-out", "srv.csr",
             "-subj", "/CN=127.0.0.1")
-        (d / "ext").write_text("subjectAltName=IP:127.0.0.1\nbasicConstraints=CA:FALSE\n")
+        (d / "ext").write_text("subjectAltName=IP:127.0.0.1\nbasicConstraints=critical,CA:FALSE\n"
+                               "keyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n"
+                               "subjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid,issuer\n")
         run(OPENSSL, "x509", "-req", "-in", "srv.csr", "-CA", "ca.pem", "-CAkey", "ca.key", "-CAcreateserial",
             "-out", "srv.pem", "-days", "2", "-extfile", "ext")
         run(OPENSSL, "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", "other.key", "-out", "other.pem",
@@ -210,6 +216,14 @@ class BootstrapTests(unittest.TestCase):
         self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertEqual([], self.stub_calls(), "no downloaded code may run after a failure")
         self.assert_clean()
+
+    def test_fixture_ca_passes_strict_verification(self):
+        # Guards the fixture itself, so Python versions without strict defaults catch what 3.13 enforces.
+        context = ssl.create_default_context(cafile=str(self.ca))
+        context.verify_flags |= getattr(ssl, "VERIFY_X509_STRICT", 0)
+        with socket.create_connection(("127.0.0.1", self.port), timeout=10) as raw:
+            with context.wrap_socket(raw, server_hostname="127.0.0.1") as tls:
+                self.assertTrue(tls.version())
 
     # Success and the installer call
     def test_success_runs_the_release_installer_with_consent(self):
