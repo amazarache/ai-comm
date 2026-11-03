@@ -51,6 +51,11 @@
       "sha256": "142c747c5aaac2050eda6e66ff8f6b4f09998121275db71f4e8a09b4ac6f7251"
     },
     {
+      "path": "adapters/common.py",
+      "bytes": 11289,
+      "sha256": "5fc228b42f2cacf37c79aa5d262e44f127a4de4f5f29d8e332f6a1c192b01ff5"
+    },
+    {
       "path": "ai_comm.py",
       "bytes": 160318,
       "sha256": "345ddfc47cc61304c996320bbec095a533c82c1fa871b466be5d2bb89836138e"
@@ -179,6 +184,11 @@
       "path": "tests/test_bootstrap.py",
       "bytes": 28747,
       "sha256": "314b99548e621c3b0769147f3805c847baa14d0d0b59ebd9da9af9b786e3ebd4"
+    },
+    {
+      "path": "tests/test_common.py",
+      "bytes": 13310,
+      "sha256": "da0a4b4e3708971e34bffde01c4b1252b7085bd8b3879f0104820c88b5fbb968"
     },
     {
       "path": "tests/test_declare_project.py",
