@@ -16,6 +16,7 @@ import errno
 import fcntl
 import hashlib
 import json
+import math
 import os
 import re
 import stat
@@ -33,6 +34,7 @@ UNIT_TEMPLATE_RESERVE = len("queue-wake@.service")
 UNIT_NAME_MAX = 255
 
 MAX_SMALL_JSON = 16 * 1024
+MAX_JSON_DEPTH = 32  # state and config files are shallow; deeper input is refused
 LOCK_ATTEMPTS = 10
 LOCK_RETRY_SECONDS = 0.2
 
@@ -171,7 +173,10 @@ def private_dir(path):
     if info.st_uid != os.getuid():
         raise WakeError("state_dir_wrong_owner")
     if stat.S_IMODE(info.st_mode) & 0o077:
-        os.chmod(path, 0o700)
+        try:
+            os.chmod(path, 0o700)
+        except OSError as exc:
+            raise _os_error(exc) from exc
     return path
 
 
@@ -210,10 +215,39 @@ def _no_constant(name):
     raise ValueError("non-finite number")
 
 
+def _finite_float(text):
+    value = float(text)
+    if not math.isfinite(value):  # an exponent overflow such as 1e400 or -1e400
+        raise ValueError("non-finite number")
+    return value
+
+
+def _within_depth(value, limit=MAX_JSON_DEPTH):
+    """Iteratively check container nesting, so a deep document cannot exhaust the stack later."""
+    stack = [(value, 1)]
+    while stack:
+        item, depth = stack.pop()
+        if isinstance(item, (dict, list)):
+            if depth > limit:
+                return False
+            children = item.values() if isinstance(item, dict) else item
+            stack.extend((child, depth + 1) for child in children)
+    return True
+
+
+def _close_quietly(fd):
+    """Release a descriptor on a failure path without replacing the mapped error."""
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+
+
 def read_small_json(path, missing=None, limit=MAX_SMALL_JSON):
     """A bounded JSON object from a regular, non-symlinked file owned by this user.
 
-    Duplicate keys, NaN/Infinity, non-objects and oversize files are refused.
+    Duplicate keys, NaN/Infinity (literal or by exponent overflow), nesting deeper
+    than MAX_JSON_DEPTH, non-objects and oversize files are refused.
     Returns `missing` when the file does not exist.
     """
     try:
@@ -228,14 +262,15 @@ def read_small_json(path, missing=None, limit=MAX_SMALL_JSON):
     except OSError as exc:
         raise _os_error(exc) from exc
     finally:
-        os.close(fd)
+        _close_quietly(fd)
     if len(raw) > limit:
         raise WakeError("state_file_invalid")
     try:
-        value = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_object, parse_constant=_no_constant)
-    except (UnicodeDecodeError, ValueError) as exc:
+        value = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_object,
+                           parse_constant=_no_constant, parse_float=_finite_float)
+    except (UnicodeDecodeError, ValueError, RecursionError) as exc:
         raise WakeError("state_file_invalid") from exc
-    if not isinstance(value, dict):
+    if not isinstance(value, dict) or not _within_depth(value):
         raise WakeError("state_file_invalid")
     return value
 
@@ -244,6 +279,8 @@ def write_private_json(directory, name, value):
     """Atomically replace `directory/name` with canonical JSON, mode 0600, fsynced.
 
     `name` must be a plain file name; the directory must be a private directory.
+    The target is replaced only after every byte is written and fsynced; on any
+    failure the previous file is left as it was and the temporary file is removed.
     """
     if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", name):
         raise WakeError("state_name_invalid")
@@ -256,7 +293,12 @@ def write_private_json(directory, name, value):
         raise _os_error(exc) from exc
     try:
         os.fchmod(fd, 0o600)
-        os.write(fd, data)
+        view = memoryview(data)
+        while view:
+            written = os.write(fd, view)
+            if written <= 0:
+                raise WakeError("state_io_failed", "transient")
+            view = view[written:]
         os.fsync(fd)
         os.close(fd)
         fd = None
@@ -271,11 +313,11 @@ def write_private_json(directory, name, value):
         raise _os_error(exc) from exc
     finally:
         if fd is not None:
-            os.close(fd)
+            _close_quietly(fd)
         if tmp is not None:
             try:
                 os.unlink(tmp)
-            except FileNotFoundError:
+            except OSError:
                 pass
 
 
@@ -285,16 +327,24 @@ def acquire_lock(directory, name="lock", sleep=time.sleep, attempts=LOCK_ATTEMPT
     Returns the open descriptor; the lock is held until it is closed. A lock held
     by another live process gives the permanent code `another_instance_running`.
     """
-    fd = _open_nofollow(os.path.join(directory, name), os.O_RDWR | os.O_CREAT)
-    if not stat.S_ISREG(os.fstat(fd).st_mode):
-        os.close(fd)
-        raise WakeError("lock_not_regular_file")
-    for attempt in range(attempts):
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            return fd
-        except BlockingIOError:
-            if attempt + 1 < attempts:
-                sleep(LOCK_RETRY_SECONDS)
-    os.close(fd)
-    raise WakeError("another_instance_running")
+    try:
+        fd = _open_nofollow(os.path.join(directory, name), os.O_RDWR | os.O_CREAT)
+    except FileNotFoundError as exc:
+        raise WakeError("state_parent_missing") from exc
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise WakeError("lock_not_regular_file")
+        for attempt in range(attempts):
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return fd
+            except BlockingIOError:
+                if attempt + 1 < attempts:
+                    sleep(LOCK_RETRY_SECONDS)
+        raise WakeError("another_instance_running")
+    except OSError as exc:
+        _close_quietly(fd)
+        raise _os_error(exc) from exc
+    except BaseException:
+        _close_quietly(fd)
+        raise

@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "adapters"))
@@ -266,6 +267,157 @@ class StateTests(unittest.TestCase):
         with self.assertRaises(common.WakeError) as ctx:
             common.private_dir(os.path.join(locked, "state"))
         self.assertEqual(ctx.exception.code, "state_access_denied")
+
+
+
+class FaultInjectionTests(unittest.TestCase):
+    """Regressions for review 00001292: partial writes, raw OS errors, descriptor leaks, overflow."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = os.path.realpath(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+        self.target = os.path.join(self.root, "config.json")
+        common.write_private_json(self.root, "config.json", {"binding": "original"})
+        self.original = Path(self.target).read_bytes()
+
+    def test_partial_writes_complete_the_file(self):
+        real_write = os.write
+        calls = []
+
+        def one_byte(fd, data):
+            calls.append(len(data))
+            return real_write(fd, bytes(data[:1]))
+
+        with mock.patch.object(common.os, "write", one_byte):
+            common.write_private_json(self.root, "config.json", {"binding": "replacement"})
+        self.assertEqual(common.read_small_json(self.target), {"binding": "replacement"})
+        self.assertGreater(len(calls), 1)
+        self.assertEqual(os.listdir(self.root), ["config.json"])
+
+    def test_partial_write_then_failure_keeps_the_original(self):
+        real_write = os.write
+        state = {"n": 0}
+
+        def flaky(fd, data):
+            state["n"] += 1
+            if state["n"] == 1:
+                return real_write(fd, bytes(data[:1]))
+            raise OSError(28, "synthetic private diagnostic")
+
+        with mock.patch.object(common.os, "write", flaky):
+            with self.assertRaises(common.WakeError) as ctx:
+                common.write_private_json(self.root, "config.json", {"binding": "replacement"})
+        self.assertEqual(ctx.exception.code, "state_io_failed")
+        self.assertEqual(ctx.exception.exit_code, 75)
+        self.assertEqual(Path(self.target).read_bytes(), self.original)
+        self.assertEqual(os.listdir(self.root), ["config.json"])
+
+    def test_zero_progress_write_is_refused(self):
+        with mock.patch.object(common.os, "write", lambda fd, data: 0):
+            with self.assertRaises(common.WakeError) as ctx:
+                common.write_private_json(self.root, "config.json", {"binding": "replacement"})
+        self.assertEqual(ctx.exception.code, "state_io_failed")
+        self.assertEqual(Path(self.target).read_bytes(), self.original)
+        self.assertEqual(os.listdir(self.root), ["config.json"])
+
+    def test_lock_io_error_is_mapped_and_closes_the_descriptor(self):
+        opened = []
+        real_open = common._open_nofollow
+
+        def recording_open(*args, **kwargs):
+            fd = real_open(*args, **kwargs)
+            opened.append(fd)
+            return fd
+
+        def eio(fd, op):
+            raise OSError(5, "synthetic private diagnostic")
+
+        with mock.patch.object(common, "_open_nofollow", recording_open), \
+                mock.patch.object(common.fcntl, "flock", eio):
+            with self.assertRaises(common.WakeError) as ctx:
+                common.acquire_lock(self.root, sleep=lambda s: None)
+        self.assertEqual(ctx.exception.code, "state_io_failed")
+        self.assertEqual(ctx.exception.exit_code, 75)
+        self.assertNotIn("synthetic", ctx.exception.line())
+        self.assertEqual(len(opened), 1)
+        with self.assertRaises(OSError):
+            os.fstat(opened[0])  # closed
+
+    def test_lock_contention_closes_the_descriptor(self):
+        holder = common.acquire_lock(self.root)
+        self.addCleanup(os.close, holder)
+        opened = []
+        real_open = common._open_nofollow
+        with mock.patch.object(common, "_open_nofollow",
+                               lambda *a, **k: opened.append(real_open(*a, **k)) or opened[-1]):
+            with self.assertRaises(common.WakeError) as ctx:
+                common.acquire_lock(self.root, sleep=lambda s: None, attempts=2)
+        self.assertEqual(ctx.exception.code, "another_instance_running")
+        with self.assertRaises(OSError):
+            os.fstat(opened[0])
+
+    def test_lock_in_missing_directory(self):
+        with self.assertRaises(common.WakeError) as ctx:
+            common.acquire_lock(os.path.join(self.root, "missing"))
+        self.assertEqual(ctx.exception.code, "state_parent_missing")
+
+    def test_chmod_eperm_is_mapped(self):
+        path = os.path.join(self.root, "state")
+        os.mkdir(path, 0o755)
+
+        def eperm(*args, **kwargs):
+            raise PermissionError(1, "synthetic private diagnostic")
+
+        with mock.patch.object(common.os, "chmod", eperm):
+            with self.assertRaises(common.WakeError) as ctx:
+                common.private_dir(path)
+        self.assertEqual(ctx.exception.code, "state_access_denied")
+        self.assertEqual(ctx.exception.exit_code, 78)
+
+    def test_cleanup_failure_does_not_replace_the_mapped_error(self):
+        def fail_fsync(fd):
+            raise OSError(5, "synthetic private diagnostic")
+
+        def fail_unlink(path):
+            raise PermissionError(1, "synthetic private diagnostic")
+
+        with mock.patch.object(common.os, "fsync", fail_fsync), \
+                mock.patch.object(common.os, "unlink", fail_unlink):
+            with self.assertRaises(common.WakeError) as ctx:
+                common.write_private_json(self.root, "config.json", {"binding": "replacement"})
+        self.assertEqual(ctx.exception.code, "state_io_failed")
+        self.assertEqual(Path(self.target).read_bytes(), self.original)
+
+    def test_numeric_overflow_is_refused(self):
+        bodies = [b'{"n":1e400}', b'{"n":-1e400}', b'{"a":[{"b":1E+999}]}', b'{"n":1.5e309}']
+        for body in bodies:
+            Path(self.target).write_bytes(body)
+            with self.assertRaises(common.WakeError, msg=body) as ctx:
+                common.read_small_json(self.target)
+            self.assertEqual(ctx.exception.code, "state_file_invalid")
+
+    def test_ordinary_numbers_still_accepted(self):
+        Path(self.target).write_bytes(b'{"a":1.5,"b":-2e10,"c":1e-400,"d":12345678901234567890,"e":0}')
+        value = common.read_small_json(self.target)
+        self.assertEqual(value["a"], 1.5)
+        self.assertEqual(value["c"], 0.0)  # underflow to zero is finite
+        self.assertEqual(value["d"], 12345678901234567890)
+
+    def test_excessive_nesting_is_refused(self):
+        depth = (common.MAX_SMALL_JSON - 8) // 2
+        Path(self.target).write_bytes(b'{"a":' + b"[" * depth + b"]" * depth + b"}")
+        with self.assertRaises(common.WakeError) as ctx:
+            common.read_small_json(self.target)
+        self.assertEqual(ctx.exception.code, "state_file_invalid")
+
+    def test_depth_limit_boundary(self):
+        limit = common.MAX_JSON_DEPTH
+        Path(self.target).write_bytes(b'{"a":' + b"[" * (limit - 1) + b"]" * (limit - 1) + b"}")
+        self.assertIn("a", common.read_small_json(self.target))
+        Path(self.target).write_bytes(b'{"a":' + b"[" * limit + b"]" * limit + b"}")
+        with self.assertRaises(common.WakeError):
+            common.read_small_json(self.target)
 
 
 class NoContentTests(unittest.TestCase):
