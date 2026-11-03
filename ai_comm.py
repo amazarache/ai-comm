@@ -1950,15 +1950,21 @@ class Channel:
                 result["warnings"] = [warning]
         return result
 
-    def outstanding(self, handle, session, peer, state_filter="any", unreplied=False, after=0, limit=10):
+    def outstanding(self, handle, session, peer, state_filter="any", unreplied=False, after=0, limit=10,
+                    exclude_acts=()):
         """Content-free delivery status of the caller's own messages to one peer.
 
         Reads the peer's receipt under the channel lock and never writes: no receipt,
         no Git and no poll heartbeat. The outstanding set is every message from the
         caller addressed to the peer with a sequence above the peer's read receipt.
-        Filters apply to the complete set before the page limit.
+        Filters apply to the complete set before the page limit. ``exclude_acts`` drops
+        messages of the named acts (for example a terminal ``ACK`` that needs no
+        response) from the outstanding set itself, so ``count`` excludes them too.
         """
         integer(limit, "limit", 1, 100)
+        excluded = set(exclude_acts)
+        require(len(exclude_acts) <= len(ACTS) and excluded <= ACTS, "unknown act", code="unknown_act",
+                field="act", allowed=sorted(ACTS), hint="Exclude only documented communication acts.")
         require(state_filter in {"any", "unseen", "seen"}, "invalid outstanding state filter",
                 code="invalid_outstanding_state", field="input",
                 hint="Use --state any, unseen or seen.")
@@ -1979,7 +1985,7 @@ class Channel:
                        if message["from"] == peer and message.get("reply_to")}
             entries, matched, count = [], 0, 0
             for message in state.messages[receipt["read"]:]:
-                if message["from"] != handle or peer not in message["to"]:
+                if message["from"] != handle or peer not in message["to"] or message["act"] in excluded:
                     continue
                 count += 1
                 entry = {"id": message["id"], "seq": message["seq"], "act": message["act"], "ts": message["ts"],
@@ -2671,6 +2677,8 @@ def parser():
             p.add_argument("--unreplied", action="store_true")
             p.add_argument("--after", type=int, default=0)
             p.add_argument("--limit", type=int, default=10)
+            p.add_argument("--exclude-act", dest="exclude_acts", action="append", default=[], metavar="ACT",
+                           help="leave messages of this act out of the outstanding set (repeatable)")
     p = sub.add_parser("state")
     p.add_argument("--as", dest="actor")
     p.add_argument("--session")
@@ -2753,7 +2761,7 @@ def main(argv=None):
             value = channel.ack(args.actor, args.session, args.through)
         elif cmd == "outstanding":
             value = channel.outstanding(args.actor, args.session, args.peer, args.state_filter,
-                                        args.unreplied, args.after, args.limit)
+                                        args.unreplied, args.after, args.limit, args.exclude_acts)
         elif cmd == "artifact":
             value = channel.put_artifact(args.actor, args.session, read_input(args.file, MAX_ARTIFACT))
         else:

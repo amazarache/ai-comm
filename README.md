@@ -207,7 +207,10 @@ peer's last scanned `inbox` page) or `seen` (scanned, not yet acknowledged), and
 `replied` is true when the peer has sent a message whose `reply_to` names it.
 `--state`, `--unreplied` and `--after SEQ` filter the complete set before
 `--limit` (1–100, default 10); `count` is the size of the whole set and `matched`
-the number passing the filters. After a peer takeover, `seen` is reported equal to
+the number passing the filters. `--exclude-act ACT` (repeatable, documented acts
+only) leaves messages of that act out of the set itself, before the limit; a
+watcher can pass `--exclude-act ACK` so a terminal handshake `ACK`, which needs no
+response, never counts as overdue. After a peer takeover, `seen` is reported equal to
 `read`, as the peer's own next `inbox` would treat it.
 
 Polling (`wait`, notifications, `state`) never moves a receipt, so it cannot hide

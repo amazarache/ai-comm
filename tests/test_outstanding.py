@@ -183,6 +183,45 @@ class OutstandingTests(unittest.TestCase):
         missing = self.cli("outstanding", "--as", "alpha", "--session", "alpha-session")
         self.assertEqual("invalid_cli_arguments", json.loads(missing.stderr)["code"])
 
+    def test_excluded_acts_leave_the_set_before_the_limit(self):
+        self.send(act="ASK")
+        ping = self.channel.send("alpha", "alpha-session", "ping", {"act": "PING", "to": ["beta"], "topic": "review",
+                                                                    "summary": "Ping."})["message"]
+        pong = self.channel.send("beta", "beta-session", "pong", {"act": "PONG", "to": ["alpha"], "topic": "review",
+                                                                  "summary": "Pong.", "reply_to": ping["id"]})["message"]
+        for i in range(12):
+            self.channel.send("alpha", "alpha-session", f"ack{i}", {"act": "ACK", "to": ["beta"], "topic": "review",
+                                                                    "summary": "Ack.", "reply_to": pong["id"]})
+        asked = self.send(act="ASK")
+        everything = self.out(limit=100)
+        self.assertEqual(15, everything["count"])
+        self.assertEqual(12, sum(1 for m in everything["messages"] if m["act"] == "ACK"))
+        filtered = self.out(exclude_acts=["ACK"], unreplied=True, after=1, limit=1)
+        # The PING is replied (PONG), so --unreplied skips it; the first match lies beyond 12 ACKs.
+        self.assertEqual((3, 1, asked["id"]), (filtered["count"], filtered["matched"], filtered["messages"][0]["id"]))
+        filtered = self.out(exclude_acts=["ACK", "PING"], after=1, limit=1)
+        self.assertEqual((2, 1, asked["id"]), (filtered["count"], filtered["matched"], filtered["messages"][0]["id"]))
+        result = self.cli("outstanding", "--as", "alpha", "--session", "alpha-session", "--to", "beta",
+                          "--exclude-act", "ACK", "--exclude-act", "PING", "--limit", "5")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(["ASK", "ASK"], [m["act"] for m in json.loads(result.stdout)["messages"]])
+        self.assertEqual("unknown_act", self.code(lambda: self.out(exclude_acts=["NOPE"])))
+        bad = self.cli("outstanding", "--as", "alpha", "--session", "alpha-session", "--to", "beta",
+                       "--exclude-act", "nope")
+        self.assertEqual("unknown_act", json.loads(bad.stderr)["code"])
+
+    def test_terminal_ack_alone_is_excluded(self):
+        ping = self.channel.send("alpha", "alpha-session", "ping", {"act": "PING", "to": ["beta"], "topic": "review",
+                                                                    "summary": "Ping."})["message"]
+        self.channel.inbox("beta", "beta-session")
+        self.channel.ack("beta", "beta-session", ping["seq"])
+        pong = self.channel.send("beta", "beta-session", "pong", {"act": "PONG", "to": ["alpha"], "topic": "review",
+                                                                  "summary": "Pong.", "reply_to": ping["id"]})["message"]
+        self.channel.send("alpha", "alpha-session", "ack", {"act": "ACK", "to": ["beta"], "topic": "review",
+                                                            "summary": "Ack.", "reply_to": pong["id"]})
+        self.assertEqual(1, self.out()["count"])
+        self.assertEqual((0, 0, []), tuple(self.out(exclude_acts=["ACK"])[k] for k in ("count", "matched", "messages")))
+
     def test_long_history_has_no_window_and_filters_search_everything(self):
         for _ in range(301):
             self.send()
