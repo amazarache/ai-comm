@@ -31,14 +31,19 @@
       "sha256": "430320527da73d789e12b11683c48885e0952a34fb155945bc0eec1aa8903ed6"
     },
     {
+      "path": "LICENSE",
+      "bytes": 35149,
+      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+    },
+    {
       "path": "PROTOCOL.md",
       "bytes": 15581,
       "sha256": "7242b13f489a393492539b2e835ed69da65d57a0d39f4acce2e18df757ef3377"
     },
     {
       "path": "README.md",
-      "bytes": 20837,
-      "sha256": "e1a9df0cc1f0d00b2ec5acc5014e428c2b4c1652aa81663291526c39de1b5038"
+      "bytes": 21165,
+      "sha256": "974f61f2d07c380e01e06387ab4f6372c571f2495dc8f8282769d3c683768262"
     },
     {
       "path": "SECURITY.md",

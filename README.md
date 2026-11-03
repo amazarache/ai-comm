@@ -355,3 +355,11 @@ python3 -m unittest discover -s tests -v
 Tests exercise real Git transactions, concurrent processes, a killed writer,
 retry deduplication, restart/backlog, stale sessions, receipt corruption, evidence
 and consensus constraints, safe rendering, and an unrelated project's index.
+
+## Licence
+
+Copyright (C) 2026 Adrian MAZARACHE.
+
+ai-comm is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License,
+version 3, as published by the Free Software Foundation (SPDX `GPL-3.0-only`). It is distributed without any
+warranty. The full text is in [LICENSE](LICENSE).
