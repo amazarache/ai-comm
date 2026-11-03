@@ -358,6 +358,16 @@ makes one session the notifier of the cache's pending offer (a claim lapses afte
 24 hours or when a newer release is offered); `offer answer` records the owner's
 answer and lists exactly what it permits.
 
+## Delivery status (1.7.0)
+
+`outstanding` is read-only and content-free; see the README section "Delivery
+status of your own messages". It needs no upgrade step of its own: a project
+adopts 1.7.0 by the guided controller like any MINOR release, and nothing in a
+channel changes. A project-local watcher can use it to report a peer's overdue
+messages, but the package itself starts no listener and sends nothing. The
+manual stability workflow is split into parallel jobs with the same repetition
+counts; Gate A requires its `all-jobs` check to succeed.
+
 ## Automation
 
 `ci.yml` runs on main, candidate branches, and pull requests against Linux and

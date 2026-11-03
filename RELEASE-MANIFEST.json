@@ -27,8 +27,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 16008,
-      "sha256": "430320527da73d789e12b11683c48885e0952a34fb155945bc0eec1aa8903ed6"
+      "bytes": 17267,
+      "sha256": "b72ea16d2c989fa18ef82c0df0efdddd4927f9ce9628dbb91b336235406c2673"
     },
     {
       "path": "LICENSE",
@@ -42,8 +42,8 @@
     },
     {
       "path": "README.md",
-      "bytes": 23020,
-      "sha256": "98d0dba07d4291c7c82d1242fd3b0c305f8a31d268ce98528588ae81fea6a178"
+      "bytes": 23190,
+      "sha256": "f2b3434240ea537ad67ccc220efdd6e14325ba003e75f7e355ea2f28508298fa"
     },
     {
       "path": "SECURITY.md",
@@ -53,7 +53,7 @@
     {
       "path": "ai_comm.py",
       "bytes": 160318,
-      "sha256": "cffb94312326b199f07ad3fcee52c4bba6e3fc5652c440dadbef488b76ac1ce7"
+      "sha256": "09d88e0b9341d7c7978fb9cc87b2e49908b24a29f5d6703ae99e3bd8abacd772"
     },
     {
       "path": "docs/ERRORS.md",
@@ -77,8 +77,8 @@
     },
     {
       "path": "docs/RELEASES.md",
-      "bytes": 24007,
-      "sha256": "81af1141b06d6015664f804119078c51acb256cf8f65096865bc5bf70afb1ffb"
+      "bytes": 24560,
+      "sha256": "7fb3f54b088cb3de7637579da282fe83d4e3a9a4ecae909651625b9d44631a62"
     },
     {
       "path": "entry/ai-comm/SKILL.md",

@@ -1,5 +1,25 @@
 # Changes
 
+## 1.7.0
+
+- Add `outstanding --as H --session S --to PEER`, a read-only, content-free
+  delivery status of the caller's own messages to one peer, from the peer's read
+  receipt: each message above the peer's `read_through` is `unseen` or `seen`,
+  and `replied` when the peer has answered it. `--state any|unseen|seen`,
+  `--unreplied`, `--after SEQ` and the repeatable `--exclude-act ACT` filter the
+  complete set before `--limit` (1–100); `count` and `matched` report the set and
+  the filtered size. The peer's receipt is validated and normalized after a
+  takeover exactly as `inbox` does, and is never written; the command writes no
+  receipt, commit or heartbeat and adds no heartbeat command value. Three new
+  error codes: `invalid_outstanding_state`, `peer_is_caller`, `unknown_peer`.
+- The manual stability workflow runs the same evidence in parallel jobs: 20
+  complete-suite runs as four shards of five, 200 notification-race and 200
+  heartbeat-ordering runs; any failing repetition fails its job, and `all-jobs`
+  succeeds only when every job succeeded.
+- The repository now carries the GNU GPL v3 licence (`LICENSE`, README section).
+- No protocol, channel or existing command change. PROTOCOL.md is unchanged at
+  the 3.0 contract digest.
+
 ## 1.6.0
 
 - Add a per-user cache of verified releases, `install.sh --user <command>`
