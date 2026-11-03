@@ -177,8 +177,8 @@
     },
     {
       "path": "tests/test_bootstrap.py",
-      "bytes": 25179,
-      "sha256": "50caad99dff535b3ed836e38e0465b4e38cba3a718c2bd4230d54091be5ef238"
+      "bytes": 25340,
+      "sha256": "e7376645946e5cf0c9321d16de9ad81965c47809245f84858fb4ddba21ec6917"
     },
     {
       "path": "tests/test_declare_project.py",

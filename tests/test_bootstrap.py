@@ -452,6 +452,8 @@ class RenderTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             rb.render("1.2.3", TOTAL_SECONDS=0)
 
+    @unittest.skipIf(os.environ.get("AI_COMM_UPGRADE_REAL_BOUNDARY_INNER") == "1",
+                     "fixtures inside a target verification rewrite VERSION")
     def test_install_doc_table_matches_this_trees_bootstrap(self):
         done = subprocess.run([sys.executable, "-I", "-B", str(ROOT / "scripts" / "render_bootstrap.py"), "--check"],
                               capture_output=True, text=True, timeout=60)
