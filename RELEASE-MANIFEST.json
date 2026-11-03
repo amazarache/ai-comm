@@ -67,8 +67,8 @@
     },
     {
       "path": "docs/INSTALL.md",
-      "bytes": 13148,
-      "sha256": "b7a4de1c066d8e4a361729d89ed104fa1bdf08e6f3be2d83e2a93904ec6fc71a"
+      "bytes": 13540,
+      "sha256": "b812488014ea46bb9f0059e850fadb8d1c34d1f40596b95c25fe9d00e88dd601"
     },
     {
       "path": "docs/PERFORMANCE.md",
@@ -102,8 +102,8 @@
     },
     {
       "path": "scripts/bootstrap.sh.in",
-      "bytes": 9203,
-      "sha256": "9b76f97c80b2a86fb8ccd7a5c12166841770e6ea22a7fdccc954b8deddc274b7"
+      "bytes": 9399,
+      "sha256": "9c1ca12bc50f8246faba36f6214758700d2f6a070c24a4835c1d3688fa2819a2"
     },
     {
       "path": "scripts/check_for_release.py",
@@ -177,8 +177,8 @@
     },
     {
       "path": "tests/test_bootstrap.py",
-      "bytes": 25340,
-      "sha256": "e7376645946e5cf0c9321d16de9ad81965c47809245f84858fb4ddba21ec6917"
+      "bytes": 27590,
+      "sha256": "17adcaeaeba96aebf47ed9699489816fd12b3fa5f8dd0f370bf266a1d5867e17"
     },
     {
       "path": "tests/test_declare_project.py",

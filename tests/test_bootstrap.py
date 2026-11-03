@@ -153,7 +153,9 @@ class BootstrapTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.server.shutdown()
+        cls.server.server_close()
         cls.plain.shutdown()
+        cls.plain.server_close()
         cls.pki.cleanup()
 
     def setUp(self):
@@ -324,6 +326,14 @@ class BootstrapTests(unittest.TestCase):
             with self.subTest(label):
                 self.serve_release(archive, sums.encode())
                 self.assert_stopped_before_install(self.run_script())
+        oversized = f"{good}  {name}\n".encode() + b"#" * 65537 + b"\n"
+        malformed_beside_valid = f"{good}  {name}\nnot-a-sha256  {name}\n".encode()
+        duplicate_after_limit = f"{good}  {name}\n".encode() + b"#" * 65537 + f"\n{good}  {name}\n".encode()
+        for label, sums in (("oversized", oversized), ("malformed beside valid", malformed_beside_valid),
+                            ("duplicate after 64 KiB", duplicate_after_limit)):
+            with self.subTest(label):
+                self.serve_release(archive, sums)
+                self.assert_stopped_before_install(self.run_script())
         self.serve_release(archive, f"{good} *{name}\n{'f' * 64}  unrelated\n".encode())
         self.assertEqual(0, self.run_script().returncode)
 
@@ -467,6 +477,34 @@ class RenderTests(unittest.TestCase):
                 with self.subTest(shell=shell):
                     done = subprocess.run([path, "-n"], input=data, capture_output=True, timeout=30)
                     self.assertEqual(0, done.returncode, done.stderr)
+
+
+class ManualChecksumTests(unittest.TestCase):
+    """The documented manual checksum lines, against the 1.8.0 two-asset SHA256SUMS layout."""
+
+    def lines(self, version):
+        doc = (ROOT / "docs" / "INSTALL.md").read_text(encoding="utf-8")
+        count = next(l for l in doc.splitlines() if l.startswith("grep -c "))
+        check = next(l for l in doc.splitlines() if l.startswith("grep -x "))
+        strip = lambda l: l.split("   #")[0].split("  #")[0].strip()
+        return [strip(l).replace("X", version) for l in (count, check)]
+
+    @unittest.skipUnless(shutil.which("sha256sum") and shutil.which("grep"), "sha256sum and grep needed")
+    def test_manual_check_passes_with_the_bootstrap_listed_and_fails_on_tampering(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            archive = d / "ai-comm-1.8.0.tar.gz"
+            archive.write_bytes(b"archive bytes")
+            digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+            (d / "SHA256SUMS").write_text(f"{digest}  ai-comm-1.8.0.tar.gz\n{'a' * 64}  install-ai-comm.sh\n")
+            count, check = self.lines("1.8.0")
+            run = lambda cmd: subprocess.run(["sh", "-c", cmd], cwd=d, capture_output=True, text=True, timeout=30)
+            self.assertEqual("1", run(count).stdout.strip())
+            ok = run(check)
+            self.assertEqual(0, ok.returncode, ok.stderr)
+            self.assertIn("ai-comm-1.8.0.tar.gz: OK", ok.stdout)
+            archive.write_bytes(b"tampered")
+            self.assertNotEqual(0, run(check).returncode)
 
 
 class VerifyFirstTests(unittest.TestCase):

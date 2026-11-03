@@ -137,10 +137,17 @@ sys.exit(problem)
 sums, archive, name = sys.argv[1], sys.argv[2], sys.argv[3]
 records = []
 with open(sums, "rb") as handle:
-    for raw in handle.read(65536).splitlines():
-        m = re.fullmatch(rb"([0-9a-f]{64}) [ *](.+)", raw.rstrip(b"\r"))
-        if m and m.group(2) == name.encode():
-            records.append(m.group(1).decode())
+    data = handle.read(65537)
+if len(data) > 65536:
+    sys.exit("SHA256SUMS is larger than expected")
+target = name.encode()
+for raw in data.splitlines():
+    line = raw.rstrip(b"\r")
+    m = re.fullmatch(rb"([0-9a-f]{64}) [ *](.+)", line)
+    if m and m.group(2) == target:
+        records.append(m.group(1).decode())
+    elif target in line:
+        sys.exit("SHA256SUMS has a malformed record for " + name)
 if len(records) != 1:
     sys.exit("SHA256SUMS has %d records for %s; expected exactly one" % (len(records), name))
 digest = hashlib.sha256()

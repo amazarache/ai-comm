@@ -51,7 +51,7 @@ On macOS use `shasum -a 256 -c -` instead of `sha256sum -c -`. To read the boots
 
 | Release | File | SHA-256 |
 | --- | --- | --- |
-| `v1.7.0` | `install-ai-comm.sh` | `37da1fd00a535d7101789932b909e9db32df7bf02d4db8f6d76c63d10a42f27f` |
+| `v1.7.0` | `install-ai-comm.sh` | `8851461add44a17591e1fc960b532ce4695db93ca8283e0ca1c242365b85067f` |
 
 The table is generated before each release is tagged (`scripts/render_bootstrap.py`), and the release workflow
 refuses to publish a bootstrap whose digest differs from it.
@@ -69,16 +69,21 @@ independently published key are the planned next step.
 The steps verify everything they download before anything from it runs. They pin one version; there is no "latest"
 and no silent fallback. Replace `X` with the version you chose, for example `1.6.0`.
 
-While the repository is private, download with the GitHub command-line tool, which uses your existing login:
+Download the archive and `SHA256SUMS` of release `vX` (the GitHub command-line tool works too:
+`gh release download vX -R amazarache/ai-comm -p 'ai-comm-X.tar.gz' -p SHA256SUMS`), then check exactly the archive's
+own record. `SHA256SUMS` also lists `install-ai-comm.sh` from 1.8.0 on, which this route does not download, so check
+the one selected line rather than the whole file:
 
 ```sh
 work=$(mktemp -d) && chmod 700 "$work" && cd "$work"
-gh release download vX -R amazarache/ai-comm -p 'ai-comm-X.tar.gz' -p SHA256SUMS
-sha256sum -c SHA256SUMS        # must print "ai-comm-X.tar.gz: OK"; stop otherwise
+curl -fsSL --proto =https --proto-redir =https --tlsv1.2 \
+  -O https://github.com/amazarache/ai-comm/releases/download/vX/ai-comm-X.tar.gz \
+  -O https://github.com/amazarache/ai-comm/releases/download/vX/SHA256SUMS
+grep -c 'ai-comm-X\.tar\.gz' SHA256SUMS                   # must print 1; stop otherwise
+grep -x '[0-9a-f]\{64\}  ai-comm-X\.tar\.gz' SHA256SUMS | sha256sum -c -   # must print "ai-comm-X.tar.gz: OK"
 ```
 
-On macOS use `shasum -a 256 -c SHA256SUMS`. If the repository becomes public, `curl -fLO` with the two explicit asset
-URLs of release `vX` replaces the download command; the checks stay the same.
+On macOS use `shasum -a 256 -c -` in place of `sha256sum -c -`.
 
 Extract it. A release archive contains only regular files and directories, so the command first checks every
 member and refuses the whole archive, before anything is written, if any name is absolute, contains a `..`
