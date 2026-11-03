@@ -313,6 +313,7 @@ changing the platform label alone cannot reactivate an old reference.
 | `1.5.3` | `3.0` (unchanged) | Existing protocol-3 channels; every instruction is host-neutral. |
 | `1.6.0` | `3.0` (unchanged) | Existing protocol-3 channels; adds the per-user cache of verified releases, a trusted check of a project's pin, cache-side upgrade declarations, a per-user entry skill, an optional `ai-comm` launcher and the cache's own update offers. |
 | `1.7.0` | `3.0` (unchanged) | Existing protocol-3 channels; adds the read-only `outstanding` delivery status of your own messages to a peer, and the GPL-3.0 licence. |
+| `1.8.0` | `3.0` (unchanged) | Existing protocol-3 channels; adds the one-line install bootstrap `install-ai-comm.sh`. |
 
 Package and protocol versions are related but distinct. A protocol MAJOR (for
 example 3.0 to 4.0) always bumps the package MAJOR. A protocol MINOR (3.0 to

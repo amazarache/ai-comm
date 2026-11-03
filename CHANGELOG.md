@@ -1,5 +1,24 @@
 # Changes
 
+## 1.8.0
+
+- Add a one-line install. Each release publishes `install-ai-comm.sh`, a small POSIX
+  bootstrap rendered from `scripts/bootstrap.sh.in` by `scripts/render_bootstrap.py`
+  and pinned to its own release. It downloads the archive and `SHA256SUMS` with a
+  stdlib Python HTTPS transport (every redirect checked before its request,
+  verifying TLS 1.2 or later, at most 5 hops, a 20 s socket timeout and a 300 s
+  total deadline enforced by a POSIX timer, a size cap and a Content-Length check),
+  requires exactly one strict `SHA256SUMS` record for the archive, applies the
+  archive member checks, and runs the release's own `install.sh --user install`.
+  It installs into the per-user cache only, unless `--register` or `--launcher` is
+  given; it refuses to run as root and refuses a version already in the cache.
+- `docs/INSTALL.md` leads with the direct and the verify-first one-liners, states
+  what each trusts, and carries the bootstrap's digest, committed before the tag;
+  the release workflow re-renders the bootstrap, refuses a digest that differs, and
+  lists it in `SHA256SUMS`. The manual steps check only the archive's own record.
+- No protocol, channel or existing command change. PROTOCOL.md is unchanged at
+  the 3.0 contract digest.
+
 ## 1.7.0
 
 - Add `outstanding --as H --session S --to PEER`, a read-only, content-free
