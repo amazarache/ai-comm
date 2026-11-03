@@ -6,27 +6,71 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
+# Same evidence as before, split so that each job keeps headroom under its own limit:
+# 20 complete-suite runs (4 shards x 5), 200 notification-race runs, 200 heartbeat-ordering runs.
+# Any failing repetition fails its job; `all-jobs` succeeds only when all six jobs succeeded.
 jobs:
-  repeated-tests:
+  full-suite:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - name: Run the complete suite 20 times
+      - name: Run the complete suite 5 times (shard ${{ matrix.shard }} of 4)
         run: |
-          for run in $(seq 1 20); do
-            python -m unittest discover -s tests -q
+          for run in $(seq 1 5); do
+            python -m unittest discover -s tests -q || exit 1
           done
+
+  notification-race:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
       - name: Repeat notification-arrival race test 200 times
         run: |
           for run in $(seq 1 200); do
-            python -m unittest tests.test_protocol.ProtocolTests.test_notification_wait_observes_later_arrival_without_ack -q
+            python -m unittest tests.test_protocol.ProtocolTests.test_notification_wait_observes_later_arrival_without_ack -q || exit 1
           done
+
+  heartbeat-ordering:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
       - name: Repeat concurrent heartbeat ordering test 200 times
         run: |
           for run in $(seq 1 200); do
-            python -m unittest tests.test_protocol.ProtocolTests.test_concurrent_polls_preserve_the_latest_sampled_instant -q
+            python -m unittest tests.test_protocol.ProtocolTests.test_concurrent_polls_preserve_the_latest_sampled_instant -q || exit 1
           done
+
+  all-jobs:
+    needs: [full-suite, notification-race, heartbeat-ordering]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every stability job to have succeeded
+        env:
+          FULL: ${{ needs.full-suite.result }}
+          RACE: ${{ needs.notification-race.result }}
+          HEARTBEAT: ${{ needs.heartbeat-ordering.result }}
+        run: |
+          echo "full-suite=$FULL notification-race=$RACE heartbeat-ordering=$HEARTBEAT"
+          [ "$FULL" = success ] && [ "$RACE" = success ] && [ "$HEARTBEAT" = success ]

@@ -366,7 +366,9 @@ test suite, runs the suite again from an extracted `git archive` with no Git
 metadata, and scans tracked source files for credential patterns, private
 network addresses, and home paths. CI provides evidence only; it does not ACCEPT
 or DECIDE a release. `stability.yml` is manual-only and runs 20 full-suite
-repetitions plus 200 focused race-test runs. `release.yml` checks pushed tags,
+repetitions (four parallel shards of five) plus 200 runs each of two focused
+race tests, in separate jobs; its `all-jobs` check succeeds only when every job
+succeeded. `release.yml` checks pushed tags,
 then creates a GitHub Release with the source archive, SHA256SUMS, and matching
 `CHANGELOG.md` section. Manual dispatch verifies an existing tag without
 publishing. The workflow force-fetches the annotated tag before checking it.

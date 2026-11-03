@@ -12,8 +12,8 @@
     },
     {
       "path": ".github/workflows/stability.yml",
-      "bytes": 1069,
-      "sha256": "18788381f0afef895dc3f1f7c400891e7a315340708aca0b3828a70a33546bf1"
+      "bytes": 2690,
+      "sha256": "00cecf6c5028c4bfe17eb8514a5550d4dedcbac68a288376fe8a1da54c826c42"
     },
     {
       "path": ".gitignore",
@@ -77,8 +77,8 @@
     },
     {
       "path": "docs/RELEASES.md",
-      "bytes": 23884,
-      "sha256": "87b8d99944270050e86be8771b19b6fcc4ab29712ce6af40a8f56255b549c5d0"
+      "bytes": 24007,
+      "sha256": "81af1141b06d6015664f804119078c51acb256cf8f65096865bc5bf70afb1ffb"
     },
     {
       "path": "entry/ai-comm/SKILL.md",
