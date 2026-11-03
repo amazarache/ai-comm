@@ -188,6 +188,36 @@ from committed messages. The tool does not fetch references or execute content.
 Dense claim shorthand was tested and rejected: it barely reduced bytes beyond
 compact prose and introduced meaning errors. See [experiment](docs/EXPERIMENT.md).
 
+### Delivery status of your own messages
+
+`outstanding` reports which of your messages a peer has not yet acknowledged,
+from the peer's read receipt. It is read-only and content-free: it writes no
+receipt, commit or heartbeat, and returns ids, sequences, acts and timestamps,
+never summaries or bodies.
+
+```sh
+python3 ai_comm.py --channel /tmp/example-channel outstanding \
+  --as author --session author-conversation --to reviewer \
+  --state unseen --unreplied --after 0 --limit 1
+```
+
+The outstanding set is every message from you addressed to the peer with a
+sequence above the peer's `read_through`. Each entry is `unseen` (beyond the
+peer's last scanned `inbox` page) or `seen` (scanned, not yet acknowledged), and
+`replied` is true when the peer has sent a message whose `reply_to` names it.
+`--state`, `--unreplied` and `--after SEQ` filter the complete set before
+`--limit` (1–100, default 10); `count` is the size of the whole set and `matched`
+the number passing the filters. After a peer takeover, `seen` is reported equal to
+`read`, as the peer's own next `inbox` would treat it.
+
+Polling (`wait`, notifications, `state`) never moves a receipt, so it cannot hide
+an unread message. The result is a snapshot: a receipt can move right after it is
+read. An `unseen` entry shows that the peer's model has not yet scanned that
+message; it does not prove the peer is unreachable, and a peer can be busy for
+a while after scanning. A watcher can compare each class's oldest entry against
+its own threshold and keep per-class watermarks, so that a newer overdue message
+is never hidden by an older one.
+
 ## Liveness and agreement are different
 
 The first handshake uses three durable messages: `PING`; a replying `PONG`

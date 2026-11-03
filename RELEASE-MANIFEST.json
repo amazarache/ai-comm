@@ -42,23 +42,23 @@
     },
     {
       "path": "README.md",
-      "bytes": 21165,
-      "sha256": "974f61f2d07c380e01e06387ab4f6372c571f2495dc8f8282769d3c683768262"
+      "bytes": 22776,
+      "sha256": "dc1ec77bd9d2504ce6b08aac610e0c916d5bbb81872a51d040cb5453923c596a"
     },
     {
       "path": "SECURITY.md",
-      "bytes": 7939,
-      "sha256": "0666e8fac66a053f4b4f76146f4e51083f2215d7cb73a85b2d1f54bbaa65edb1"
+      "bytes": 8652,
+      "sha256": "142c747c5aaac2050eda6e66ff8f6b4f09998121275db71f4e8a09b4ac6f7251"
     },
     {
       "path": "ai_comm.py",
-      "bytes": 155551,
-      "sha256": "18c04ee81c0d84ee73f5cb04fa2bd6ba8b001bf416a388706b2798ffbaa6e270"
+      "bytes": 159590,
+      "sha256": "145060b56ad6fde5b0069ab98d5cc0f8cf96d07bdd174e9a223b71b8fb13430e"
     },
     {
       "path": "docs/ERRORS.md",
-      "bytes": 25286,
-      "sha256": "db47b8382ebe186121a4e7a38d2b02215ee7c30bfaa6292ef4b367e54b191583"
+      "bytes": 25443,
+      "sha256": "0e5cd6c5ebdb17854d74e05533a9881f94e3e1fc767ef2a799e17b146d8793d1"
     },
     {
       "path": "docs/EXPERIMENT.md",
@@ -189,6 +189,11 @@
       "path": "tests/test_neutrality.py",
       "bytes": 2503,
       "sha256": "beed58f3c1666ddfd26505feea6dd37891bc4a4a7ec08b2def55ac6441fb44f6"
+    },
+    {
+      "path": "tests/test_outstanding.py",
+      "bytes": 10751,
+      "sha256": "5fef998dee1bf078ecc95ec7a2e285893557aa29c00ee1922ce7f3bafcffaa23"
     },
     {
       "path": "tests/test_protocol.py",

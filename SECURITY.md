@@ -123,3 +123,16 @@ project's pin.
 ## Runtime liveness records
 
 Package 1.3 writes best-effort heartbeat files beneath the channel runtime directory, outside Git history. They are mode 0600 in a mode 0700 directory and contain only the participant handle, generation, UTC poll time, command name, and package version. A same-OS-user process can forge or replace these files; liveness is advisory process evidence, not authenticated peer or model activity. Symlinks and non-regular target files are refused.
+
+## Delivery status (1.7.0)
+
+`outstanding` lets a current participant read another participant's receipt
+boundaries (`read_through`, `seen_through`) and the classification of the
+caller's own messages. Participants already share one channel and OS account,
+and receipts are delivery bookkeeping, not credentials. The command requires
+the caller's current identity, validates the peer's receipt exactly as `inbox`
+does (symlinks and corrupt bounds are refused), reads it under the channel lock,
+and never writes it. Output contains no message text, artifacts or session
+references beyond the peer's handle and generation. A same-OS-user process can
+forge receipts; treat the result as advisory delivery evidence.
+

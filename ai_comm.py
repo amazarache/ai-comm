@@ -212,6 +212,7 @@ ERROR_CODES = frozenset([
     'invalid_limit',
     'invalid_manifest_sha256',
     'invalid_message_id',
+    'invalid_outstanding_state',
     'invalid_non_secret_session_reference_length',
     'invalid_notification_sequence',
     'invalid_offset',
@@ -278,6 +279,7 @@ ERROR_CODES = frozenset([
     'package_contract_does_not_match_channel_select_its_pinned_revisi',
     'package_version_missing',
     'partial_clone_release_check_unsupported',
+    'peer_is_caller',
     'pong_nonce_must_be_fresh',
     'predecessor_arguments_must_be_paired',
     'predecessor_acceptance_missing',
@@ -345,6 +347,7 @@ ERROR_CODES = frozenset([
     'unexpected_control_nonce',
     'unknown_act',
     'unknown_draft_field',
+    'unknown_peer',
     'unknown_question_operation',
     'unknown_source_reference',
     'unregistered_or_stale_session',
@@ -1878,6 +1881,10 @@ class Channel:
 
     def receipt(self, state, handle, session):
         current = state.identity(handle, session)
+        return self._load_receipt(state, handle, current)
+
+    def _load_receipt(self, state, handle, current):
+        """Validate and normalize a stored receipt for the participant's current generation; never writes."""
         path = self.runtime / (handle + ".json")
         require(not path.is_symlink(), "receipt symlink refused", code="receipt_symlink_refused")
         if path.exists():
@@ -1942,6 +1949,53 @@ class Channel:
             if warning:
                 result["warnings"] = [warning]
         return result
+
+    def outstanding(self, handle, session, peer, state_filter="any", unreplied=False, after=0, limit=10):
+        """Content-free delivery status of the caller's own messages to one peer.
+
+        Reads the peer's receipt under the channel lock and never writes: no receipt,
+        no Git and no poll heartbeat. The outstanding set is every message from the
+        caller addressed to the peer with a sequence above the peer's read receipt.
+        Filters apply to the complete set before the page limit.
+        """
+        integer(limit, "limit", 1, 100)
+        require(state_filter in {"any", "unseen", "seen"}, "invalid outstanding state filter",
+                code="invalid_outstanding_state", field="input",
+                hint="Use --state any, unseen or seen.")
+        with self.lock():
+            state = self.snapshot()
+            state.identity(handle, session)
+            pattern(peer, HANDLE, "handle")
+            require(peer != handle, "peer must differ from the caller", code="peer_is_caller", field="to",
+                    hint="Name another participant with --to.")
+            current = state.current.get(peer)
+            require(current is not None, "unknown peer", code="unknown_peer", field="to",
+                    hint="Name a current participant of this channel with --to.")
+            integer(after, "after", 0, len(state.messages))
+            path = self.runtime / (peer + ".json")
+            present = path.exists() or path.is_symlink()
+            _, receipt = self._load_receipt(state, peer, current)
+            replied = {message.get("reply_to") for message in state.messages
+                       if message["from"] == peer and message.get("reply_to")}
+            entries, matched, count = [], 0, 0
+            for message in state.messages[receipt["read"]:]:
+                if message["from"] != handle or peer not in message["to"]:
+                    continue
+                count += 1
+                entry = {"id": message["id"], "seq": message["seq"], "act": message["act"], "ts": message["ts"],
+                         "state": "unseen" if message["seq"] > receipt["seen"] else "seen",
+                         "replied": message["id"] in replied}
+                if (message["seq"] <= after or (state_filter != "any" and entry["state"] != state_filter)
+                        or (unreplied and entry["replied"])):
+                    continue
+                matched += 1
+                if len(entries) < limit:
+                    entries.append(entry)
+            return {"head": state.head, "as_of": now(),
+                    "peer": {"handle": peer, "generation": current["generation"],
+                             "receipt": {"present": present, "generation": receipt["generation"],
+                                         "read_through": receipt["read"], "seen_through": receipt["seen"]}},
+                    "count": count, "matched": matched, "messages": entries}
 
     def ack(self, handle, session, through):
         integer(through, "receipt sequence")
@@ -2589,7 +2643,9 @@ def parser():
         "artifact": "publish a file as an immutable artifact and print its SHA-256; "
                     "read it back with show-artifact DIGEST",
     }
-    for command in ("send", "inbox", "ack", "wait", "artifact"):
+    command_help["outstanding"] = ("content-free delivery status of your own messages to one peer, from the "
+                                   "peer's read receipt; read-only")
+    for command in ("send", "inbox", "ack", "wait", "artifact", "outstanding"):
         p = sub.add_parser(command, help=command_help.get(command),
                            description=command_help.get(command))
         p.add_argument("--as", dest="actor", required=True)
@@ -2609,6 +2665,12 @@ def parser():
             p.add_argument("--through", type=int, required=True)
         elif command == "artifact":
             p.add_argument("--file", required=True)
+        elif command == "outstanding":
+            p.add_argument("--to", dest="peer", required=True)
+            p.add_argument("--state", dest="state_filter", choices=["any", "unseen", "seen"], default="any")
+            p.add_argument("--unreplied", action="store_true")
+            p.add_argument("--after", type=int, default=0)
+            p.add_argument("--limit", type=int, default=10)
     p = sub.add_parser("state")
     p.add_argument("--as", dest="actor")
     p.add_argument("--session")
@@ -2689,6 +2751,9 @@ def main(argv=None):
             value = channel.wait(args.actor, args.session, args.timeout, args.limit, args.new_since)
         elif cmd == "ack":
             value = channel.ack(args.actor, args.session, args.through)
+        elif cmd == "outstanding":
+            value = channel.outstanding(args.actor, args.session, args.peer, args.state_filter,
+                                        args.unreplied, args.after, args.limit)
         elif cmd == "artifact":
             value = channel.put_artifact(args.actor, args.session, read_input(args.file, MAX_ARTIFACT))
         else:

@@ -138,6 +138,7 @@ Complete code catalog:
 | `invalid_notification_sequence` | invalid notification sequence |
 | `invalid_offset` | invalid offset |
 | `invalid_open_question_delta` | invalid open question delta |
+| `invalid_outstanding_state` | invalid outstanding state filter |
 | `invalid_platform` | invalid platform |
 | `invalid_policy` | invalid policy |
 | `invalid_policy_acts` | invalid policy acts |
@@ -200,6 +201,7 @@ Complete code catalog:
 | `package_contract_does_not_match_channel_select_its_pinned_revisi` | package contract does not match channel select its pinned revisi |
 | `package_version_missing` | package version missing |
 | `partial_clone_release_check_unsupported` | partial clone release check unsupported |
+| `peer_is_caller` | peer must differ from the caller |
 | `pong_nonce_must_be_fresh` | pong nonce must be fresh |
 | `predecessor_acceptance_missing` | predecessor acceptance missing |
 | `predecessor_arguments_must_be_paired` | predecessor arguments must be paired |
@@ -267,6 +269,7 @@ Complete code catalog:
 | `unexpected_control_nonce` | unexpected control nonce |
 | `unknown_act` | unknown act |
 | `unknown_draft_field` | unknown draft field |
+| `unknown_peer` | unknown peer |
 | `unknown_question_operation` | unknown question operation |
 | `unknown_source_reference` | unknown source reference |
 | `unregistered_or_stale_session` | unregistered or stale session |
