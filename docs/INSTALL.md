@@ -11,7 +11,60 @@ There are two places ai-comm can live:
   user, with `current` and `previous` links (`install.sh --user`). Changing the cache never changes a project's pin,
   channel, declaration, listener or guidance.
 
-## First install on a new machine
+## One-line install
+
+Each release (from 1.8.0) publishes `install-ai-comm.sh`, a small bootstrap that installs **that** release into the
+per-user cache. It downloads the release archive and `SHA256SUMS` over HTTPS only (every redirect too, with bounded
+time), checks the archive's own `SHA256SUMS` record and every archive member, then runs the release's
+`install.sh --user install`. That installer re-verifies the tag, the release index and the manifest, and runs the full
+test suite, before publishing anything. By default it installs into the cache only; `--register SKILLS_DIR`
+(repeatable) and `--launcher BIN_DIR` add the skill link and the `ai-comm` command. It never needs root and touches no
+project. If another release is already current, the new one is installed but not activated, and the bootstrap prints
+the `activate` command. If the version is already in the cache, it refuses without changing anything.
+
+Replace `X` with the version you chose.
+
+**Direct (fastest):**
+
+```sh
+curl -fsSL --proto =https --proto-redir =https --tlsv1.2 \
+  https://github.com/amazarache/ai-comm/releases/download/vX/install-ai-comm.sh | sh
+```
+
+Add options after `sh -s --`, for example `| sh -s -- --register ~/.agents/skills --launcher ~/.local/bin`. A
+convenience URL, `https://github.com/amazarache/ai-comm/releases/latest/download/install-ai-comm.sh`, always serves
+the newest release's bootstrap, which pins its own version; use it only when you deliberately want the newest.
+
+**Verify first (recommended):** the bootstrap runs only if the whole downloaded file matches the digest in the table
+below. Run it in any POSIX shell; the parentheses give it its own subshell, so the temporary file is removed when the
+command ends and your shell's traps are untouched:
+
+```sh
+( f=$(mktemp) || exit 1; trap 'rm -f "$f"' EXIT; trap 'exit 129' HUP; trap 'exit 130' INT; trap 'exit 143' TERM
+  curl -fsSL --proto =https --proto-redir =https --tlsv1.2 --connect-timeout 20 --max-time 120 -o "$f" \
+    https://github.com/amazarache/ai-comm/releases/download/vX/install-ai-comm.sh \
+  && echo "<sha256>  $f" | sha256sum -c - && sh "$f" )
+```
+
+On macOS use `shasum -a 256 -c -` instead of `sha256sum -c -`. To read the bootstrap first, replace `sh "$f"` with
+`cat "$f"`, or download it to a file of your own with `-o install-ai-comm.sh`.
+
+| Release | File | SHA-256 |
+| --- | --- | --- |
+| `v1.7.0` | `install-ai-comm.sh` | `37da1fd00a535d7101789932b909e9db32df7bf02d4db8f6d76c63d10a42f27f` |
+
+The table is generated before each release is tagged (`scripts/render_bootstrap.py`), and the release workflow
+refuses to publish a bootstrap whose digest differs from it.
+
+**What this trusts.** Piped into `sh`, the bootstrap itself runs before you have read it, fetched from GitHub over
+HTTPS. `SHA256SUMS` comes from the same release as the archive, so it proves the download is intact, not who
+published it. A tag cannot move (the repository's rules forbid it), but a release asset can still be replaced; the
+digest in the tagged repository's table above is what detects a changed bootstrap. The direct pipe only guarantees
+that a download cut inside the bootstrap's function body does not run a partial body; the verify-first command
+rejects any corrupted or truncated download before it runs. ai-comm releases are not signed yet; signatures with an
+independently published key are the planned next step.
+
+## First install on a new machine (manual steps)
 
 The steps verify everything they download before anything from it runs. They pin one version; there is no "latest"
 and no silent fallback. Replace `X` with the version you chose, for example `1.6.0`.
@@ -60,8 +113,9 @@ publishing the release into the cache. You can delete the download directory aft
 
 **What this proves and what it does not.** The download comes over authenticated HTTPS, and the archive, tag and
 index agree with each other. That is consistency, not independent proof of who published the release: ai-comm
-releases are not signed yet. Never pipe a downloaded script into a shell; a later signed-release design will add a
-reviewed verifier and an independently trusted key before any downloaded code runs.
+releases are not signed yet. The one-line install above trusts exactly the same things, plus the bootstrap script
+itself; the verify-first variant checks that script against the tagged digest before running it. A later
+signed-release design will add an independently trusted key.
 
 ## Managing the cache
 

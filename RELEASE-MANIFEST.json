@@ -7,8 +7,8 @@
     },
     {
       "path": ".github/workflows/release.yml",
-      "bytes": 2973,
-      "sha256": "3b9a2852138b51dd3cd6cff9e03f457ce63278712cb5b4367c3dbc0c392e1cdc"
+      "bytes": 3714,
+      "sha256": "c00aecea83c6adeb3004ef23ebf62a45ed6e825f1ddae140b8642421148f6fdb"
     },
     {
       "path": ".github/workflows/stability.yml",
@@ -42,8 +42,8 @@
     },
     {
       "path": "README.md",
-      "bytes": 23190,
-      "sha256": "f2b3434240ea537ad67ccc220efdd6e14325ba003e75f7e355ea2f28508298fa"
+      "bytes": 23664,
+      "sha256": "29f99bc4839908bc7d2266287e8f6473e2b46bc0db323d3fdf4de844093666e5"
     },
     {
       "path": "SECURITY.md",
@@ -67,8 +67,8 @@
     },
     {
       "path": "docs/INSTALL.md",
-      "bytes": 9660,
-      "sha256": "07a51f206471b5c2fcdf8bc88aba9f707cf0f1b458e17b40a0d2e71c12f17c92"
+      "bytes": 13148,
+      "sha256": "b7a4de1c066d8e4a361729d89ed104fa1bdf08e6f3be2d83e2a93904ec6fc71a"
     },
     {
       "path": "docs/PERFORMANCE.md",
@@ -99,6 +99,11 @@
       "path": "scripts/benchmark_snapshot.py",
       "bytes": 4884,
       "sha256": "eb983ed2c861f6e2f437c3f090af443c97873311c4eb5db6b9962d90f9019b01"
+    },
+    {
+      "path": "scripts/bootstrap.sh.in",
+      "bytes": 9203,
+      "sha256": "9b76f97c80b2a86fb8ccd7a5c12166841770e6ea22a7fdccc954b8deddc274b7"
     },
     {
       "path": "scripts/check_for_release.py",
@@ -151,6 +156,11 @@
       "sha256": "e0c1e41a105c48b7cbb3ef0fa44456c484d50e5135b45a671b63782d2af52487"
     },
     {
+      "path": "scripts/render_bootstrap.py",
+      "bytes": 3779,
+      "sha256": "903edac5f5f2e9b8ccd1ee8e5ec3df3c12de46e4b839a8afa21f0ebb38b9c176"
+    },
+    {
       "path": "scripts/test_old_protocol.py",
       "bytes": 3872,
       "sha256": "84ce3149a471b604d023637c6d35cc10da3615581a1aa7b3f49994e75c2f49f0"
@@ -164,6 +174,11 @@
       "path": "skills/ai-comm/SKILL.md",
       "bytes": 22211,
       "sha256": "41a97275f4b48f9e5caec3a28f02ec1aacdac6fe3f68cf718211b5fd9db69896"
+    },
+    {
+      "path": "tests/test_bootstrap.py",
+      "bytes": 25179,
+      "sha256": "50caad99dff535b3ed836e38e0465b4e38cba3a718c2bd4230d54091be5ef238"
     },
     {
       "path": "tests/test_declare_project.py",

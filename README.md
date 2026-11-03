@@ -10,6 +10,18 @@ hosts the tool. Your channel is a separate local bare Git repository and is neve
 automatically uploaded. There is no telemetry, browser dependency or background
 model service.
 
+## Install
+
+To install a release for your user (no root; nothing outside the per-user cache):
+
+```sh
+curl -fsSL --proto =https --proto-redir =https --tlsv1.2 \
+  https://github.com/amazarache/ai-comm/releases/download/vX/install-ai-comm.sh | sh
+```
+
+[docs/INSTALL.md](docs/INSTALL.md) has the verify-first variant (recommended), the bootstrap digests, what this
+trusts, and the manual steps. A project's own pinned copy is installed separately with `install.sh --project`.
+
 ## How any agent uses ai-comm
 
 ai-comm works the same way for every AI agent and every host program that runs

@@ -64,11 +64,21 @@ jobs:
           cat >> dist/RELEASE-NOTES.md <<'EOF'
 
           This release was checked by the tagged GitHub Actions workflow.
-          SHA256SUMS verifies the source archive. This private repository does
+          SHA256SUMS verifies the source archive and the bootstrap. This repository does
           not publish a provenance attestation, so publisher authenticity is not
           independently verified by the release archive.
           EOF
-          (cd dist && sha256sum "ai-comm-${version}.tar.gz" > SHA256SUMS && sha256sum -c SHA256SUMS)
+          python scripts/render_bootstrap.py --check
+          python scripts/render_bootstrap.py "$version" --out dist/install-ai-comm.sh
+          bootstrap_sha=$(sha256sum dist/install-ai-comm.sh | cut -d" " -f1)
+          grep -qF "| \`v${version}\` | \`install-ai-comm.sh\` | \`${bootstrap_sha}\` |" docs/INSTALL.md
+          cat >> dist/RELEASE-NOTES.md <<EOF
+
+          One-line install of this release into the per-user cache (see docs/INSTALL.md; verify-first variant there):
+          curl -fsSL --proto =https --proto-redir =https --tlsv1.2 https://github.com/amazarache/ai-comm/releases/download/v${version}/install-ai-comm.sh | sh
+          install-ai-comm.sh sha256: ${bootstrap_sha}
+          EOF
+          (cd dist && sha256sum "ai-comm-${version}.tar.gz" install-ai-comm.sh > SHA256SUMS && sha256sum -c SHA256SUMS)
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}

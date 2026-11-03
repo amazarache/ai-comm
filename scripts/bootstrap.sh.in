@@ -1,0 +1,214 @@
+#!/bin/sh
+# ai-comm @VERSION@ bootstrap: install this verified release into the per-user cache.
+#
+# Generated from scripts/bootstrap.sh.in by scripts/render_bootstrap.py; do not edit.
+# Usage: sh install-ai-comm.sh [--register SKILLS_DIR]... [--launcher BIN_DIR]
+#
+# It downloads ai-comm-@VERSION@.tar.gz and SHA256SUMS over HTTPS only (every redirect too),
+# checks the archive against its SHA256SUMS record, checks every archive member, extracts it,
+# and runs the release's own `install.sh --user install`, which re-verifies the tag, the
+# release index and the manifest and runs the full test suite before publishing into the
+# cache. It never needs root, touches no project, and writes only the cache, its own
+# temporary directory and the directories you name with --register / --launcher. If
+# another release is already current, the new one is installed but not activated.
+#
+# Trust: run as `curl ... | sh`, this script itself is code you did not inspect, fetched
+# from GitHub over HTTPS. SHA256SUMS comes from the same release, so it proves the download
+# is intact, not who published it. Releases are not signed yet. To check this script before
+# it runs, use the verify-first command in docs/INSTALL.md.
+#
+# The whole body is one function, called on the last line: a download cut inside the
+# function does not run a partial body. That is the only truncation guarantee of a pipe.
+
+ai_comm_bootstrap() {
+  set -eu
+  version='@VERSION@'
+  base='@BASE@'
+  archive="ai-comm-$version.tar.gz"
+  cache="${XDG_DATA_HOME:-$HOME/.local/share}/ai-comm"
+
+  say() { printf 'ai-comm bootstrap: %s\n' "$*"; }
+  die() { printf 'ai-comm bootstrap: %s\n' "$*" >&2; exit 1; }
+
+  register_dirs=''
+  launcher_dir=''
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --register)
+        [ $# -ge 2 ] && [ -n "$2" ] || die "--register needs a skills directory"
+        register_dirs="$register_dirs
+$2"
+        shift 2 ;;
+      --launcher)
+        [ $# -ge 2 ] && [ -n "$2" ] || die "--launcher needs a directory"
+        [ -z "$launcher_dir" ] || die "--launcher may be given once"
+        launcher_dir=$2
+        shift 2 ;;
+      -h|--help)
+        say "usage: sh install-ai-comm.sh [--register SKILLS_DIR]... [--launcher BIN_DIR]"
+        return 0 ;;
+      *) die "unknown option: $1 (see --help)" ;;
+    esac
+  done
+
+  [ "$(id -u)" != 0 ] || die "refusing to run as root; ai-comm installs per user and never needs root"
+  command -v python3 >/dev/null 2>&1 || die "python3 3.10 or later is required"
+  python3 -I -c 'import signal, ssl, sys, tarfile
+sys.exit(0 if sys.version_info >= (3, 10) and hasattr(tarfile, "data_filter") and hasattr(signal, "setitimer") else 1)' \
+    || die "python3 3.10 or later with ssl, safe tar extraction and POSIX timers is required"
+  command -v git >/dev/null 2>&1 || die "git 2.25 or later is required"
+  git --version | python3 -I -c 'import re, sys
+m = re.search(r"(\d+)\.(\d+)", sys.stdin.read())
+sys.exit(0 if m and (int(m.group(1)), int(m.group(2))) >= (2, 25) else 1)' || die "git 2.25 or later is required"
+
+  work=$(mktemp -d) || die "cannot create a temporary directory"
+  trap 'rm -rf "$work"' EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  chmod 700 "$work"
+
+  # One download per child process. The child arms a POSIX interval timer first, so the total
+  # deadline aborts it wherever it blocks (DNS, connect, TLS, headers, redirect-body drains,
+  # body reads). Every redirect is counted and checked for HTTPS before its request is made.
+  transport='import signal, ssl, sys, urllib.error, urllib.request
+TOTAL, SOCKET, HOPS, LIMIT = @TOTAL_SECONDS@, @SOCKET_SECONDS@, @MAX_HOPS@, @SIZE_LIMIT@
+
+class Deadline(Exception):
+    pass
+
+def expire(signum, frame):
+    raise Deadline("total download time exceeded")
+
+signal.signal(signal.SIGALRM, expire)
+signal.setitimer(signal.ITIMER_REAL, TOTAL)
+
+class HttpsOnly(urllib.request.HTTPRedirectHandler):
+    hops = 0
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        HttpsOnly.hops += 1
+        if HttpsOnly.hops > HOPS:
+            raise urllib.error.URLError("too many redirects")
+        if not newurl.lower().startswith("https://"):
+            raise urllib.error.URLError("refusing a redirect away from HTTPS")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+def main(url, out):
+    if not url.lower().startswith("https://"):
+        return "refusing a non-HTTPS URL"
+    context = ssl.create_default_context()
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=context), HttpsOnly)
+    with opener.open(url, timeout=SOCKET) as response, open(out, "xb") as target:
+        if not response.geturl().lower().startswith("https://"):
+            return "refusing a non-HTTPS final URL"
+        expected = response.headers.get("Content-Length")
+        size = 0
+        while True:
+            chunk = response.read(65536)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > LIMIT:
+                return "download larger than expected"
+            target.write(chunk)
+        if expected is not None and (not expected.isdigit() or int(expected) != size):
+            return "short or inconsistent download"
+    return None
+
+try:
+    problem = main(sys.argv[1], sys.argv[2])
+except Deadline as exc:
+    problem = str(exc)
+except (OSError, ValueError) as exc:
+    problem = "download failed: " + exc.__class__.__name__ + ": " + str(exc)[:200]
+finally:
+    signal.setitimer(signal.ITIMER_REAL, 0)
+sys.exit(problem)
+'
+
+  say "installing ai-comm $version into the per-user cache $cache"
+  say "downloading $archive and SHA256SUMS from $base (HTTPS only)"
+  for name in "$archive" SHA256SUMS; do
+    python3 -I -c "$transport" "$base/$name" "$work/$name" || die "download of $name failed; nothing was installed"
+  done
+
+  python3 -I -c 'import hashlib, re, sys
+sums, archive, name = sys.argv[1], sys.argv[2], sys.argv[3]
+records = []
+with open(sums, "rb") as handle:
+    for raw in handle.read(65536).splitlines():
+        m = re.fullmatch(rb"([0-9a-f]{64}) [ *](.+)", raw.rstrip(b"\r"))
+        if m and m.group(2) == name.encode():
+            records.append(m.group(1).decode())
+if len(records) != 1:
+    sys.exit("SHA256SUMS has %d records for %s; expected exactly one" % (len(records), name))
+digest = hashlib.sha256()
+with open(archive, "rb") as handle:
+    for chunk in iter(lambda: handle.read(65536), b""):
+        digest.update(chunk)
+if digest.hexdigest() != records[0]:
+    sys.exit("checksum mismatch for " + name)' "$work/SHA256SUMS" "$work/$archive" "$archive" \
+    || die "the archive failed its checksum check; nothing was installed"
+  say "checksum ok"
+
+  mkdir "$work/pkg"
+  python3 -I -c 'import sys, tarfile
+with tarfile.open(sys.argv[1]) as archive:
+    members, names = archive.getmembers(), set()
+    for m in members:
+        parts = m.name.split("/")
+        if (not m.name or m.name.startswith("/") or ".." in parts or m.name in names
+                or not (m.isreg() or m.isdir())):
+            sys.exit("refusing the archive: unexpected member " + repr(m.name))
+        names.add(m.name)
+    archive.extractall(sys.argv[2], members=members, filter="data")' "$work/$archive" "$work/pkg" \
+    || die "the archive was refused; nothing was installed"
+
+  say "running the release's installer (it fetches tag v$version and the release index, then runs the full test suite)"
+  set +e
+  result=$(sh "$work/pkg/install.sh" --user install --version "$version" --fetch-permitted 2>&1)
+  status=$?
+  set -e
+  printf '%s\n' "$result"
+  if [ "$status" -ne 0 ]; then
+    case $result in
+      *release_installed*)
+        say "ai-comm $version is already present in the cache; nothing was changed or repaired"
+        say "inspect it with: sh \"\$(cd \"$cache/current\" && pwd -P)/install.sh\" --user status" ;;
+      *) say "the installer stopped; see its report above" ;;
+    esac
+    if [ -n "$register_dirs$launcher_dir" ]; then
+      say "requested --register/--launcher steps were not performed"
+    fi
+    exit "$status"
+  fi
+
+  failed=0
+  old_ifs=$IFS
+  IFS='
+'
+  set -f
+  for dir in $register_dirs; do
+    IFS=$old_ifs
+    [ -n "$dir" ] || continue
+    say "registering the ai-comm skill in $dir"
+    sh "$work/pkg/install.sh" --user register --skills-dir "$dir" \
+      || { failed=1; say "registration in $dir failed; the cache install above succeeded"; }
+  done
+  set +f
+  IFS=$old_ifs
+  if [ -n "$launcher_dir" ]; then
+    say "installing the ai-comm command in $launcher_dir"
+    sh "$work/pkg/install.sh" --user launcher --bin-dir "$launcher_dir" \
+      || { failed=1; say "the launcher step failed; the cache install above succeeded"; }
+  fi
+
+  say "done. Optional next steps:"
+  say "  register the skill:  sh \"\$(cd \"$cache/current\" && pwd -P)/install.sh\" --user register --skills-dir DIR"
+  say "  add the command:     sh \"\$(cd \"$cache/current\" && pwd -P)/install.sh\" --user launcher --bin-dir DIR"
+  say "  if another release was already current: sh \"\$(cd \"$cache/current\" && pwd -P)/install.sh\" --user activate $version"
+  exit "$failed"
+}
+
+ai_comm_bootstrap "$@"
