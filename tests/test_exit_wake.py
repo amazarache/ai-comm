@@ -10,6 +10,7 @@ import sys
 import tempfile
 import textwrap
 import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -398,6 +399,181 @@ class PeerAlarmTests(Base):
         self.assertTrue(out.getvalue().startswith("WAKE-EXPIRED"))  # watermark advanced: no repeat
 
 
+
+class KindGateTests(Base):
+    """Decision 1314: one adapter kind per handle, serialized by instance.lock."""
+
+    def prepare_dir(self):
+        state = self.state_dir()
+        os.makedirs(state, mode=0o700)
+        os.chmod(os.path.dirname(state), 0o700)
+        return state
+
+    def test_queue_marker_refuses_startup(self):
+        state = self.prepare_dir()
+        common.write_private_json(state, "config.json", {"v": 1})
+        cli = FakeCli("left", SESSION_A)
+        self.assertEqual(self.run_main(self.argv(), cli), (78, "WAKE-ERROR instance_kind_conflict"))
+        self.assertEqual(cli.subcommands(), ["state"])
+        self.assertEqual(sorted(os.listdir(state)), ["config.json", "instance.lock", "lock"])  # nothing removed
+
+    def test_dangling_link_marker_counts_and_is_not_followed(self):
+        state = self.prepare_dir()
+        os.symlink(os.path.join(self.base, "nowhere"), os.path.join(state, "config.json"))
+        self.assertEqual(self.run_main(self.argv(), FakeCli("left", SESSION_A)),
+                         (78, "WAKE-ERROR instance_kind_conflict"))
+        self.assertFalse(os.path.exists(os.path.join(self.base, "nowhere")))
+
+    def test_expiry_only_run_leaves_a_persistent_marker(self):
+        self.assertEqual(self.run_main(self.argv(), FakeCli("left", SESSION_A))[0], 0)
+        self.assertEqual(common.read_small_json(os.path.join(self.state_dir(), "cursor.json")),
+                         {"v": 1, "notification_through": 0})
+        self.assertFalse(os.path.exists(os.path.join(self.state_dir(), "run.json")))
+
+    def test_existing_cursor_is_preserved(self):
+        state = self.prepare_dir()
+        common.write_private_json(state, "cursor.json", {"v": 1, "notification_through": 17})
+        cli = FakeCli("left", SESSION_A)
+        self.run_main(self.argv(), cli)
+        self.assertEqual(cli.calls[1][cli.calls[1].index("--new-since") + 1], "17")
+        self.assertEqual(common.read_small_json(os.path.join(state, "cursor.json"))["notification_through"], 17)
+
+    def test_forced_interleaving_never_starts_both_kinds(self):
+        """A queue installer holds the gate, publishes its marker and releases while exit-wake waits."""
+        state = self.prepare_dir()
+        installer = common.acquire_lock(state, name="instance.lock")
+        events = []
+
+        def sleep(seconds):
+            if installer is not None and not events:
+                common.write_private_json(state, "config.json", {"v": 1})
+                os.close(installer)
+                events.append("queue published")
+
+        cli = FakeCli("left", SESSION_A)
+        out = io.StringIO()
+        code = exit_wake.main(self.argv(), runner=cli, out=out, sleep=sleep)
+        self.assertEqual(events, ["queue published"])
+        self.assertEqual((code, out.getvalue().strip()), (78, "WAKE-ERROR instance_kind_conflict"))
+        self.assertNotIn("wait", cli.subcommands())
+        self.assertFalse(os.path.exists(os.path.join(state, "run.json")))
+        self.assertFalse(os.path.exists(os.path.join(state, "cursor.json")))
+
+    def test_gate_held_too_long_is_reported(self):
+        state = self.prepare_dir()
+        holder = common.acquire_lock(state, name="instance.lock")
+        self.addCleanup(os.close, holder)
+        self.assertEqual(self.run_main(self.argv(), FakeCli("left", SESSION_A)),
+                         (78, "WAKE-ERROR another_instance_running"))
+
+
+class PhaseTests(Base):
+    def phase(self, name, generation=1, key=None, clock=lambda: 0.0, sleep=lambda s: None):
+        argv = [name] + self.argv(generation=generation, key=key)
+        out = io.StringIO()
+        code = exit_wake.main(argv, out=out, clock=clock, sleep=sleep)
+        return code, json.loads(out.getvalue())
+
+    def receipt(self, read, seen=None, generation=1):
+        runtime = os.path.join(self.project, ".ai-comm", "ai-comm-runtime")
+        os.makedirs(runtime, exist_ok=True)
+        Path(runtime, "left.json").write_text(json.dumps(
+            {"v": 2, "generation": generation, "read": read, "seen": read if seen is None else seen}))
+
+    def setUp(self):
+        super().setUp()
+        Path(self.project, ".tools", "ai-comm", "ai_comm.py").write_text("# cli\n")
+        self.cli_digest = exit_wake.hashlib.sha256(b"# cli\n").hexdigest()
+
+    def test_probe_creates_nothing(self):
+        self.receipt(0)
+        code, value = self.phase("probe")
+        self.assertEqual((code, value), (0, {"running": False, "paused": False, "pending": False,
+                                             "bound_cli_sha256": self.cli_digest}))
+        self.assertFalse(os.path.exists(os.path.join(self.project, ".ai-comm-local", "wake")))
+
+    def test_probe_sees_a_running_instance(self):
+        self.receipt(0)
+        seen = {}
+        cli = FakeCli("left", SESSION_A)
+        cli.on_wait = lambda: seen.setdefault("probe", self.phase("probe"))
+        self.run_main(self.argv(), cli)
+        self.assertEqual(seen["probe"], (0, {"running": True, "paused": False, "pending": False,
+                                             "bound_cli_sha256": self.cli_digest}))
+
+    def test_pause_resume_cycle_while_stopped(self):
+        self.receipt(0)
+        code, value = self.phase("pause")
+        self.assertEqual((code, value["paused"], value["pending"]), (0, True, False))
+        self.assertIsNotNone(exit_wake.read_pause_request(self.state_dir()))
+        code, value = self.phase("check")
+        self.assertEqual((code, value["paused"]), (0, True))
+        code, value = self.phase("resume")
+        self.assertEqual((code, value["paused"], value["running"]), (0, False, False))
+        self.assertEqual(sorted(os.listdir(self.state_dir())), ["phase.lock"])
+
+    def test_pause_with_unread_messages_does_not_complete(self):
+        self.receipt(0)
+        self.run_main(self.argv(), FakeCli("left", SESSION_A, waits=[4]))  # cursor 4, read 0
+        ticks = iter(range(0, 10000, 10))
+        code, value = self.phase("pause", clock=lambda: next(ticks))
+        self.assertEqual((code, value), (75, {"error": "run_did_not_pause"}))
+        self.assertIsNotNone(exit_wake.read_pause_request(self.state_dir()))  # the request stays
+
+    def test_pause_is_honoured_by_a_running_instance(self):
+        self.receipt(0)
+        started = threading.Event()
+        cli = FakeCli("left", SESSION_A)
+
+        def slow_wait():
+            started.set()
+            time.sleep(0.05)
+
+        cli.on_wait = slow_wait
+        result = {}
+        run = threading.Thread(target=lambda: result.setdefault("run", exit_wake.main(
+            self.argv(extra=["--rounds", "20"]), runner=cli, out=io.StringIO(), sleep=lambda s: time.sleep(0.01))))
+        run.start()
+        self.assertTrue(started.wait(10))
+        code, value = self.phase("pause", sleep=lambda s: time.sleep(0.02))
+        self.assertEqual((code, value["paused"], value["running"], value["pending"]), (0, True, True, False))
+        waits = cli.subcommands().count("wait")
+        time.sleep(0.3)
+        self.assertEqual(cli.subcommands().count("wait"), waits)  # no CLI call while paused
+        code, value = self.phase("resume")
+        self.assertEqual((code, value["paused"]), (0, False))
+        run.join(30)
+        self.assertEqual(result["run"], 0)
+        self.assertGreater(cli.subcommands().count("wait"), waits)
+
+    def test_identity_and_receipt_refusals(self):
+        self.receipt(0)
+        self.assertEqual(self.phase("probe", key="0" * 16), (78, {"error": "project_key_mismatch"}))
+        self.assertEqual(self.phase("probe", generation=2), (78, {"error": "receipt_invalid"}))
+        os.unlink(os.path.join(self.project, ".ai-comm", "ai-comm-runtime", "left.json"))
+        self.assertEqual(self.phase("probe"), (78, {"error": "receipt_missing"}))
+
+    def test_phase_refuses_queue_instance(self):
+        self.receipt(0)
+        state = self.state_dir()
+        os.makedirs(state, mode=0o700)
+        os.chmod(os.path.dirname(state), 0o700)
+        common.write_private_json(state, "config.json", {"v": 1})
+        self.assertEqual(self.phase("probe"), (78, {"error": "instance_kind_conflict"}))
+        self.assertEqual(self.phase("pause"), (78, {"error": "instance_kind_conflict"}))
+        self.assertFalse(os.path.exists(os.path.join(state, "pause")))
+
+    def test_non_private_state_is_refused_by_probe(self):
+        self.receipt(0)
+        self.run_main(self.argv(), FakeCli("left", SESSION_A))
+        os.chmod(self.state_dir(), 0o755)
+        self.assertEqual(self.phase("probe"), (78, {"error": "state_dir_not_private"}))
+
+    def test_bad_arguments_are_json(self):
+        out = io.StringIO()
+        self.assertEqual(exit_wake.main(["probe", "--handle", "Left"], out=out), 78)
+        self.assertEqual(json.loads(out.getvalue()), {"error": "arguments_invalid"})
+
 class LaunchTests(unittest.TestCase):
     """The real launch line: python3 -I <dir>/exit_wake.py, run from a copy outside the package."""
 
@@ -428,6 +604,16 @@ class LaunchTests(unittest.TestCase):
                 capture_output=True, text=True, timeout=60, cwd=base, env=env)
             self.assertEqual((result.returncode, result.stdout.strip(), result.stderr),
                              (0, "WAKE new messages for left; notification cursor 5", ""))
+            self.assertEqual(sorted(os.listdir(bundle)), ["common.py", "exit_wake.py"])
+            runtime = os.path.join(project, ".ai-comm", "ai-comm-runtime")
+            os.makedirs(runtime)
+            Path(runtime, "left.json").write_text('{"v":2,"generation":1,"read":5,"seen":5}')
+            probe = subprocess.run(
+                [sys.executable, "-I", os.path.join(bundle, "exit_wake.py"), "probe", "--project", project,
+                 "--project-key", key, "--handle", "left", "--session=s-1", "--generation", "1"],
+                capture_output=True, text=True, timeout=60, cwd=base, env=env)
+            self.assertEqual((probe.returncode, probe.stderr), (0, ""))
+            self.assertEqual(json.loads(probe.stdout)["pending"], False)
             self.assertEqual(sorted(os.listdir(bundle)), ["common.py", "exit_wake.py"])
 
 

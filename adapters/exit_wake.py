@@ -22,6 +22,17 @@ symlinks refused): lock, cursor, ``run.json``, ``pause``/``pause-ack`` and
 already drive: while a nonce-bearing ``pause`` request exists, the adapter writes
 ``pause-ack`` = {nonce, run_id} between rounds and makes no CLI call.
 
+One adapter kind per handle (decision 1314): under the shared ``instance.lock``
+gate a run refuses an instance directory holding the queue adapter's
+``config.json`` (a link counts and is never followed), creates ``cursor.json`` at
+0 if it is absent, so the instance stays marked even when it only ever expires,
+and publishes ``run.json``. The gate is never held across a channel wait.
+
+Guided upgrade phases: ``exit_wake.py probe|pause|rebind|check|resume`` with the
+same identity arguments print one JSON object (``running``, ``paused``,
+``pending``, ``bound_cli_sha256``) or ``{"error": CODE}`` with exit 75 or 78. A
+probe creates nothing. Phases never launch a run: only the host does that.
+
 Exit codes come from common.py: 0 for a wake, expiry or alarm; 75 for a transient
 failure; 78 for a permanent one (unsafe state, identity or binding mismatch).
 Standard library only, plus the sibling common.py from the same directory.
@@ -35,10 +46,14 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)  # -I drops the script's directory; common.py is its sibling
 
 import argparse  # noqa: E402
+import errno  # noqa: E402
+import fcntl  # noqa: E402
+import hashlib  # noqa: E402
 import json  # noqa: E402
 import re  # noqa: E402
 import secrets  # noqa: E402
 import selectors  # noqa: E402
+import stat  # noqa: E402
 import subprocess  # noqa: E402
 import time  # noqa: E402
 from datetime import datetime, timezone  # noqa: E402
@@ -59,6 +74,18 @@ RUN_NAME = "run.json"
 PAUSE_NAME = "pause"
 ACK_NAME = "pause-ack"
 ALARM_NAME = "peer-alarm.json"
+LOCK_NAME = "lock"
+INSTANCE_LOCK = "instance.lock"  # the cross-kind gate (decision 1314)
+QUEUE_MARKER = "config.json"  # the queue adapter's persistent kind marker
+PHASE_LOCK = "phase.lock"
+PHASES = ("probe", "pause", "rebind", "check", "resume")
+# A run checks the pause request between waits; a wait may take wait_timeout (<= 60 s) + 30 s.
+PAUSE_DEADLINE_SECONDS = 60 + 30 + 5
+PHASE_LOCK_SECONDS = PAUSE_DEADLINE_SECONDS + 10
+RUN_RECORD_ATTEMPTS = 5
+PHASE_POLL_SECONDS = 0.5
+MAX_PID = 4194304
+MAX_CLI_BYTES = 8 * 1024 * 1024
 PAUSE_POLL_SECONDS = 1.0
 CLI_TIMEOUT = 30
 GIT_TIMEOUT = 30
@@ -222,6 +249,22 @@ def commit_json(directory, name, value):
         if common.read_small_json(os.path.join(directory, name)) != value:
             raise
     return value
+
+
+def publish_run(state_dir, sleep, record):
+    """Under the shared instance gate: refuse a queue instance, keep a persistent cursor
+    marker (created at 0 if absent, an existing one validated and preserved), then
+    publish run.json. The gate is never held across a channel wait."""
+    gate = common.acquire_lock(state_dir, name=INSTANCE_LOCK, sleep=sleep)
+    try:
+        if os.path.lexists(os.path.join(state_dir, QUEUE_MARKER)):  # a link counts; never followed
+            raise common.WakeError("instance_kind_conflict")
+        if not os.path.lexists(os.path.join(state_dir, CURSOR_NAME)):
+            write_cursor(state_dir, 0)
+        read_cursor(state_dir)
+        commit_json(state_dir, RUN_NAME, record)
+    finally:
+        os.close(gate)
 
 
 def remove_file(directory, name):
@@ -436,7 +479,7 @@ def watch(args, runner=run_cli, out=sys.stdout, clock=time.monotonic, sleep=time
     try:
         check_binding(runner(cli_base(layout, "state", args, identity=False), CLI_TIMEOUT),
                       args.handle, args.session, args.generation)
-        commit_json(state_dir, RUN_NAME, {
+        publish_run(state_dir, sleep, {
             "v": 1, "adapter": "exit-wake", "run_id": run_id, "pid": os.getpid(), "instance": layout.instance,
             "project": identity, "handle": args.handle, "session": args.session,
             "generation": args.generation})
@@ -469,6 +512,219 @@ def watch(args, runner=run_cli, out=sys.stdout, clock=time.monotonic, sleep=time
         except (common.WakeError, OSError):
             pass
         os.close(lock_fd)
+
+
+# --------------------------------------------------------------------------- guided phases
+# Owner phases for the upgrade controller: probe, pause, rebind, check, resume. Each prints
+# one JSON object; a failure prints {"error": CODE} and exits 75 or 78. They never read inbox
+# pages, acknowledge, send, reset a cursor or launch a run: the host starts runs.
+
+
+def existing_private_dir(path):
+    """Validate without creating or changing anything. Returns False if absent."""
+    common._reject_symlinked_ancestors(path)
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise common._os_error(exc) from exc
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+        raise common.WakeError("state_dir_not_directory")
+    if info.st_uid != os.getuid():
+        raise common.WakeError("state_dir_wrong_owner")
+    if stat.S_IMODE(info.st_mode) & 0o077:
+        raise common.WakeError("state_dir_not_private")
+    return True
+
+
+def lock_held(state_dir):
+    """True if a run holds the run lock. Opens read-only, never creates it."""
+    try:
+        fd = os.open(os.path.join(state_dir, LOCK_NAME), os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC)
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise common._os_error(exc) from exc
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise common.WakeError("lock_not_regular_file")
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        except OSError as exc:
+            raise common._os_error(exc) from exc
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return False
+    finally:
+        os.close(fd)
+
+
+def pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+    except (ProcessLookupError, OverflowError, PermissionError):
+        return False  # gone, or not ours: cannot be this instance's run
+    return True
+
+
+def file_digest(path):
+    """sha256 of a regular, non-symlinked file, bounded while reading."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC)
+    except OSError as exc:
+        raise common.WakeError("cli_invalid") from exc
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise common.WakeError("cli_invalid")
+        digest, total = hashlib.sha256(), 0
+        while True:
+            chunk = os.read(fd, 65536)
+            if not chunk:
+                return digest.hexdigest()
+            total += len(chunk)
+            if total > MAX_CLI_BYTES:
+                raise common.WakeError("cli_invalid")
+            digest.update(chunk)
+    except OSError as exc:
+        raise common.WakeError("cli_invalid") from exc
+    finally:
+        os.close(fd)
+
+
+class Instance:
+    """One declared instance: identity verified exactly as a run verifies it."""
+
+    def __init__(self, args, git_run=subprocess.run):
+        self.args = args
+        self.layout = Layout(args.project, args.project_key, args.handle)
+        self.identity = project_identity(self.layout, git_run)
+        if common.project_key(self.identity) != args.project_key:
+            raise common.WakeError("project_key_mismatch")
+        if os.path.realpath(self.layout.cli) != self.layout.cli:
+            raise common.WakeError("cli_path_not_canonical")
+        self.state = self.layout.state
+
+
+def validated_run(inst, sleep):
+    """The run lock is held: its holder must have recorded exactly this instance."""
+    for attempt in range(RUN_RECORD_ATTEMPTS):
+        run = common.read_small_json(os.path.join(inst.state, RUN_NAME))
+        if run is not None:
+            break
+        if attempt + 1 < RUN_RECORD_ATTEMPTS:
+            sleep(0.2)
+    else:
+        raise common.WakeError("run_identity_unverified")
+    a = inst.args
+    expected = {"v": 1, "adapter": "exit-wake", "instance": inst.layout.instance, "project": inst.identity,
+                "handle": a.handle, "session": a.session, "generation": a.generation}
+    pid, run_id = run.get("pid"), run.get("run_id")
+    if (any(run.get(k) != v for k, v in expected.items())
+            or type(pid) is not int or not 1 <= pid <= MAX_PID
+            or not isinstance(run_id, str) or not NONCE.fullmatch(run_id) or not pid_alive(pid)):
+        raise common.WakeError("run_identity_unverified")
+    return run
+
+
+def receipt_read(inst):
+    """This handle's real read receipt, validated for the declared generation."""
+    path = os.path.join(inst.layout.channel, "ai-comm-runtime", inst.args.handle + ".json")
+    value = common.read_small_json(path)
+    if value is None:
+        raise common.WakeError("receipt_missing")
+    if (set(value) != {"v", "generation", "read", "seen"} or value["v"] != 2
+            or any(type(value[k]) is not int for k in ("generation", "read", "seen"))
+            or value["generation"] != inst.args.generation
+            or not 0 <= value["read"] <= value["seen"] <= MAX_CURSOR):
+        raise common.WakeError("receipt_invalid")
+    return value["read"]
+
+
+def observe(inst, sleep=time.sleep):
+    present = existing_private_dir(inst.state)
+    if present and os.path.lexists(os.path.join(inst.state, QUEUE_MARKER)):
+        raise common.WakeError("instance_kind_conflict")
+    running = present and lock_held(inst.state)
+    run = validated_run(inst, sleep) if running else None
+    nonce = ack = None
+    cursor = 0
+    if present:
+        nonce = read_pause_request(inst.state)
+        cursor = read_cursor(inst.state)
+        ack = common.read_small_json(os.path.join(inst.state, ACK_NAME))
+    acked = (run is not None and ack is not None and ack.get("v") == 1
+             and ack.get("nonce") == nonce and ack.get("run_id") == run["run_id"])
+    paused = nonce is not None and (not running or acked)
+    return {"running": bool(running), "paused": paused, "pending": cursor > receipt_read(inst),
+            "bound_cli_sha256": file_digest(inst.layout.cli)}
+
+
+class PhaseLock:
+    def __init__(self, state_dir, clock, sleep):
+        self.state_dir, self.clock, self.sleep = state_dir, clock, sleep
+        self.fd = None
+
+    def __enter__(self):
+        deadline = self.clock() + PHASE_LOCK_SECONDS
+        while True:
+            try:
+                self.fd = common.acquire_lock(self.state_dir, name=PHASE_LOCK, sleep=self.sleep, attempts=1)
+                return self
+            except common.WakeError as exc:
+                if exc.code != "another_instance_running":
+                    raise
+                if self.clock() >= deadline:
+                    raise common.WakeError("phase_busy", "transient") from exc
+                self.sleep(PHASE_POLL_SECONDS)
+
+    def __exit__(self, *exc):
+        os.close(self.fd)
+        return False
+
+
+def run_phase(phase, inst, clock=time.monotonic, sleep=time.sleep):
+    if phase == "probe":
+        return observe(inst, sleep)
+    common.private_dir(inst.layout.wake_root)
+    common.private_dir(inst.state)
+    with PhaseLock(inst.state, clock, sleep):
+        if os.path.lexists(os.path.join(inst.state, QUEUE_MARKER)):
+            raise common.WakeError("instance_kind_conflict")  # before any write
+        if phase in ("check", "rebind"):
+            # A run holds no package binding: it calls the pin's CLI each round.
+            return observe(inst, sleep)
+        if phase == "pause":
+            commit_json(inst.state, PAUSE_NAME, {"v": 1, "nonce": secrets.token_hex(16)})
+            deadline = clock() + PAUSE_DEADLINE_SECONDS
+            while True:
+                state = observe(inst, sleep)
+                if state["paused"] and not state["pending"]:
+                    return state
+                if clock() >= deadline:
+                    raise common.WakeError("run_did_not_pause", "transient")  # the request stays
+                sleep(PHASE_POLL_SECONDS)
+        if phase == "resume":
+            remove_file(inst.state, PAUSE_NAME)
+            remove_file(inst.state, ACK_NAME)
+            return observe(inst, sleep)
+    raise common.WakeError("unknown_phase")
+
+
+def phase_main(argv, out, clock, sleep, git_run):
+    try:
+        phase, rest = argv[0], argv[1:]
+        args = parse_args(rest)
+        result = run_phase(phase, Instance(args, git_run), clock, sleep)
+    except common.WakeError as exc:
+        print(json.dumps({"error": exc.code}), file=out)
+        return exc.exit_code
+    except OSError:
+        print(json.dumps({"error": "os_error"}), file=out)
+        return common.EXIT_TRANSIENT
+    print(json.dumps(result, sort_keys=True), file=out)
+    return common.EXIT_OK
 
 
 def _bounded_int(text, low, high, code):
@@ -521,8 +777,11 @@ def parse_args(argv):
 
 def main(argv=None, runner=run_cli, out=sys.stdout, clock=time.monotonic, sleep=time.sleep, wall=time.time,
          git_run=subprocess.run):
+    argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] in PHASES:
+        return phase_main(argv, out, clock, sleep, git_run)
     try:
-        args = parse_args(sys.argv[1:] if argv is None else argv)
+        args = parse_args(argv)
         return watch(args, runner, out, clock, sleep, wall, git_run)
     except common.WakeError as exc:
         print(exc.line(), file=out)

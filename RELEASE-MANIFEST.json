@@ -57,8 +57,8 @@
     },
     {
       "path": "adapters/exit_wake.py",
-      "bytes": 24045,
-      "sha256": "8565d36943550286ce8de8b78028cfe7357bd59a16c6274801009d851b4a1f2c"
+      "bytes": 34871,
+      "sha256": "a61245792d2cdb47aca56854377bffa612ef36735afe2fe7f3e8fe7ae5e5b7ad"
     },
     {
       "path": "ai_comm.py",
@@ -202,8 +202,8 @@
     },
     {
       "path": "tests/test_exit_wake.py",
-      "bytes": 21454,
-      "sha256": "425571040f6356a4449ec8be03dfd42d813c0ccad34f2f8fd4d78ce4e304db59"
+      "bytes": 30995,
+      "sha256": "57f7f054ce5ec160c8238358b17c17ace81554b6df47c2983bb7431c7669ef26"
     },
     {
       "path": "tests/test_host_neutral_channel.py",
