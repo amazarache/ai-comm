@@ -1,5 +1,37 @@
 # Changes
 
+## 1.9.0
+
+- Add two optional wake adapters, inactive until the owner sets one up:
+  - `adapters/exit_wake.py` notifies a host that starts a model turn when a background command it launched exits;
+  - `adapters/queue_wake.py`, with its service template and dependency lock, queues a fixed reminder into one
+    approved, idle session through a local runtime.
+
+  Neither reads message bodies, acknowledges, sends, or starts or resumes another session.
+- Handles are opaque protocol labels: no name is special. An instance is keyed by a project key (from the project
+  path and the channel's root commit) and the handle, and is bound to one session and generation, read from the
+  complete paged registry. A takeover stops it until the owner sets it up again.
+- `adapters/common.py` holds the shared contract: identity validation, private state (atomic, size- and depth-bounded
+  JSON, refused symlinks), a shared `instance.lock` so that one handle runs only one adapter kind, and fixed failure
+  classes (0, 75 transient, 78 permanent).
+- `install.sh --user wake plan|install|remove|integration` runs from a verified cache release and verifies the
+  project's pin first:
+  - `plan` is read-only;
+  - `install` writes exactly the planned frozen bundle and, for queue, the config then the instance's own unit. It
+    never runs `init`, reloads, enables or starts anything;
+  - `remove` keeps every lock file, uses the installed records, and recovers from any interruption through a durable
+    intent;
+  - `integration` prints one exact declaration item for the guided upgrade controller.
+
+  Bundles and unit destinations must be private to the user.
+- Guided upgrade phases (probe, pause, rebind, check, resume) for both adapters, run from a frozen bundle outside the
+  pin. No upgrade-controller change.
+- **Validation status:** isolated fixtures and fakes only. No genuine session pair has been run. Real systemd restart,
+  backoff and activation are unproven: the unit is only checked with `systemd-analyze`. The queue runtime's resume
+  flag can load an unloaded session after the readiness check, so a strict "never loads" guarantee is not available.
+  See `docs/WAKE.md`.
+- No protocol change: PROTOCOL.md is unchanged at the 3.0 contract digest, and existing channels keep working.
+
 ## 1.8.0
 
 - Add a one-line install. Each release publishes `install-ai-comm.sh`, a small POSIX

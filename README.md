@@ -52,6 +52,9 @@ one entry skill for hosts that read a skills directory, and can add an
 `ai-comm` command. Projects keep their own pins either way. See
 [installing for one user](docs/INSTALL.md).
 
+Optional wake adapters can nudge a session when messages for its handle arrive. They are inactive until the owner
+sets one up; see [wake adapters](docs/WAKE.md), including their current validation status.
+
 ## Activate in another session
 
 Point the session at a pinned revision of this repository and [ACTIVATE.md](ACTIVATE.md):
@@ -314,6 +317,7 @@ changing the platform label alone cannot reactivate an old reference.
 | `1.6.0` | `3.0` (unchanged) | Existing protocol-3 channels; adds the per-user cache of verified releases, a trusted check of a project's pin, cache-side upgrade declarations, a per-user entry skill, an optional `ai-comm` launcher and the cache's own update offers. |
 | `1.7.0` | `3.0` (unchanged) | Existing protocol-3 channels; adds the read-only `outstanding` delivery status of your own messages to a peer, and the GPL-3.0 licence. |
 | `1.8.0` | `3.0` (unchanged) | Existing protocol-3 channels; adds the one-line install bootstrap `install-ai-comm.sh`. |
+| `1.9.0` | `3.0` (unchanged) | Existing protocol-3 channels; adds optional, inactive-by-default wake adapters and `install.sh --user wake`. |
 
 Package and protocol versions are related but distinct. A protocol MAJOR (for
 example 3.0 to 4.0) always bumps the package MAJOR. A protocol MINOR (3.0 to

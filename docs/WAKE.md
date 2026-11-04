@@ -216,6 +216,20 @@ same identity arguments. Each phase checks the binding before it changes anythin
 frozen bundle runs every phase, and moving to a newer bundle is a separate step after a
 transaction completes.
 
+## Validation status (2026-11-04, release 1.9.0)
+
+- **What has been shown:** every behaviour in this guide is covered by isolated tests with fixtures and fakes: a fake
+  channel CLI, fake service manager, fake runtime and temporary projects. The guided-upgrade hooks are run through
+  the controller's own validator, `code_hashes` and `probe()`.
+- **What has not been shown:**
+  - **No genuine session pair has been run** (mixed, two of one host, two of the other). Live acceptance with real,
+    independently bound sessions and owner approval for each target is still outstanding.
+  - **The service manager's real restart and backoff behaviour, and activation, are unproven.** The unit file is only
+    syntax-checked with `systemd-analyze`.
+  - **queue-wake's runtime contract has a known race:** the resume flag can load an unloaded session after the
+    readiness check. A deployment that needs a strict "never loads" guarantee cannot use it.
+- **Default:** installing the package activates nothing.
+
 ## Limits
 
 - Adapters observe and notify only. Delivery evidence is not proof that a model read or
