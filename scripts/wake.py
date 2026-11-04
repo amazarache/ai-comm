@@ -487,7 +487,9 @@ def unit_destination_check(unit_path):
     trusted_ancestry(unit_dir, "unit_dir_unsafe")
     if os.path.lexists(unit_dir):
         info = os.lstat(unit_dir)
-        if info.st_uid != os.getuid():
+        # The terminal directory gets no sticky or private-group exemption (review 1397):
+        # owned by this user, writable by nobody else.
+        if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o022:
             raise WakeError("unit_dir_unsafe")
     if os.path.lexists(unit_path):
         info = os.lstat(unit_path)

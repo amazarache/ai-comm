@@ -535,6 +535,18 @@ class CorrectionTests(Base):
         self.assertEqual(self.run_wake(argv)[1]["code"], "unit_dir_unsafe")  # writable parent of a missing dir
         self.assertFalse(os.path.exists(self.base / "home" / ".config"))
 
+    def test_group_or_world_writable_terminal_unit_dir_is_refused(self):
+        """Review 1397: no sticky or private-group exemption for the unit directory itself."""
+        plan = self.plan(kind="queue")
+        argv = self.args("install", kind="queue", extra=["--plan-sha256", plan["plan_sha256"], "--confirm"])
+        self.unit_dir.mkdir(parents=True, mode=0o700)
+        for mode in (0o1777, 0o775, 0o1775, 0o770):
+            os.chmod(self.unit_dir, mode)
+            before = self.snapshot_all()
+            self.assertEqual(self.run_wake(argv), (78, {"status": "stopped", "code": "unit_dir_unsafe"}), oct(mode))
+            self.assertEqual(self.snapshot_all(), before, oct(mode))
+            self.assertEqual(stat.S_IMODE(os.lstat(self.unit_dir).st_mode), mode)
+
     def test_user_owned_traversable_unit_dir_is_accepted(self):
         self.unit_dir.mkdir(parents=True, mode=0o755)
         for directory in (self.unit_dir, self.unit_dir.parent, self.unit_dir.parent.parent):
