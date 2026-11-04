@@ -1,0 +1,728 @@
+#!/usr/bin/env python3
+"""Plan, install and remove the optional wake adapters (design 024, installer design v4).
+
+Run as ``install.sh --user wake plan|install|remove …`` from a verified per-user cache
+release. It verifies that release and then the project's pin with the trusted
+verifier, and continues only for a ``verified`` pin. No unverified pin code runs; the
+two permitted pin-derived paths, used only after verification, are the pin CLI's
+read-only ``registry sessions`` (a subprocess, every page) and the queue renderer,
+loaded from bytes checked against the trusted manifest.
+
+- ``plan`` is read-only: it writes nothing, reads no runtime socket and starts nothing.
+  It prints the exact objects ``install`` would write and the owner's next steps.
+- ``install`` recomputes the plan and requires its digest. For exit it freezes the
+  adapter bundle; for queue it also publishes ``config.json`` and then the instance's own
+  unit file, under the shared ``instance.lock``. It never runs ``init``, never reloads,
+  enables or starts a unit.
+- ``remove`` deletes only this instance's unchanged data, its config and its recorded
+  unit, never a lock file, bundle, receipt, the channel or the pin. Queue removal writes a
+  durable ``remove-intent.json`` first, so any interrupted removal can be rerun.
+
+Output is one JSON object. A refusal is ``{"status": "stopped", "code": CODE}`` with
+exit 75 (transient) or 78 (permanent). Standard library only.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import importlib.util
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import subprocess
+import sys
+import tempfile
+
+sys.dont_write_bytecode = True
+RELEASE = Path(__file__).resolve().parents[1]
+
+
+def _load(name, path):
+    if name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(name, path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return sys.modules[name]
+
+
+common = _load("ai_comm_release_wake_common", RELEASE / "adapters" / "common.py")
+WakeError = common.WakeError
+
+KINDS = {"exit": ("exit_wake.py", "common.py"),
+         "queue": ("queue_wake.py", "common.py", "queue-wake@.service", "queue_wake.lock")}
+LOCK_NAMES = frozenset({"lock", "phase.lock", "observer.lock", "guided.lock", "instance.lock"})
+EXIT_DATA = ("cursor.json", "run.json", "pause", "pause-ack", "peer-alarm.json")
+QUEUE_DATA = ("config.json", "state.json", "paused.json")
+INTENT = "remove-intent.json"
+REBIND = re.compile(r"rebind-[0-9a-f]{12}\Z")
+HEX = re.compile(r"[0-9a-f]{64}\Z")
+MIN_SYSTEMD = 254
+MAX_FILE = 4 * 1024 * 1024
+MAX_CLI_OUTPUT = 256 * 1024
+SYSTEMCTL = "/usr/bin/systemctl"
+REGISTRY_PAGE = 100
+REGISTRY_MAX_PAGES = 100
+
+
+def sha256(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def canonical(value):
+    """The exact bytes common.write_private_json writes."""
+    return (json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n").encode("utf-8")
+
+
+def read_regular(path, limit=MAX_FILE):
+    """Bytes of a regular file opened without following a final symlink, bounded."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise common._os_error(exc) from exc
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_size > limit:
+            raise WakeError("file_not_regular")
+        chunks, total = [], 0
+        while True:
+            chunk = os.read(fd, 65536)
+            if not chunk:
+                return b"".join(chunks)
+            total += len(chunk)
+            if total > limit:
+                raise WakeError("file_too_large")
+            chunks.append(chunk)
+    except OSError as exc:
+        raise common._os_error(exc) from exc
+    finally:
+        os.close(fd)
+
+
+# --------------------------------------------------------------------------- environment
+
+
+class Host:
+    """Everything that reaches outside this process; tests replace parts of it."""
+
+    def __init__(self, env=None):
+        self.env = dict(os.environ if env is None else env)
+
+    def verify(self, project):
+        vp = _load("ai_comm_verify_pin", RELEASE / "scripts" / "verify_pin.py")
+        try:
+            return vp.check_project(project, vp.cache_for_release())
+        except vp.Stop as exc:
+            raise WakeError("pin_check_stopped") from exc
+
+    def cli_json(self, argv):
+        try:
+            done = subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True, timeout=60, check=False)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise WakeError("channel_state_unavailable", "transient") from exc
+        if done.returncode != 0 or len(done.stdout) > MAX_CLI_OUTPUT:
+            raise WakeError("channel_state_unavailable", "transient")
+        try:
+            value = json.loads(done.stdout.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise WakeError("channel_state_invalid") from exc
+        if not isinstance(value, dict):
+            raise WakeError("channel_state_invalid")
+        return value
+
+    def registry(self, cli, channel):
+        """Every handle's current binding from the complete paged registry (review 1345 Q1).
+
+        `state` is a size-trimmed summary, so it is never used as the registry. A handle's
+        current binding is its highest generation; every page must share one head."""
+        current, offset, head = {}, 0, None
+        for _ in range(REGISTRY_MAX_PAGES):
+            page = self.cli_json([sys.executable, "-I", "-B", str(cli), "--channel", str(channel), "registry",
+                                  "sessions", "--offset", str(offset), "--limit", str(REGISTRY_PAGE)])
+            items, more, nxt = page.get("items"), page.get("more"), page.get("next")
+            if (not isinstance(items, list) or type(more) is not bool or type(nxt) is not int
+                    or nxt != offset + len(items) or not isinstance(page.get("head"), str)):
+                raise WakeError("channel_state_invalid")
+            if head is not None and page["head"] != head:
+                raise WakeError("registry_changed", "transient")
+            head = page["head"]
+            for item in items:
+                if (not isinstance(item, dict) or not isinstance(item.get("handle"), str)
+                        or not isinstance(item.get("session"), str) or type(item.get("generation")) is not int):
+                    raise WakeError("channel_state_invalid")
+                old = current.get(item["handle"])
+                if old is None or item["generation"] > old["generation"]:
+                    current[item["handle"]] = {k: item[k] for k in ("handle", "session", "generation")}
+            if not more:
+                return {"participants": list(current.values())}
+            if not items:
+                raise WakeError("channel_state_invalid")
+            offset = nxt
+        raise WakeError("registry_limit")
+
+    def systemctl(self, *args):
+        try:
+            done = subprocess.run([SYSTEMCTL, *args], stdin=subprocess.DEVNULL, capture_output=True, timeout=30,
+                                  check=False)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise WakeError("service_manager_unavailable", "transient") from exc
+        return done.returncode, done.stdout[:65536].decode("utf-8", "replace")
+
+    def unit_dir(self):
+        base = self.env.get("XDG_CONFIG_HOME") or os.path.join(self.env.get("HOME", ""), ".config")
+        if not os.path.isabs(base):
+            raise WakeError("unit_dir_invalid")
+        return Path(os.path.normpath(base)) / "systemd" / "user"
+
+
+def systemd_version(host):
+    code, out = host.systemctl("--version")
+    match = re.match(r"systemd ([0-9]{1,5})\b", out)
+    if code != 0 or not match:
+        raise WakeError("service_manager_unavailable", "transient")
+    if int(match.group(1)) < MIN_SYSTEMD:
+        raise WakeError("service_manager_unsupported")
+    return int(match.group(1))
+
+
+# --------------------------------------------------------------------------- the verified pin
+
+
+class Pin:
+    """The project's verified pin: its manifest, package identity and adapter bytes."""
+
+    def __init__(self, project, host):
+        report = host.verify(project)
+        if not isinstance(report, dict) or report.get("status") != "verified":
+            raise WakeError("pin_not_verified")
+        self.dir = Path(report["pin"])
+        raw = read_regular(self.dir / "RELEASE-MANIFEST.json")
+        if raw is None:
+            raise WakeError("pin_not_verified")
+        manifest = json.loads(raw.decode("utf-8"))
+        self.entries = {e["path"]: e for e in manifest["files"]}
+        if "ai_comm.py" not in self.entries or not HEX.fullmatch(str(manifest.get("protocol_sha256"))):
+            raise WakeError("pin_not_verified")
+        self.package = {"commit": report["commit"], "manifest_sha256": sha256(raw),
+                        "protocol_sha256": manifest["protocol_sha256"],
+                        "cli_sha256": self.entries["ai_comm.py"]["sha256"]}
+
+    def adapter_files(self, kind):
+        """Each adapter file's bytes, re-read and compared with the trusted manifest."""
+        files = {}
+        for name in KINDS[kind]:
+            entry = self.entries.get("adapters/" + name)
+            if entry is None:
+                raise WakeError("adapters_unsupported")
+            data = read_regular(self.dir / "adapters" / name)
+            if data is None or sha256(data) != entry["sha256"]:
+                raise WakeError("pin_changed")
+            files[name] = data
+        return files
+
+
+def load_queue_module(directory, files, tag):
+    """The queue adapter from `directory`, after checking its files are exactly `files`."""
+    for name, data in files.items():
+        if read_regular(Path(directory) / name) != data:
+            raise WakeError("pin_changed")
+    return _load(f"ai_comm_wake_queue_{tag}", Path(directory) / "queue_wake.py")
+
+
+def renderer_call(fn, *args, module):
+    """Call the queue module; its own error types become a fixed code (ACK 1319)."""
+    try:
+        return fn(*args)
+    except (module.Invalid, module.common.WakeError) as exc:
+        raise WakeError("queue_render_refused") from exc
+
+
+# --------------------------------------------------------------------------- plan
+
+
+def instance_dir(project, instance):
+    return Path(project) / ".ai-comm-local" / "wake" / instance
+
+
+def bundle_root(project):
+    return Path(project) / ".ai-comm-local" / "upgrade" / "adapters"
+
+
+def check_binding(state, handle, session, generation):
+    participants = state.get("participants")
+    records = [p for p in participants if isinstance(p, dict) and p.get("handle") == handle] \
+        if isinstance(participants, list) else None
+    if records is None or len(records) > 1:
+        raise WakeError("channel_state_invalid")
+    if not records:
+        raise WakeError("handle_not_joined")
+    if records[0].get("session") != session:
+        raise WakeError("session_mismatch")
+    if records[0].get("generation") != generation:
+        raise WakeError("generation_mismatch")
+
+
+def advisory_kind_check(kind, directory):
+    names = ("config.json",) if kind == "exit" else ("cursor.json", "run.json")
+    if any(os.path.lexists(directory / n) for n in names):
+        raise WakeError("instance_kind_conflict")
+
+
+def compute(args, host):
+    """Everything plan prints and install writes. Writes nothing."""
+    uc = _load("ai_comm_upgrade_controller", RELEASE / "upgrade_controller.py")
+    try:
+        project = uc.Project(args.project)
+        identity = project.project_id()
+    except uc.Stop as exc:
+        raise WakeError("project_invalid") from exc
+    pin = Pin(identity["path"], host)
+    files = pin.adapter_files(args.kind)
+    check_binding(host.registry(pin.dir / "ai_comm.py", identity["channel_path"]),
+                  args.handle, args.session, args.generation)
+    key = common.project_key(identity)
+    instance = common.instance_name(key, args.handle)
+    directory = instance_dir(identity["path"], instance)
+    advisory_kind_check(args.kind, directory)
+    bundle_doc = {"kind": args.kind, "package": {"commit": pin.package["commit"],
+                                                 "manifest_sha256": pin.package["manifest_sha256"]},
+                  "files": {name: sha256(data) for name, data in files.items()}}
+    bundle_sha = sha256(canonical(bundle_doc))
+    bundle_dir = bundle_root(identity["path"]) / bundle_sha
+    plan = {"v": 1, "kind": args.kind, "instance": instance, "project": identity, "handle": args.handle,
+            "session": args.session, "generation": args.generation,
+            "bundle": {"dir": str(bundle_dir), "sha256": bundle_sha, "files": bundle_doc["files"]}}
+    private = {"files": files, "bundle_doc": bundle_doc, "pin": pin}
+    if args.kind == "exit":
+        launch = [sys.executable, "-I", str(bundle_dir / "exit_wake.py"), "--project", identity["path"],
+                  "--project-key", key, "--handle", args.handle, f"--session={args.session}",
+                  "--generation", str(args.generation)]
+        if args.peer:
+            launch += ["--peer", args.peer]
+        plan["launch"] = launch
+    else:
+        systemd_version(host)
+        queue = load_queue_module(pin.dir / "adapters", files, "pin")
+        config_path = directory / "config.json"
+        unit_path = host.unit_dir() / f"queue-wake@{instance}.service"
+        config = {"v": 1, "schema": queue.SCHEMA, "project": identity, "instance": instance,
+                  "handle": args.handle, "session": args.session, "generation": args.generation,
+                  "runtime": {"socket": args.socket, "binary": args.binary, "sha256": args.binary_sha256,
+                              "approved_thread": args.thread},
+                  "package": pin.package, "service": None}
+        template = files["queue-wake@.service"].decode("utf-8")
+        unit = renderer_call(queue.render_service, config, config_path, args.python,
+                             str(bundle_dir / "queue_wake.py"), template, module=queue)
+        config["service"] = {"path": str(unit_path), "sha256": sha256(unit)}
+        renderer_call(queue.validate_config, config, module=queue)
+        plan.update({"config_path": str(config_path), "config": config, "config_sha256": sha256(canonical(config)),
+                     "unit_path": str(unit_path), "unit_sha256": sha256(unit)})
+        private.update({"unit": unit, "template": template})
+    plan["plan_sha256"] = sha256(canonical(plan))
+    plan["steps"] = steps(args, plan)
+    return plan, private
+
+
+def steps(args, plan):
+    """The owner's next commands, bound to this release's own path, never to `current`."""
+    install = ["sh", str(RELEASE / "install.sh"), "--user", "wake", "install", *identity_argv(args),
+               "--plan-sha256", plan["plan_sha256"], "--confirm"]
+    if plan["kind"] == "exit":
+        return [install, plan["launch"]]
+    bundle = Path(plan["bundle"]["dir"])
+    init = [args.python, "-I", "-B", str(bundle / "queue_wake.py"), "init", "--config", plan["config_path"],
+            "--handle", args.handle, "--session", args.session, "--generation", str(args.generation)]
+    return [install, init, [SYSTEMCTL, "--user", "daemon-reload"],
+            [SYSTEMCTL, "--user", "enable", "--now", f"queue-wake@{plan['instance']}.service"]]
+
+
+def identity_argv(args):
+    argv = ["--project", args.project, "--handle", args.handle, "--kind", args.kind,
+            f"--session={args.session}", "--generation", str(args.generation)]
+    if args.kind == "exit" and args.peer:
+        argv += ["--peer", args.peer]
+    if args.kind == "queue":
+        argv += ["--python", args.python, "--socket", args.socket, "--binary", args.binary,
+                 "--binary-sha256", args.binary_sha256, "--thread", args.thread]
+    return argv
+
+
+# --------------------------------------------------------------------------- install
+
+
+def bundle_state(bundle_dir, files, bundle_doc):
+    """'absent', 'identical', or a refusal: an existing bundle is reused only if exactly equal."""
+    if not os.path.lexists(bundle_dir):
+        return "absent"
+    info = os.lstat(bundle_dir)
+    if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode):
+        raise WakeError("bundle_conflict")
+    expected = dict(files, **{"BUNDLE.json": canonical(bundle_doc)})
+    if sorted(os.listdir(bundle_dir)) != sorted(expected):
+        raise WakeError("bundle_conflict")
+    for name, data in expected.items():
+        if read_regular(bundle_dir / name) != data:
+            raise WakeError("bundle_conflict")
+    return "identical"
+
+
+def freeze_bundle(project, bundle_dir, files, bundle_doc):
+    if bundle_state(bundle_dir, files, bundle_doc) == "identical":
+        return
+    common.private_dir(str(Path(project) / ".ai-comm-local" / "upgrade"))
+    root = common.private_dir(str(bundle_root(project)))
+    tmp = tempfile.mkdtemp(prefix=".bundle-", dir=root)
+    try:
+        for name, data in dict(files, **{"BUNDLE.json": canonical(bundle_doc)}).items():
+            fd = os.open(os.path.join(tmp, name), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o400)
+            try:
+                view = memoryview(data)
+                while view:
+                    view = view[os.write(fd, view):]
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+        os.chmod(tmp, 0o700)
+        try:
+            os.rename(tmp, bundle_dir)
+            tmp = None
+        except OSError:
+            pass  # another install published it first: it must then be identical
+    finally:
+        if tmp is not None:
+            for name in os.listdir(tmp):
+                os.unlink(os.path.join(tmp, name))
+            os.rmdir(tmp)
+    if bundle_state(bundle_dir, files, bundle_doc) != "identical":
+        raise WakeError("bundle_conflict")
+
+
+def destination_check(directory, unit_path, config_bytes, unit_bytes):
+    """Read-only preflight of every queue destination. Returns (config_present, unit_present)."""
+    if any(os.path.lexists(directory / n) for n in ("cursor.json", "run.json")):
+        raise WakeError("instance_kind_conflict")
+    if os.path.lexists(directory / INTENT):
+        raise WakeError("removal_in_progress")
+    config = read_regular(directory / "config.json") if os.path.lexists(directory / "config.json") else None
+    if os.path.lexists(directory / "config.json") and config != config_bytes:
+        raise WakeError("config_exists")
+    unit = read_regular(unit_path) if os.path.lexists(unit_path) else None
+    if os.path.lexists(unit_path):
+        if unit != unit_bytes:
+            raise WakeError("unit_exists")
+        if config is None:
+            raise WakeError("unit_orphan")
+    return config is not None, unit is not None
+
+
+def write_config(directory, config, config_bytes):
+    try:
+        common.write_private_json(str(directory), "config.json", config)
+    except WakeError as exc:
+        if exc.code != "state_commit_uncertain" or read_regular(directory / "config.json") != config_bytes:
+            raise
+
+
+def publish_unit(unit_path, unit_bytes):
+    """Exclusive publication: write a temporary file, then link it to the final name."""
+    unit_dir = unit_path.parent
+    if os.path.lexists(unit_dir) and (os.path.islink(unit_dir) or not unit_dir.is_dir()):
+        raise WakeError("unit_dir_invalid")
+    os.makedirs(unit_dir, mode=0o700, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=".queue-wake.", dir=unit_dir)
+    try:
+        os.fchmod(fd, 0o600)
+        view = memoryview(unit_bytes)
+        while view:
+            view = view[os.write(fd, view):]
+        os.fsync(fd)
+        os.close(fd)
+        fd = None
+        try:
+            os.link(tmp, unit_path)
+        except FileExistsError:
+            if read_regular(unit_path) != unit_bytes:
+                raise WakeError("unit_exists") from None
+    finally:
+        if fd is not None:
+            os.close(fd)
+        os.unlink(tmp)
+    try:
+        dfd = os.open(unit_dir, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(dfd)
+        finally:
+            os.close(dfd)
+    except OSError as exc:
+        if read_regular(unit_path) != unit_bytes:
+            raise WakeError("state_commit_uncertain", "transient") from exc
+
+
+def install(args, host):
+    plan, private = compute(args, host)
+    if plan["plan_sha256"] != args.plan_sha256:
+        raise WakeError("plan_changed")
+    project = plan["project"]["path"]
+    bundle_dir = Path(plan["bundle"]["dir"])
+    files, bundle_doc = private["files"], private["bundle_doc"]
+    if args.kind == "exit":
+        freeze_bundle(project, bundle_dir, files, bundle_doc)
+        return {"status": "installed", "kind": "exit", "instance": plan["instance"],
+                "bundle": plan["bundle"]["dir"], "steps": plan["steps"][1:]}
+    directory = Path(plan["config_path"]).parent
+    unit_path = Path(plan["unit_path"])
+    config_bytes = canonical(plan["config"])
+    bundle_state(bundle_dir, files, bundle_doc)
+    destination_check(directory, unit_path, config_bytes, private["unit"])
+    freeze_bundle(project, bundle_dir, files, bundle_doc)
+    queue = load_queue_module(bundle_dir, files, "bundle_" + plan["bundle"]["sha256"][:16])
+    null_config = dict(plan["config"], service=None)
+    rendered = renderer_call(queue.render_service, null_config, Path(plan["config_path"]), args.python,
+                             str(bundle_dir / "queue_wake.py"), private["template"], module=queue)
+    if rendered != private["unit"]:
+        raise WakeError("plan_changed")
+    common.private_dir(str(directory.parent))
+    common.private_dir(str(directory))
+    gate = common.acquire_lock(str(directory), name="instance.lock")
+    try:
+        config_present, unit_present = destination_check(directory, unit_path, config_bytes, private["unit"])
+        if not config_present:
+            write_config(directory, plan["config"], config_bytes)
+        if not unit_present:
+            publish_unit(unit_path, private["unit"])
+    finally:
+        os.close(gate)
+    return {"status": "installed", "kind": "queue", "instance": plan["instance"], "config": plan["config_path"],
+            "unit": plan["unit_path"], "steps": plan["steps"][1:]}
+
+
+# --------------------------------------------------------------------------- remove
+
+
+def check_entries(directory, allowed):
+    """Every entry is an allowed private regular file; refuse anything else, change nothing."""
+    for name in sorted(os.listdir(directory)):
+        path = directory / name
+        if REBIND.fullmatch(name):
+            raise WakeError("recovery_data_present")
+        info = os.lstat(path)
+        if name not in allowed or not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid():
+            raise WakeError("instance_unexpected_files")
+
+
+def hold(directory, names):
+    """Take each lock in order, without waiting; contention means the instance is active."""
+    fds = []
+    try:
+        for name in names:
+            try:
+                fds.append(common.acquire_lock(str(directory), name=name, attempts=1))
+            except WakeError as exc:
+                if exc.code == "another_instance_running":
+                    raise WakeError("instance_active") from exc
+                raise
+        return fds
+    except BaseException:
+        for fd in fds:
+            os.close(fd)
+        raise
+
+
+def remove_exit(plan):
+    directory = instance_dir(plan["project"]["path"], plan["instance"])
+    if not os.path.lexists(directory):
+        return {"status": "removed", "kind": "exit", "instance": plan["instance"], "removed": []}
+    common.private_dir(str(directory))
+    check_entries(directory, LOCK_NAMES | set(EXIT_DATA))
+    fds = hold(directory, ("phase.lock", "lock", "instance.lock"))
+    try:
+        check_entries(directory, LOCK_NAMES | set(EXIT_DATA))
+        removed = []
+        for name in EXIT_DATA:
+            if os.path.lexists(directory / name):
+                os.unlink(directory / name)
+                removed.append(name)
+    finally:
+        for fd in reversed(fds):
+            os.close(fd)
+    return {"status": "removed", "kind": "exit", "instance": plan["instance"], "removed": removed}
+
+
+def unit_inactive(host, plan):
+    code, out = host.systemctl("--user", "show", f"queue-wake@{plan['instance']}.service",
+                               "--property=LoadState", "--property=ActiveState", "--property=UnitFileState",
+                               "--property=FragmentPath")
+    values = dict(line.partition("=")[::2] for line in out.splitlines() if "=" in line)
+    if code != 0 and values.get("LoadState") != "not-found":
+        raise WakeError("service_manager_unavailable", "transient")
+    if values.get("LoadState") not in (None, "not-found") and values.get("FragmentPath") != plan["unit_path"]:
+        raise WakeError("wrong_service_fragment")
+    if values.get("ActiveState") not in ("inactive", "failed", None) \
+            or values.get("UnitFileState") not in ("disabled", "", None):
+        raise WakeError("instance_active")
+
+
+def remove_queue(plan, private, host):
+    directory = Path(plan["config_path"]).parent
+    unit_path = Path(plan["unit_path"])
+    if not os.path.lexists(directory):
+        return {"status": "removed", "kind": "queue", "instance": plan["instance"], "removed": []}
+    if not any(os.path.lexists(directory / n) for n in (*QUEUE_DATA, INTENT)) and not os.path.lexists(unit_path):
+        return {"status": "removed", "kind": "queue", "instance": plan["instance"], "removed": []}
+    # Read-only refusal before any lock file can be created (decision 1335 note).
+    if not os.path.lexists(directory / INTENT) and not os.path.lexists(directory / "state.json") \
+            and os.path.lexists(directory / "config.json"):
+        raise WakeError("state_missing")
+    allowed = LOCK_NAMES | set(QUEUE_DATA) | {INTENT}
+    check_entries(directory, allowed)
+    unit_inactive(host, plan)
+    queue = load_queue_module(Path(private["pin"].dir) / "adapters", private["files"], "pin")
+    fds = hold(directory, ("guided.lock", "observer.lock", "instance.lock"))
+    try:
+        check_entries(directory, allowed)
+        intent = intent_for(plan, directory, unit_path, queue)
+        removed = []
+        unit = read_regular(unit_path) if os.path.lexists(unit_path) else None
+        if unit is not None:
+            if sha256(unit) != intent["unit"]["sha256"]:
+                raise WakeError("unit_changed")
+            os.unlink(unit_path)
+            removed.append(str(unit_path))
+        for name in ("paused.json", "state.json", "config.json", INTENT):
+            if os.path.lexists(directory / name):
+                os.unlink(directory / name)
+                removed.append(name)
+    finally:
+        for fd in reversed(fds):
+            os.close(fd)
+    return {"status": "removed", "kind": "queue", "instance": plan["instance"], "removed": removed}
+
+
+def intent_for(plan, directory, unit_path, queue):
+    """Validate or create the durable removal intent (design v3 §4b, v4)."""
+    identity = {k: plan[k] for k in ("instance", "project", "handle", "session", "generation")}
+    present = {n: read_regular(directory / n) for n in ("config.json", "state.json")
+               if os.path.lexists(directory / n)}
+    existing = read_regular(directory / INTENT) if os.path.lexists(directory / INTENT) else None
+    if existing is not None:
+        intent = common.read_small_json(str(directory / INTENT))
+        if (set(intent) != {"v", *identity, "config_sha256", "unit", "state_sha256", "pending"}
+                or intent["v"] != 1 or any(intent[k] != v for k, v in identity.items())
+                or intent["pending"] is not None or intent["unit"] != {"path": str(unit_path),
+                                                                     "sha256": plan["unit_sha256"]}):
+            raise WakeError("removal_intent_invalid")
+        if "config.json" in present and sha256(present["config.json"]) != intent["config_sha256"]:
+            raise WakeError("removal_intent_invalid")
+        if "state.json" in present and sha256(present["state.json"]) != intent["state_sha256"]:
+            raise WakeError("removal_state_changed")
+        return intent
+    if "config.json" not in present:
+        raise WakeError("config_missing")
+    if present["config.json"] != canonical(plan["config"]):
+        raise WakeError("config_changed")
+    if "state.json" not in present:
+        raise WakeError("state_missing")
+    try:
+        state = queue.Store(directory, plan["config"]).load()
+    except (queue.Invalid, queue.common.WakeError) as exc:
+        raise WakeError("state_invalid") from exc
+    if state["pending"] is not None:
+        raise WakeError("pending_attempt")
+    intent = dict(identity, v=1, config_sha256=sha256(present["config.json"]),
+                  unit={"path": str(unit_path), "sha256": plan["unit_sha256"]},
+                  state_sha256=sha256(present["state.json"]), pending=None)
+    try:
+        common.write_private_json(str(directory), INTENT, intent)
+    except WakeError as exc:
+        if exc.code != "state_commit_uncertain" or read_regular(directory / INTENT) != canonical(intent):
+            raise
+    return intent
+
+
+def remove(args, host):
+    plan, private = compute_for_remove(args, host)
+    if args.kind == "exit":
+        return remove_exit(plan)
+    return remove_queue(plan, private, host)
+
+
+def compute_for_remove(args, host):
+    """The same identity as plan; an existing instance is not a kind conflict for its own kind."""
+    return compute(args, host)
+
+
+# --------------------------------------------------------------------------- arguments
+
+
+class _Parser(argparse.ArgumentParser):
+    def error(self, message):
+        raise WakeError("arguments_invalid")
+
+
+def parse_args(argv):
+    p = _Parser(prog="install.sh --user wake", add_help=False)
+    p.add_argument("command", choices=("plan", "install", "remove"))
+    p.add_argument("--project", required=True)
+    p.add_argument("--handle", required=True)
+    p.add_argument("--kind", required=True, choices=tuple(KINDS))
+    p.add_argument("--session", required=True)
+    p.add_argument("--generation", required=True)
+    p.add_argument("--peer")
+    for name in ("--python", "--socket", "--binary", "--binary-sha256", "--thread", "--plan-sha256"):
+        p.add_argument(name)
+    p.add_argument("--confirm", action="store_true")
+    args = p.parse_args(argv)
+    if not os.path.isabs(args.project) or os.path.normpath(args.project) != args.project:
+        raise WakeError("project_path_invalid")
+    common.validate_handle(args.handle)
+    common.validate_session(args.session)
+    if not re.fullmatch(r"[1-9][0-9]{0,7}", args.generation):
+        raise WakeError("generation_invalid")
+    args.generation = int(args.generation)
+    if args.peer is not None and (not common.HANDLE.fullmatch(args.peer) or args.peer == args.handle):
+        raise WakeError("peer_invalid")
+    queue_args = (args.python, args.socket, args.binary, args.binary_sha256, args.thread)
+    if args.kind == "queue":
+        if any(v is None for v in queue_args) or args.peer is not None:
+            raise WakeError("arguments_invalid")
+        if not all(os.path.isabs(v) and os.path.normpath(v) == v for v in (args.python, args.socket, args.binary)):
+            raise WakeError("path_invalid")
+        if not HEX.fullmatch(args.binary_sha256) or args.thread != args.session:
+            raise WakeError("runtime_binding_invalid")
+    elif any(v is not None for v in queue_args):
+        raise WakeError("arguments_invalid")
+    if args.command == "plan" and (args.confirm or args.plan_sha256):
+        raise WakeError("arguments_invalid")
+    if args.command == "install" and not (args.confirm and args.plan_sha256 and HEX.fullmatch(args.plan_sha256)):
+        raise WakeError("confirmation_required")
+    if args.command == "remove" and not args.confirm:
+        raise WakeError("confirmation_required")
+    return args
+
+
+def main(argv=None, host=None, out=sys.stdout):
+    try:
+        args = parse_args(sys.argv[1:] if argv is None else argv)
+        host = host or Host()
+        if args.command == "plan":
+            result = compute(args, host)[0]
+        elif args.command == "install":
+            result = install(args, host)
+        else:
+            result = remove(args, host)
+    except WakeError as exc:
+        print(json.dumps({"status": "stopped", "code": exc.code}, sort_keys=True), file=out)
+        return exc.exit_code
+    except OSError:
+        print(json.dumps({"status": "stopped", "code": "os_error"}, sort_keys=True), file=out)
+        return common.EXIT_TRANSIENT
+    print(json.dumps(result, sort_keys=True), file=out)
+    return common.EXIT_OK
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -111,6 +111,11 @@
       "sha256": "7fb3f54b088cb3de7637579da282fe83d4e3a9a4ecae909651625b9d44631a62"
     },
     {
+      "path": "docs/WAKE.md",
+      "bytes": 9239,
+      "sha256": "e8467e821a54c1a7508bd994707e152d06d4143f3cc3a8a0b5b9736e0444b5df"
+    },
+    {
       "path": "entry/ai-comm/SKILL.md",
       "bytes": 5144,
       "sha256": "dab720005006e9b0a873d5d9786416915faf1fb32190613f65410435c7cddb90"
@@ -167,8 +172,8 @@
     },
     {
       "path": "scripts/install_user.py",
-      "bytes": 71500,
-      "sha256": "11efe85217beac5f5cb2c158db8b7e3fe9e4ebcf978dde2c52e66e551dd75266"
+      "bytes": 71950,
+      "sha256": "0f4447e665d7b246060589ff0a8b7caa8ff52bd371a0692ee7dbbbc59221de55"
     },
     {
       "path": "scripts/leak_scan.py",
@@ -199,6 +204,11 @@
       "path": "scripts/verify_pin.py",
       "bytes": 15326,
       "sha256": "65f9340ad875f0a841ff50db415cbea94e8f241a2a472d6ec4631cb2ef55f8eb"
+    },
+    {
+      "path": "scripts/wake.py",
+      "bytes": 32983,
+      "sha256": "20c575df5a2c2ad519b6b72a8d1460361124938b9c5ebb31c352ce113355eb97"
     },
     {
       "path": "skills/ai-comm/SKILL.md",
@@ -299,6 +309,11 @@
       "path": "tests/test_verify_pin.py",
       "bytes": 18789,
       "sha256": "442ecf123f6568690bd5bd466c965d00a821921e915291f50c0115fdd779807e"
+    },
+    {
+      "path": "tests/test_wake_install.py",
+      "bytes": 24270,
+      "sha256": "cb9144e94c5a1776a2913ca1490ef2cdbb0a912e9f469157e8ce14f367aa60a9"
     },
     {
       "path": "upgrade_controller.py",

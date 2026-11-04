@@ -1486,6 +1486,14 @@ def _finish_root(cache, results):
 
 
 def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] == "wake":
+        # Optional wake adapters (design 024): handled by this same release's scripts/wake.py.
+        spec = importlib.util.spec_from_file_location(
+            "ai_comm_wake_installer", Path(__file__).resolve().parent / "wake.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module.main(argv[1:])
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("install")
