@@ -13,8 +13,9 @@ Identity is explicit and checked before the first wait (design 024 v3, section 1
   the channel's root commit; a mismatch stops the instance;
 - the handle, an opaque protocol label (no name is special);
 - the bound session and its channel generation, compared with the channel's
-  current binding; a takeover or any change stops the instance until the owner
-  rebinds it.
+  current binding (read from the complete paged ``registry sessions``, never from
+  the size-trimmed ``state``); a takeover or any change stops the instance until
+  the owner rebinds it.
 
 State lives in ``<project>/.ai-comm-local/wake/<project-key>-<handle>/`` (private,
 symlinks refused): lock, cursor, ``run.json``, ``pause``/``pause-ack`` and
@@ -243,6 +244,43 @@ def check_binding(state, handle, session, generation):
         raise common.WakeError("session_mismatch")
     if record.get("generation") != generation:
         raise common.WakeError("generation_mismatch")
+
+
+REGISTRY_PAGE = 100
+REGISTRY_MAX_PAGES = 100
+
+
+def current_participants(runner, layout, args):
+    """Every handle's current binding, from the complete paged registry.
+
+    ``state`` is a size-trimmed summary that may omit participants, so it is never used
+    as the registry (review 1345, Q1). ``registry sessions`` lists every generation; a
+    handle's current binding is its highest generation. All pages must come from the
+    same channel head."""
+    current, offset, head = {}, 0, None
+    for _ in range(REGISTRY_MAX_PAGES):
+        page = runner(cli_base(layout, "registry", args, identity=False)
+                      + ["sessions", "--offset", str(offset), "--limit", str(REGISTRY_PAGE)], CLI_TIMEOUT)
+        items, more, nxt = page.get("items"), page.get("more"), page.get("next")
+        if (not isinstance(items, list) or type(more) is not bool or type(nxt) is not int
+                or nxt != offset + len(items) or not isinstance(page.get("head"), str)):
+            raise CliError("cli_output_invalid")
+        if head is not None and page["head"] != head:
+            raise CliError("registry_changed")
+        head = page["head"]
+        for item in items:
+            if not isinstance(item, dict) or not isinstance(item.get("handle"), str) \
+                    or not isinstance(item.get("session"), str) or not _is_int(item.get("generation"), 1):
+                raise CliError("cli_output_invalid")
+            old = current.get(item["handle"])
+            if old is None or item["generation"] > old["generation"]:
+                current[item["handle"]] = {k: item[k] for k in ("handle", "session", "generation")}
+        if not more:
+            return {"participants": list(current.values())}
+        if not items:
+            raise CliError("cli_output_invalid")
+        offset = nxt
+    raise CliError("registry_limit", "permanent")
 
 
 def commit_json(directory, name, value):
@@ -487,8 +525,7 @@ def watch(args, runner=run_cli, out=sys.stdout, clock=time.monotonic, sleep=time
     lock_fd = common.acquire_lock(state_dir, sleep=sleep)
     run_id = secrets.token_hex(16)
     try:
-        check_binding(runner(cli_base(layout, "state", args, identity=False), CLI_TIMEOUT),
-                      args.handle, args.session, args.generation)
+        check_binding(current_participants(runner, layout, args), args.handle, args.session, args.generation)
         publish_run(state_dir, sleep, {
             "v": 1, "adapter": "exit-wake", "run_id": run_id, "pid": os.getpid(), "instance": layout.instance,
             "project": identity, "handle": args.handle, "session": args.session,
@@ -680,8 +717,7 @@ def preflight(inst, sleep):
     generation; a queue instance is refused; and a running instance must have
     recorded exactly this identity."""
     a = inst.args
-    check_binding(inst.runner(cli_base(inst.layout, "state", a, identity=False), CLI_TIMEOUT),
-                  a.handle, a.session, a.generation)
+    check_binding(current_participants(inst.runner, inst.layout, a), a.handle, a.session, a.generation)
     receipt_read(inst)
     if existing_private_dir(inst.state):
         if os.path.lexists(os.path.join(inst.state, REMOVE_INTENT)):

@@ -58,12 +58,18 @@ class FakeCli:
             {"handle": handle, "session": session, "generation": generation}]
         self.outstanding = outstanding
         self.on_wait = None
+        self.head = "h" * 40
 
     def __call__(self, cmd, timeout):
         self.calls.append(list(cmd))
         sub = cmd[cmd.index("--channel") + 2]
-        if sub == "state":
-            return {"participants": self.participants}
+        if sub == "registry":
+            assert cmd[cmd.index("registry") + 1] == "sessions"
+            offset = int(cmd[cmd.index("--offset") + 1])
+            limit = int(cmd[cmd.index("--limit") + 1])
+            page = self.participants[offset:offset + limit]
+            return {"head": self.head, "items": page, "next": offset + len(page),
+                    "more": offset + len(page) < len(self.participants)}
         if sub == "wait":
             if self.on_wait:
                 self.on_wait()
@@ -184,13 +190,39 @@ class IdentityTests(Base):
             cli = FakeCli("left", SESSION_A, participants=participants)
             result = self.run_main(self.argv(), cli)
             self.assertEqual(result, (78, f"WAKE-ERROR {code}"))
-            self.assertEqual(cli.subcommands(), ["state"])  # never waits on a stale binding
+            self.assertEqual(cli.subcommands(), ["registry"])  # never waits on a stale binding
 
     def test_takeover_during_run_fails_closed(self):
         error = exit_wake.CliError("session_not_current", "permanent", "unregistered_or_stale_session")
         cli = FakeCli("left", SESSION_A, waits=[None, error])
         self.assertEqual(self.run_main(self.argv(extra=["--rounds", "3"]), cli),
                          (78, "WAKE-ERROR session_not_current"))
+
+    def test_binding_comes_from_the_complete_paged_registry(self):
+        """Review 1345 Q1: many participants and history; the current binding is the highest generation."""
+        participants = [{"handle": f"peer-{i}", "session": "x" * 150 + str(i), "generation": 1} for i in range(250)]
+        participants += [{"handle": "left", "session": "old-session", "generation": 1},
+                         {"handle": "left", "session": SESSION_A, "generation": 2}]
+        cli = FakeCli("left", SESSION_A, participants=participants, waits=[8])
+        self.assertEqual(self.run_main(self.argv(generation=2), cli),
+                         (0, "WAKE new messages for left; notification cursor 8"))
+        self.assertEqual(cli.subcommands()[:3], ["registry"] * 3)  # 252 records, pages of 100
+        stale = FakeCli("left", "old-session", participants=participants)
+        self.assertEqual(self.run_main(self.argv(session="old-session", generation=1), stale),
+                         (78, "WAKE-ERROR session_mismatch"))
+
+    def test_registry_changing_between_pages_is_transient(self):
+        participants = [{"handle": f"peer-{i}", "session": f"s{i}", "generation": 1} for i in range(150)]
+        participants.append({"handle": "left", "session": SESSION_A, "generation": 1})
+        cli = FakeCli("left", SESSION_A, participants=participants)
+        real = FakeCli.__call__
+
+        def moving(cmd, timeout):
+            result = real(cli, cmd, timeout)
+            cli.head = "g" * 40
+            return result
+
+        self.assertEqual(self.run_main(self.argv(), moving), (75, "WAKE-ERROR registry_changed"))
 
     def test_third_participant_is_tolerated(self):
         participants = [{"handle": h, "session": f"s-{h}", "generation": 1} for h in ("right", "third")]
@@ -341,7 +373,7 @@ class PauseTests(Base):
             if len(sleeps) == 3:
                 ack = common.read_small_json(os.path.join(state, "pause-ack"))
                 self.assertEqual(ack["nonce"], nonce)
-                self.assertEqual(cli.subcommands(), ["state"])  # no wait while paused
+                self.assertEqual(cli.subcommands(), ["registry"])  # no wait while paused
                 os.unlink(os.path.join(state, "pause"))
 
         code = exit_wake.main(self.argv(), runner=cli, out=out, clock=lambda: 0.0, sleep=sleep)
@@ -358,7 +390,7 @@ class PauseTests(Base):
         out = io.StringIO()
         code = exit_wake.main(self.argv(), runner=cli, out=out, clock=lambda: next(ticks), sleep=lambda s: None)
         self.assertEqual((code, out.getvalue().strip()), (0, "WAKE-EXPIRED re-arm; notification cursor 0"))
-        self.assertEqual(cli.subcommands(), ["state"])
+        self.assertEqual(cli.subcommands(), ["registry"])
         self.assertEqual(common.read_small_json(os.path.join(state, "pause-ack"))["nonce"], "b" * 32)
 
     def test_malformed_pause_is_permanent(self):
@@ -414,7 +446,7 @@ class KindGateTests(Base):
         common.write_private_json(state, "config.json", {"v": 1})
         cli = FakeCli("left", SESSION_A)
         self.assertEqual(self.run_main(self.argv(), cli), (78, "WAKE-ERROR instance_kind_conflict"))
-        self.assertEqual(cli.subcommands(), ["state"])
+        self.assertEqual(cli.subcommands(), ["registry"])
         self.assertEqual(sorted(os.listdir(state)), ["config.json", "instance.lock", "lock"])  # nothing removed
 
     def test_dangling_link_marker_counts_and_is_not_followed(self):
@@ -732,8 +764,9 @@ class LaunchTests(unittest.TestCase):
             Path(project, ".tools", "ai-comm", "ai_comm.py").write_text(textwrap.dedent("""\
                 import json, sys
                 sub = sys.argv[3]
-                if sub == "state":
-                    print(json.dumps({"participants": [{"handle": "left", "session": "s-1", "generation": 1}]}))
+                if sub == "registry":
+                    print(json.dumps({"head": "h", "next": 1, "more": False,
+                                      "items": [{"handle": "left", "session": "s-1", "generation": 1}]}))
                 elif sub == "wait":
                     print(json.dumps({"notification_through": 5, "messages": [{"seq": 5}]}))
                 else:
