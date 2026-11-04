@@ -794,6 +794,86 @@ class LaunchTests(unittest.TestCase):
             self.assertEqual(sorted(os.listdir(bundle)), ["common.py", "exit_wake.py"])
 
 
+class RealCliTests(unittest.TestCase):
+    """Design 022 section 5 with the real CLI and a real channel: no fake runner, no fake binding."""
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory(prefix="wake-real-")
+        self.addCleanup(temp.cleanup)
+        self.project = os.path.join(os.path.realpath(temp.name), "project")
+        self.pin = Path(self.project, ".tools", "ai-comm")
+        self.pin.mkdir(parents=True)
+        for name in ("ai_comm.py", "PROTOCOL.md", "RELEASE-MANIFEST.json"):
+            shutil.copy2(ROOT / name, self.pin / name)
+        os.mkdir(os.path.join(self.project, ".ai-comm-local"), 0o700)
+        self.env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1", "GIT_AUTHOR_NAME": "t",
+                    "GIT_AUTHOR_EMAIL": "t@example.invalid", "GIT_COMMITTER_NAME": "t",
+                    "GIT_COMMITTER_EMAIL": "t@example.invalid"}
+        self.cli("init", "--task", "wake test", "--reviewers", "left", "right")
+
+    def cli(self, *args):
+        done = subprocess.run([sys.executable, "-I", "-B", str(self.pin / "ai_comm.py"), "--channel",
+                               os.path.join(self.project, ".ai-comm"), *args], capture_output=True, text=True,
+                              env=self.env, timeout=60)
+        self.assertEqual(done.returncode, 0, done.stdout[-300:] + done.stderr[-300:])
+        return done.stdout
+
+    def join(self, handle, session):
+        self.cli("join", "--as", handle, "--platform", "host", "--session", session)
+
+    def send(self, sender, session, to, key):
+        path = os.path.join(self.project, ".ai-comm-local", key + ".json")
+        Path(path).write_text(json.dumps({"act": "ASK", "to": to, "topic": "t", "summary": "ping", "body": "b"}))
+        self.cli("send", "--as", sender, "--session", session, "--key", key, "--draft", path)
+
+    def argv(self, handle, session, rounds=1):
+        return ["--project", self.project, "--project-key", key_for(self.project), "--handle", handle,
+                f"--session={session}", "--generation", "1", "--rounds", str(rounds), "--wait-timeout", "1"]
+
+    def run_adapter(self, handle, session, rounds=1):
+        out = io.StringIO()
+        return exit_wake.main(self.argv(handle, session, rounds), out=out), out.getvalue().strip()
+
+    def test_solo_then_a_late_join(self):
+        self.join("left", SESSION_A)
+        self.assertEqual(self.run_adapter("left", SESSION_A), (0, "WAKE-EXPIRED re-arm; notification cursor 0"))
+        self.join("right", SESSION_B)
+        self.send("right", SESSION_B, ["left"], "late")
+        code, line = self.run_adapter("left", SESSION_A)
+        self.assertEqual(code, 0, line)
+        self.assertTrue(line.startswith("WAKE new messages for left"), line)
+
+    def test_simultaneous_delivery_to_two_handles(self):
+        self.join("left", SESSION_A)
+        self.join("right", SESSION_B)
+        self.join("third", "third-session")
+        self.send("third", "third-session", ["left", "right"], "both")
+        results = {}
+        threads = [threading.Thread(target=lambda h=h, s=s: results.setdefault(h, self.run_adapter(h, s)))
+                   for h, s in (("left", SESSION_A), ("right", SESSION_B))]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(60)
+        for handle in ("left", "right"):
+            self.assertEqual(results[handle][0], 0, results[handle])
+            self.assertTrue(results[handle][1].startswith(f"WAKE new messages for {handle}"), results[handle])
+
+    def test_a_real_takeover_stops_a_live_run_and_the_old_binding(self):
+        self.join("left", SESSION_A)
+        live = subprocess.Popen([sys.executable, "-I", str(ROOT / "adapters" / "exit_wake.py"),
+                                 *self.argv("left", SESSION_A, rounds=30)], stdout=subprocess.PIPE, text=True)
+        run_record = os.path.join(self.project, ".ai-comm-local", "wake", f"{key_for(self.project)}-left", "run.json")
+        for _ in range(200):
+            if os.path.exists(run_record):
+                break
+            time.sleep(0.05)
+        self.cli("join", "--as", "left", "--platform", "host", "--session", "new-session", "--takeover")
+        output, _ = live.communicate(timeout=60)
+        self.assertEqual((live.returncode, output.strip()), (78, "WAKE-ERROR session_not_current"))
+        self.assertEqual(self.run_adapter("left", SESSION_A), (78, "WAKE-ERROR session_mismatch"))
+
+
 class NoContentTests(unittest.TestCase):
     def test_never_reads_inbox_acknowledges_or_sends(self):
         source = (ROOT / "adapters" / "exit_wake.py").read_text(encoding="utf-8")

@@ -22,13 +22,13 @@
     },
     {
       "path": "ACTIVATE.md",
-      "bytes": 31272,
-      "sha256": "450302a94808952e7f3f0f7eea5ecb48fb8c079471b7e3a38f7f76b0c6191445"
+      "bytes": 31528,
+      "sha256": "1a66d09fdea78194653625447c2ec7fc1e235da0d6a738b6b5fe1aa4aea19224"
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 20815,
-      "sha256": "1d42b2d447d3836be7e48f3b679de74bcd1dbd87079e9b404372e09f8a9db3e9"
+      "bytes": 20974,
+      "sha256": "64f177f8e00854e952ebddd39849ae189993b99dcae2a79b003fe669d8649236"
     },
     {
       "path": "LICENSE",
@@ -92,8 +92,8 @@
     },
     {
       "path": "docs/INSTALL.md",
-      "bytes": 13540,
-      "sha256": "029e362b701adab7a9c9af8ed4e648778bcd172bdd8944b1f413726116cfa071"
+      "bytes": 13751,
+      "sha256": "d55a34f4cf1ecc6f4c44915c200e0ff2abdda069eb58acf858a07e21515ba47a"
     },
     {
       "path": "docs/PERFORMANCE.md",
@@ -112,8 +112,8 @@
     },
     {
       "path": "docs/WAKE.md",
-      "bytes": 12778,
-      "sha256": "c9750a5942705795e899c61895808242ce3b54e3df805f8271f2f9b1ca1d0b1f"
+      "bytes": 13415,
+      "sha256": "b33536e266af120e06b30c23265a48d996186cdc4e00785e3efbb0690a04526c"
     },
     {
       "path": "entry/ai-comm/SKILL.md",
@@ -127,8 +127,8 @@
     },
     {
       "path": "install.sh",
-      "bytes": 474,
-      "sha256": "fba221989f137f8713dae8bdb410b83cf462e893b495b1d842fdc51ccf91770b"
+      "bytes": 591,
+      "sha256": "e2140d437fe7a09757814da0c479abd19d5d6b54bc34106cc100d372253798ab"
     },
     {
       "path": "scripts/benchmark_snapshot.py",
@@ -212,8 +212,8 @@
     },
     {
       "path": "skills/ai-comm/SKILL.md",
-      "bytes": 22211,
-      "sha256": "41a97275f4b48f9e5caec3a28f02ec1aacdac6fe3f68cf718211b5fd9db69896"
+      "bytes": 22438,
+      "sha256": "2ed5dccd92c73aec927deadd419386aa92fddd1fd6d82b964cbc0ccac24c5971"
     },
     {
       "path": "tests/test_bootstrap.py",
@@ -232,8 +232,8 @@
     },
     {
       "path": "tests/test_exit_wake.py",
-      "bytes": 40658,
-      "sha256": "0d5660507b896f7fb9b6effb805b6c69473396094a36d80847414b2974db4385"
+      "bytes": 45117,
+      "sha256": "f904329f51702b199c35b885f36d3c44fd88491808bf99ab7ab3871040e2dc7c"
     },
     {
       "path": "tests/test_host_neutral_channel.py",

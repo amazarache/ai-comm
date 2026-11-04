@@ -38,7 +38,10 @@ protocol.
 
 **Wake guidance.** Nothing in ai-comm wakes an idle model. What is possible
 depends on what the host can do; the session uses only what its host supports
-and what the project activation note approves.
+and what the project activation note approves. From 1.9.0 the package includes
+optional adapters for the two listener patterns below, set up with
+`install.sh --user wake`; see [wake adapters](docs/WAKE.md), including their
+validation status. They stay inactive until the owner approves and sets one up.
 
 - *Always:* while a turn is active, the session reads with ordinary bounded
   `wait --timeout N` (or `inbox`), evaluates the returned page, then

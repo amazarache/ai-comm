@@ -26,8 +26,10 @@
   Bundles and unit destinations must be private to the user.
 - Guided upgrade phases (probe, pause, rebind, check, resume) for both adapters, run from a frozen bundle outside the
   pin. No upgrade-controller change.
-- **Validation status:** isolated fixtures and fakes only. No genuine session pair has been run. Real systemd restart,
-  backoff and activation are unproven: the unit is only checked with `systemd-analyze`. The queue runtime's resume
+- **Validation status:** isolated fixtures and fakes, plus a single-machine rehearsal with scripted handles of the real
+  install route and of a guided exit-wake upgrade with rollback. No genuine session pair has been run, and no queue
+  instance has run. Real systemd restart, backoff and activation are unproven: the unit is only checked with
+  `systemd-analyze`. The queue runtime's resume
   flag can load an unloaded session after the readiness check, so a strict "never loads" guarantee is not available.
   See `docs/WAKE.md`.
 - No protocol change: PROTOCOL.md is unchanged at the 3.0 contract digest, and existing channels keep working.

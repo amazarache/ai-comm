@@ -141,6 +141,7 @@ All commands print JSON and stop with a code on any problem.
 | `install.sh --user launcher --remove` | remove it, only if unchanged |
 | `install.sh --user offer status`, `offer claim`, `offer answer` | the cache's own update offer (below) |
 | `install.sh --user uninstall --confirm` | remove the cache, its links and launcher; anything unexpected or changed is kept and reported |
+| `install.sh --user wake plan\|install\|remove\|integration …` | the optional wake adapters of a project with a verified pin; `plan` changes nothing, and nothing is activated (see [wake adapters](WAKE.md)) |
 
 `check` reports `verdict`: `update_available`, `up_to_date`, or `unknown`. It says `up_to_date` only when the release
 metadata is fresh (refreshed within seven days, not dated in the future, last refresh attempt successful); otherwise

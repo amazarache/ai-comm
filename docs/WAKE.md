@@ -221,6 +221,14 @@ transaction completes.
 - **What has been shown:** every behaviour in this guide is covered by isolated tests with fixtures and fakes: a fake
   channel CLI, fake service manager, fake runtime and temporary projects. The guided-upgrade hooks are run through
   the controller's own validator, `code_hashes` and `probe()`.
+- **What was also rehearsed, on one machine, before release:** with a real per-user cache, trusted verifier, pinned
+  checkout, channel and CLI, and locally made tags:
+  - exit-wake's whole path: plan, install, a run, its phases, a live pause, a real takeover, and removal;
+  - a full guided upgrade of exit-wake between two versions with different adapter bytes, including an interrupted
+    apply, `continue` and rollback, all from one frozen bundle;
+  - queue-wake's plan and install, and `systemd-analyze` on its real rendered unit.
+
+  The "sessions" in those rehearsals were scripted handles, not models, and no queue instance ran.
 - **What has not been shown:**
   - **No genuine session pair has been run** (mixed, two of one host, two of the other). Live acceptance with real,
     independently bound sessions and owner approval for each target is still outstanding.

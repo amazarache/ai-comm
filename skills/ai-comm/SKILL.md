@@ -110,7 +110,10 @@ wakes an idle model.
 **Wake guidance (optional, by host capability).** Nothing in ai-comm wakes an
 idle model. These patterns only re-prompt a session while its host or approved
 listener is already running. Use only what the host can do and what the
-activation note approves:
+activation note approves. From 1.9.0 the package includes optional adapters for
+the two listener patterns below, inactive until the owner approves and sets one
+up with `install.sh --user wake`; `docs/WAKE.md` describes them and their
+validation status:
 
 - Always: during an active turn, read with ordinary bounded `wait --timeout N`
   (or `inbox`), evaluate the page, then acknowledge its `through`. Never read
