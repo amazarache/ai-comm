@@ -1,0 +1,442 @@
+"""Tests for adapters/exit_wake.py. Fakes only: no real channel, host or peer."""
+import io
+import json
+import os
+import random
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+import textwrap
+import threading
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "adapters"))
+import common  # noqa: E402
+import exit_wake  # noqa: E402
+
+SESSION_A = "11111111-2222-4333-8444-555555555555"
+SESSION_B = "session two / tab 3"
+SEED = 20261104
+
+
+def git(directory, *args):
+    subprocess.run(["git", "-C", str(directory), *args], check=True, capture_output=True,
+                   env=exit_wake.git_env())
+
+
+def make_project(base, name="project"):
+    """A project root with a one-commit channel repository and an empty pin directory."""
+    project = os.path.join(os.path.realpath(base), name)
+    os.makedirs(os.path.join(project, ".ai-comm"))
+    os.makedirs(os.path.join(project, ".tools", "ai-comm"))
+    os.makedirs(os.path.join(project, ".ai-comm-local"))
+    channel = os.path.join(project, ".ai-comm")
+    git(channel, "init", "-q")
+    Path(channel, "README").write_text("channel\n")
+    git(channel, "add", "README")
+    git(channel, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m", "root")
+    return project
+
+
+def key_for(project):
+    layout = exit_wake.Layout(project, "0" * 16, "x")
+    return common.project_key(exit_wake.project_identity(layout))
+
+
+class FakeCli:
+    """Answers state/wait/outstanding calls; records every argv."""
+
+    def __init__(self, handle, session, generation=1, waits=None, participants=None, outstanding=None):
+        self.calls = []
+        self.waits = list(waits or [])
+        self.participants = participants if participants is not None else [
+            {"handle": handle, "session": session, "generation": generation}]
+        self.outstanding = outstanding
+        self.on_wait = None
+
+    def __call__(self, cmd, timeout):
+        self.calls.append(list(cmd))
+        sub = cmd[cmd.index("--channel") + 2]
+        if sub == "state":
+            return {"participants": self.participants}
+        if sub == "wait":
+            if self.on_wait:
+                self.on_wait()
+            cursor = int(cmd[cmd.index("--new-since") + 1])
+            item = self.waits.pop(0) if self.waits else None
+            if isinstance(item, Exception):
+                raise item
+            if item is None:
+                return {"notification_through": cursor, "messages": []}
+            return {"notification_through": item, "messages": [{"seq": item}]}
+        if sub == "outstanding":
+            return self.outstanding(cmd)
+        raise AssertionError("unexpected subcommand")
+
+    def subcommands(self):
+        return [c[c.index("--channel") + 2] for c in self.calls]
+
+
+class Base(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.base = os.path.realpath(self._tmp.name)
+        self.project = make_project(self.base)
+        self.key = key_for(self.project)
+
+    def argv(self, handle="left", session=SESSION_A, generation=1, project=None, key=None, extra=()):
+        return ["--project", project or self.project, "--project-key", key or self.key, "--handle", handle,
+                f"--session={session}", "--generation", str(generation), "--rounds", "2", "--wait-timeout", "1",
+                *extra]
+
+    def run_main(self, argv, cli):
+        out = io.StringIO()
+        code = exit_wake.main(argv, runner=cli, out=out, sleep=lambda s: None)
+        return code, out.getvalue().strip()
+
+    def state_dir(self, handle="left", project=None, key=None):
+        return os.path.join(project or self.project, ".ai-comm-local", "wake", f"{key or self.key}-{handle}")
+
+
+class ArgumentTests(Base):
+    def test_handles_are_opaque(self):
+        rng = random.Random(SEED)
+        alphabet = "abcdefghijklmnopqrstuvwxyz0123456789-"
+        handles = ["left", "right", "a", "x" * 32]
+        handles += ["".join([rng.choice("abcdefghijklmnopqrstuvwxyz")]
+                            + [rng.choice(alphabet) for _ in range(rng.randrange(0, 32))]) for _ in range(20)]
+        for handle in handles:
+            args = exit_wake.parse_args(self.argv(handle=handle))
+            self.assertEqual(args.handle, handle, f"seed {SEED}")
+
+    def test_refusals(self):
+        cases = [
+            (self.argv(project="relative/p"), "project_path_invalid"),
+            (self.argv(project=self.project + "/"), "project_path_invalid"),
+            (self.argv(project="/"), "project_path_invalid"),
+            (self.argv(key="XYZ"), "project_key_invalid"),
+            (self.argv(handle="Left"), "handle_invalid"),
+            (self.argv(session="a\nb"), "session_invalid"),
+            (self.argv(generation=0), "generation_invalid"),
+            (self.argv(generation="01"), "generation_invalid"),
+            (self.argv(extra=["--peer", "left"]), "peer_invalid"),
+            (self.argv(extra=["--rounds", "0"]), "bounds_invalid"),
+            (self.argv(extra=["--overdue-after", "700", "--seen-overdue-after", "650"]), "bounds_invalid"),
+            (self.argv() + ["--unknown"], "arguments_invalid"),
+            (["--handle", "left"], "arguments_invalid"),
+        ]
+        for argv, code in cases:
+            with self.assertRaises(common.WakeError, msg=code) as ctx:
+                exit_wake.parse_args(argv)
+            self.assertEqual(ctx.exception.code, code)
+            self.assertEqual(ctx.exception.exit_code, 78)
+
+    def test_session_starting_with_dash_is_passed_safely(self):
+        cli = FakeCli("left", "-x --as right")
+        code, line = self.run_main(self.argv(session="-x --as right"), cli)
+        self.assertEqual(code, 0, line)
+        wait = cli.calls[1]
+        self.assertIn("--session=-x --as right", wait)
+        self.assertEqual(wait.count("--as"), 1)
+
+
+class IdentityTests(Base):
+    def test_wrong_project_key_stops(self):
+        cli = FakeCli("left", SESSION_A)
+        code, line = self.run_main(self.argv(key="0" * 16), cli)
+        self.assertEqual((code, line), (78, "WAKE-ERROR project_key_mismatch"))
+        self.assertEqual(cli.calls, [])
+
+    def test_identical_channel_history_in_two_paths_gives_two_keys(self):
+        other = os.path.join(self.base, "copy")
+        shutil.copytree(self.project, other, symlinks=True)
+        self.assertNotEqual(key_for(other), self.key)
+        code, line = self.run_main(self.argv(project=other), FakeCli("left", SESSION_A))
+        self.assertEqual((code, line), (78, "WAKE-ERROR project_key_mismatch"))
+
+    def test_channel_without_history_stops(self):
+        bare = os.path.join(self.base, "empty")
+        for sub in (".ai-comm", ".tools/ai-comm", ".ai-comm-local"):
+            os.makedirs(os.path.join(bare, sub))
+        git(os.path.join(bare, ".ai-comm"), "init", "-q")
+        code, line = self.run_main(self.argv(project=bare), FakeCli("left", SESSION_A))
+        self.assertEqual((code, line), (78, "WAKE-ERROR channel_identity_unavailable"))
+
+    def test_git_hooks_and_user_config_are_ignored(self):
+        env = exit_wake.git_env()
+        self.assertEqual(env["GIT_CONFIG_GLOBAL"], os.devnull)
+        self.assertEqual(env["GIT_CONFIG_NOSYSTEM"], "1")
+        self.assertEqual((env["GIT_CONFIG_KEY_0"], env["GIT_CONFIG_VALUE_0"]), ("core.hooksPath", os.devnull))
+
+    def test_binding_mismatches_fail_closed(self):
+        cases = [
+            ([], "handle_not_joined"),
+            ([{"handle": "left", "session": SESSION_B, "generation": 1}], "session_mismatch"),
+            ([{"handle": "left", "session": SESSION_A, "generation": 2}], "generation_mismatch"),
+        ]
+        for participants, code in cases:
+            cli = FakeCli("left", SESSION_A, participants=participants)
+            result = self.run_main(self.argv(), cli)
+            self.assertEqual(result, (78, f"WAKE-ERROR {code}"))
+            self.assertEqual(cli.subcommands(), ["state"])  # never waits on a stale binding
+
+    def test_takeover_during_run_fails_closed(self):
+        error = exit_wake.CliError("session_not_current", "permanent", "unregistered_or_stale_session")
+        cli = FakeCli("left", SESSION_A, waits=[None, error])
+        self.assertEqual(self.run_main(self.argv(extra=["--rounds", "3"]), cli),
+                         (78, "WAKE-ERROR session_not_current"))
+
+    def test_third_participant_is_tolerated(self):
+        participants = [{"handle": h, "session": f"s-{h}", "generation": 1} for h in ("right", "third")]
+        participants.append({"handle": "left", "session": SESSION_A, "generation": 1})
+        cli = FakeCli("left", SESSION_A, participants=participants, waits=[7])
+        self.assertEqual(self.run_main(self.argv(), cli), (0, "WAKE new messages for left; notification cursor 7"))
+
+
+class RunTests(Base):
+    def test_wake_records_cursor_and_cleans_run_record(self):
+        cli = FakeCli("left", SESSION_A, waits=[None, 42])
+        code, line = self.run_main(self.argv(), cli)
+        self.assertEqual((code, line), (0, "WAKE new messages for left; notification cursor 42"))
+        state = self.state_dir()
+        self.assertEqual(common.read_small_json(os.path.join(state, "cursor.json")),
+                         {"v": 1, "notification_through": 42})
+        self.assertFalse(os.path.exists(os.path.join(state, "run.json")))
+        self.assertEqual(stat.S_IMODE(os.lstat(state).st_mode), 0o700)
+        self.assertEqual(stat.S_IMODE(os.lstat(os.path.dirname(state)).st_mode), 0o700)
+        # The next run continues from the stored cursor.
+        cli2 = FakeCli("left", SESSION_A)
+        self.run_main(self.argv(), cli2)
+        self.assertIn("42", cli2.calls[1][cli2.calls[1].index("--new-since") + 1])
+
+    def test_expiry(self):
+        code, line = self.run_main(self.argv(), FakeCli("left", SESSION_A))
+        self.assertEqual((code, line), (0, "WAKE-EXPIRED re-arm; notification cursor 0"))
+
+    def test_run_record_names_full_identity(self):
+        seen = {}
+        cli = FakeCli("left", SESSION_A)
+        cli.on_wait = lambda: seen.setdefault("run", common.read_small_json(
+            os.path.join(self.state_dir(), "run.json")))
+        self.run_main(self.argv(generation=1), cli)
+        run = seen["run"]
+        self.assertEqual(run["adapter"], "exit-wake")
+        self.assertEqual((run["handle"], run["session"], run["generation"]), ("left", SESSION_A, 1))
+        self.assertEqual(run["instance"], f"{self.key}-left")
+        self.assertEqual(set(run["project"]), {"path", "channel", "pin_path", "channel_path"})
+        self.assertEqual(run["project"]["path"], self.project)
+
+    def test_transient_and_permanent_cli_failures(self):
+        cli = FakeCli("left", SESSION_A, waits=[exit_wake.CliError("cli_timed_out")])
+        self.assertEqual(self.run_main(self.argv(), cli), (75, "WAKE-ERROR cli_timed_out"))
+        cli = FakeCli("left", SESSION_A, waits=[exit_wake.CliError("cli_not_runnable", "permanent")])
+        self.assertEqual(self.run_main(self.argv(), cli), (78, "WAKE-ERROR cli_not_runnable"))
+
+    def test_cursor_regression_is_refused(self):
+        cli = FakeCli("left", SESSION_A, waits=[5])
+        self.run_main(self.argv(), cli)
+        bad = FakeCli("left", SESSION_A)
+        bad.waits = []
+
+        def regress(cmd, timeout):
+            if cmd[cmd.index("--channel") + 2] == "wait":
+                return {"notification_through": 3, "messages": []}
+            return FakeCli.__call__(bad, cmd, timeout)
+
+        self.assertEqual(self.run_main(self.argv(), regress), (75, "WAKE-ERROR notification_cursor_invalid"))
+
+    def test_commit_uncertain_cursor_is_accepted_after_read_back(self):
+        real_write = common.write_private_json
+
+        def uncertain(directory, name, value):
+            real_write(directory, name, value)
+            if name == "cursor.json":
+                raise common.WakeError("state_commit_uncertain", "transient")
+
+        common.write_private_json = uncertain
+        try:
+            code, line = self.run_main(self.argv(), FakeCli("left", SESSION_A, waits=[9]))
+        finally:
+            common.write_private_json = real_write
+        self.assertEqual((code, line), (0, "WAKE new messages for left; notification cursor 9"))
+
+    def test_corrupt_cursor_is_permanent(self):
+        self.run_main(self.argv(), FakeCli("left", SESSION_A))
+        Path(self.state_dir(), "cursor.json").write_text('{"v":1,"notification_through":-1}')
+        self.assertEqual(self.run_main(self.argv(), FakeCli("left", SESSION_A)), (78, "WAKE-ERROR cursor_invalid"))
+
+    def test_symlinked_state_is_refused(self):
+        os.makedirs(os.path.join(self.base, "elsewhere"))
+        os.symlink(os.path.join(self.base, "elsewhere"), os.path.join(self.project, ".ai-comm-local", "wake"))
+        cli = FakeCli("left", SESSION_A)
+        self.assertEqual(self.run_main(self.argv(), cli), (78, "WAKE-ERROR state_path_symlink"))
+        self.assertEqual(cli.calls, [])
+
+
+class IsolationTests(Base):
+    def test_second_instance_of_same_handle_is_refused(self):
+        state = self.state_dir()
+        os.makedirs(state, mode=0o700)
+        os.chmod(os.path.dirname(state), 0o700)
+        holder = common.acquire_lock(state)
+        self.addCleanup(os.close, holder)
+        self.assertEqual(self.run_main(self.argv(), FakeCli("left", SESSION_A)),
+                         (78, "WAKE-ERROR another_instance_running"))
+
+    def test_left_and_right_run_concurrently_in_one_project(self):
+        barrier = threading.Barrier(2, timeout=10)
+        results = {}
+
+        def run(handle, session, seq):
+            cli = FakeCli(handle, session, waits=[seq])
+            cli.on_wait = barrier.wait  # both hold their locks at the same moment
+            results[handle] = self.run_main(self.argv(handle=handle, session=session), cli)
+
+        threads = [threading.Thread(target=run, args=("left", SESSION_A, 3)),
+                   threading.Thread(target=run, args=("right", SESSION_B, 4))]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(15)
+        self.assertEqual(results["left"], (0, "WAKE new messages for left; notification cursor 3"))
+        self.assertEqual(results["right"], (0, "WAKE new messages for right; notification cursor 4"))
+        self.assertEqual(sorted(os.listdir(os.path.join(self.project, ".ai-comm-local", "wake"))),
+                         sorted([f"{self.key}-left", f"{self.key}-right"]))
+
+    def test_same_handle_in_two_projects_is_independent(self):
+        second = make_project(self.base, "second")
+        key2 = key_for(second)
+        self.assertNotEqual(key2, self.key)
+        self.run_main(self.argv(), FakeCli("left", SESSION_A, waits=[11]))
+        self.run_main(self.argv(project=second, key=key2), FakeCli("left", SESSION_A, waits=[22]))
+        read = common.read_small_json
+        self.assertEqual(read(os.path.join(self.state_dir(), "cursor.json"))["notification_through"], 11)
+        self.assertEqual(read(os.path.join(self.state_dir(project=second, key=key2), "cursor.json"))
+                         ["notification_through"], 22)
+
+    def test_same_handle_name_for_two_sessions_needs_its_own_binding(self):
+        # Two sessions of one host may use any labels; the binding, not the name, decides.
+        cli = FakeCli("left", SESSION_B)
+        self.assertEqual(self.run_main(self.argv(session=SESSION_A), cli), (78, "WAKE-ERROR session_mismatch"))
+
+
+class PauseTests(Base):
+    def test_pause_is_acknowledged_without_cli_calls(self):
+        self.run_main(self.argv(), FakeCli("left", SESSION_A))  # creates the state directory
+        state = self.state_dir()
+        nonce = "a" * 32
+        common.write_private_json(state, "pause", {"v": 1, "nonce": nonce})
+        cli = FakeCli("left", SESSION_A)
+        out = io.StringIO()
+        sleeps = []
+
+        def sleep(seconds):
+            sleeps.append(seconds)
+            if len(sleeps) == 3:
+                ack = common.read_small_json(os.path.join(state, "pause-ack"))
+                self.assertEqual(ack["nonce"], nonce)
+                self.assertEqual(cli.subcommands(), ["state"])  # no wait while paused
+                os.unlink(os.path.join(state, "pause"))
+
+        code = exit_wake.main(self.argv(), runner=cli, out=out, clock=lambda: 0.0, sleep=sleep)
+        self.assertEqual(code, 0)
+        self.assertFalse(os.path.exists(os.path.join(state, "pause-ack")))
+        self.assertIn("wait", cli.subcommands())
+
+    def test_expiry_while_paused_keeps_the_acknowledgement(self):
+        self.run_main(self.argv(), FakeCli("left", SESSION_A))
+        state = self.state_dir()
+        common.write_private_json(state, "pause", {"v": 1, "nonce": "b" * 32})
+        ticks = iter(range(1000))
+        cli = FakeCli("left", SESSION_A)
+        out = io.StringIO()
+        code = exit_wake.main(self.argv(), runner=cli, out=out, clock=lambda: next(ticks), sleep=lambda s: None)
+        self.assertEqual((code, out.getvalue().strip()), (0, "WAKE-EXPIRED re-arm; notification cursor 0"))
+        self.assertEqual(cli.subcommands(), ["state"])
+        self.assertEqual(common.read_small_json(os.path.join(state, "pause-ack"))["nonce"], "b" * 32)
+
+    def test_malformed_pause_is_permanent(self):
+        self.run_main(self.argv(), FakeCli("left", SESSION_A))
+        common.write_private_json(self.state_dir(), "pause", {"v": 1, "nonce": "short"})
+        self.assertEqual(self.run_main(self.argv(), FakeCli("left", SESSION_A)),
+                         (78, "WAKE-ERROR pause_request_invalid"))
+
+
+class PeerAlarmTests(Base):
+    def outstanding(self, ages):
+        def answer(cmd):
+            cls = cmd[cmd.index("--state") + 1]
+            after = int(cmd[cmd.index("--after") + 1])
+            info = {"handle": "right", "generation": 1,
+                    "receipt": {"present": True, "generation": 1, "read_through": 0, "seen_through": 5}}
+            seq = {"unseen": 9, "seen": 3}[cls]
+            if cls not in ages or seq <= after:
+                return {"peer": info, "count": 2, "matched": 0, "messages": []}
+            entry = {"id": f"{seq:08d}-left", "seq": seq, "act": "PROPOSE", "ts": ages[cls], "state": cls,
+                     "replied": False}
+            return {"peer": info, "count": 2, "matched": 1, "messages": [entry]}
+        return answer
+
+    def test_overdue_fires_once(self):
+        argv = self.argv(extra=["--peer", "right"])
+        wall = lambda: 1_800_000_000.0  # noqa: E731
+        old = "2027-01-15T07:00:00Z"  # 3600 s before wall
+        cli = FakeCli("left", SESSION_A, outstanding=self.outstanding({"unseen": old}))
+        out = io.StringIO()
+        code = exit_wake.main(argv, runner=cli, out=out, sleep=lambda s: None, wall=wall)
+        self.assertEqual(code, 0)
+        self.assertEqual(out.getvalue().strip(),
+                         "PEER-OVERDUE right outstanding 2 unseen 00000009-left sent 2027-01-15T07:00:00Z age 3600s")
+        out = io.StringIO()
+        exit_wake.main(argv, runner=FakeCli("left", SESSION_A, outstanding=self.outstanding({"unseen": old})),
+                       out=out, sleep=lambda s: None, wall=wall)
+        self.assertTrue(out.getvalue().startswith("WAKE-EXPIRED"))  # watermark advanced: no repeat
+
+
+class LaunchTests(unittest.TestCase):
+    """The real launch line: python3 -I <dir>/exit_wake.py, run from a copy outside the package."""
+
+    def test_isolated_launch_imports_its_sibling_and_writes_no_bytecode(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = os.path.realpath(tmp)
+            bundle = os.path.join(base, "bundle")
+            os.makedirs(bundle, 0o700)
+            for name in ("exit_wake.py", "common.py"):
+                shutil.copy2(ROOT / "adapters" / name, bundle)
+            project = make_project(base)
+            Path(project, ".tools", "ai-comm", "ai_comm.py").write_text(textwrap.dedent("""\
+                import json, sys
+                sub = sys.argv[3]
+                if sub == "state":
+                    print(json.dumps({"participants": [{"handle": "left", "session": "s-1", "generation": 1}]}))
+                elif sub == "wait":
+                    print(json.dumps({"notification_through": 5, "messages": [{"seq": 5}]}))
+                else:
+                    sys.exit(2)
+                """))
+            key = key_for(project)
+            env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": base}
+            result = subprocess.run(
+                [sys.executable, "-I", os.path.join(bundle, "exit_wake.py"), "--project", project,
+                 "--project-key", key, "--handle", "left", "--session=s-1", "--generation", "1",
+                 "--rounds", "1", "--wait-timeout", "1"],
+                capture_output=True, text=True, timeout=60, cwd=base, env=env)
+            self.assertEqual((result.returncode, result.stdout.strip(), result.stderr),
+                             (0, "WAKE new messages for left; notification cursor 5", ""))
+            self.assertEqual(sorted(os.listdir(bundle)), ["common.py", "exit_wake.py"])
+
+
+class NoContentTests(unittest.TestCase):
+    def test_never_reads_inbox_acknowledges_or_sends(self):
+        source = (ROOT / "adapters" / "exit_wake.py").read_text(encoding="utf-8")
+        for sub in ('"inbox"', '"ack"', '"send"', '"join"'):
+            self.assertNotIn(sub, source)
+
+
+if __name__ == "__main__":
+    unittest.main()
