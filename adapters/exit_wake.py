@@ -26,7 +26,9 @@ One adapter kind per handle (decision 1314): under the shared ``instance.lock``
 gate a run refuses an instance directory holding the queue adapter's
 ``config.json`` (a link counts and is never followed), creates ``cursor.json`` at
 0 if it is absent, so the instance stays marked even when it only ever expires,
-and publishes ``run.json``. The gate is never held across a channel wait.
+and publishes ``run.json``. While the installer's ``remove-intent.json`` exists (any
+path at that name), a run and every phase refuse ``removal_in_progress`` and
+change nothing. The gate is never held across a channel wait.
 
 Guided upgrade phases: ``exit_wake.py probe|pause|rebind|check|resume`` with the
 same identity arguments print one JSON object (``running``, ``paused``,
@@ -80,6 +82,7 @@ ALARM_NAME = "peer-alarm.json"
 LOCK_NAME = "lock"
 INSTANCE_LOCK = "instance.lock"  # the cross-kind gate (decision 1314)
 QUEUE_MARKER = "config.json"  # the queue adapter's persistent kind marker
+REMOVE_INTENT = "remove-intent.json"  # installer-owned: a removal is in progress (decision 1335)
 PHASE_LOCK = "phase.lock"
 PHASES = ("probe", "pause", "rebind", "check", "resume")
 # A run checks the pause request between waits; a wait may take wait_timeout (<= 60 s) + 30 s.
@@ -260,6 +263,8 @@ def publish_run(state_dir, sleep, record):
     publish run.json. The gate is never held across a channel wait."""
     gate = common.acquire_lock(state_dir, name=INSTANCE_LOCK, sleep=sleep)
     try:
+        if os.path.lexists(os.path.join(state_dir, REMOVE_INTENT)):
+            raise common.WakeError("removal_in_progress")
         if os.path.lexists(os.path.join(state_dir, QUEUE_MARKER)):  # a link counts; never followed
             raise common.WakeError("instance_kind_conflict")
         if not os.path.lexists(os.path.join(state_dir, CURSOR_NAME)):
@@ -477,6 +482,8 @@ def watch(args, runner=run_cli, out=sys.stdout, clock=time.monotonic, sleep=time
         raise common.WakeError("project_key_mismatch")
     common.private_dir(layout.wake_root)
     state_dir = common.private_dir(layout.state)
+    if os.path.lexists(os.path.join(state_dir, REMOVE_INTENT)):  # read-only, before any lock exists
+        raise common.WakeError("removal_in_progress")
     lock_fd = common.acquire_lock(state_dir, sleep=sleep)
     run_id = secrets.token_hex(16)
     try:
@@ -677,6 +684,8 @@ def preflight(inst, sleep):
                   a.handle, a.session, a.generation)
     receipt_read(inst)
     if existing_private_dir(inst.state):
+        if os.path.lexists(os.path.join(inst.state, REMOVE_INTENT)):
+            raise common.WakeError("removal_in_progress")
         if os.path.lexists(os.path.join(inst.state, QUEUE_MARKER)):
             raise common.WakeError("instance_kind_conflict")
         if lock_held(inst.state):

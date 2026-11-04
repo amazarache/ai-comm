@@ -459,6 +459,47 @@ class KindGateTests(Base):
         self.assertFalse(os.path.exists(os.path.join(state, "run.json")))
         self.assertFalse(os.path.exists(os.path.join(state, "cursor.json")))
 
+    def test_removal_intent_blocks_startup_without_changes(self):
+        """Decision 1335: an interrupted removal must be completed before a run may start."""
+        state = self.prepare_dir()
+        common.write_private_json(state, "cursor.json", {"v": 1, "notification_through": 3})
+        marker = os.path.join(state, "remove-intent.json")
+        for dangling in (False, True):
+            if dangling:
+                os.symlink(os.path.join(self.base, "missing-intent"), marker)
+            else:
+                common.write_private_json(state, "remove-intent.json", {"fixture": "installer-owned"})
+            before = {n: Path(state, n).read_bytes() for n in os.listdir(state)
+                      if not os.path.islink(os.path.join(state, n))}
+            cli = FakeCli("left", SESSION_A)
+            self.assertEqual(self.run_main(self.argv(), cli), (78, "WAKE-ERROR removal_in_progress"))
+            self.assertNotIn("wait", cli.subcommands())
+            self.assertFalse(os.path.exists(os.path.join(state, "run.json")))
+            after = {n: Path(state, n).read_bytes() for n in os.listdir(state)
+                     if not os.path.islink(os.path.join(state, n))}
+            self.assertEqual(after, before)  # no lock file created either
+            self.assertTrue(os.path.lexists(marker))
+            os.unlink(marker)
+
+    def test_intent_published_while_startup_waits_on_the_gate(self):
+        state = self.prepare_dir()
+        holder = common.acquire_lock(state, name="instance.lock")
+        published = []
+
+        def sleep(seconds):
+            if not published:
+                common.write_private_json(state, "remove-intent.json", {"fixture": "new-intent"})
+                os.close(holder)
+                published.append(True)
+
+        cli = FakeCli("left", SESSION_A)
+        out = io.StringIO()
+        code = exit_wake.main(self.argv(), runner=cli, out=out, sleep=sleep)
+        self.assertEqual((code, out.getvalue().strip()), (78, "WAKE-ERROR removal_in_progress"))
+        self.assertEqual(published, [True])
+        self.assertNotIn("wait", cli.subcommands())
+        self.assertFalse(os.path.exists(os.path.join(state, "run.json")))
+
     def test_gate_held_too_long_is_reported(self):
         state = self.prepare_dir()
         holder = common.acquire_lock(state, name="instance.lock")
@@ -662,6 +703,15 @@ class PhaseTests(Base):
         self.assertEqual(self.phase("pause"), (78, {"error": "run_identity_unverified"}))
         self.assertFalse(os.path.exists(os.path.join(self.state_dir(), "pause")))
         thread.join(30)
+
+    def test_removal_intent_blocks_every_phase(self):
+        self.receipt(0)
+        self.run_main(self.argv(), FakeCli("left", SESSION_A))
+        common.write_private_json(self.state_dir(), "remove-intent.json", {"fixture": "installer-owned"})
+        for phase in exit_wake.PHASES:
+            before = self.snapshot()
+            self.assertEqual(self.phase(phase), (78, {"error": "removal_in_progress"}), phase)
+            self.assertEqual(self.snapshot(), before, phase)
 
     def test_bad_arguments_are_json(self):
         out = io.StringIO()
