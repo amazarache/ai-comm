@@ -381,6 +381,17 @@ def owned_private_dir(path, code):
         raise WakeError(code)
 
 
+def instance_path_guard(directory):
+    """Read-only, before even a missing-instance no-op: no component of the instance path
+    may be a symlink (dangling or not), and .ai-comm-local passes the ancestor rule
+    (plan 054)."""
+    try:
+        common._reject_symlinked_ancestors(str(directory))
+    except WakeError as exc:
+        raise WakeError("instance_dir_unsafe") from exc
+    trusted_ancestry(Path(directory).parents[1], "instance_dir_unsafe")
+
+
 def instance_dir_check(directory):
     """Read-only: no component of the instance path is a symlink, and the wake root and the
     instance directory are real private directories owned by this user (review 1379 R6)."""
@@ -645,6 +656,7 @@ def removal_identity(args, host):
 
 def remove_exit(ident):
     directory = instance_dir(ident["project"]["path"], ident["instance"])
+    instance_path_guard(directory)
     if not os.path.lexists(directory):
         return {"status": "removed", "kind": "exit", "instance": ident["instance"], "removed": []}
     instance_dir_check(directory)
@@ -747,6 +759,7 @@ def queue_removal_record(directory, ident, unit_path, args, queue):
 def remove_queue(ident, pin, host, args):
     directory = instance_dir(ident["project"]["path"], ident["instance"])
     unit_path = host.unit_dir() / f"queue-wake@{ident['instance']}.service"
+    instance_path_guard(directory)
     if not os.path.lexists(directory) or (
             not any(os.path.lexists(directory / n) for n in (*QUEUE_DATA, INTENT))
             and not os.path.lexists(unit_path)):

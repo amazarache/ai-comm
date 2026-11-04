@@ -461,6 +461,35 @@ class CorrectionTests(Base):
                 self.assertEqual(tree(str(outside)), before)  # nothing outside the project deleted
                 self.codes = getattr(self, "codes", []) + [result["code"]]
 
+    def test_dangling_or_empty_symlinked_wake_root_is_refused(self):
+        """Plan 054: a symlinked ancestor is a refusal, never a 'nothing to remove' no-op."""
+        for kind in ("exit", "queue"):
+            for target in ("missing", "empty"):
+                with self.subTest(kind=kind, target=target):
+                    self.setUp()
+                    self.plan(kind=kind)
+                    destination = self.base / target
+                    if target == "empty":
+                        destination.mkdir(mode=0o700)
+                    os.symlink(destination, self.project / ".ai-comm-local" / "wake")
+                    before = tree(str(self.base / "empty"))
+                    self.assertEqual(self.remove(kind=kind),
+                                     (78, {"status": "stopped", "code": "instance_dir_unsafe"}))
+                    self.assertEqual(tree(str(self.base / "empty")), before)
+
+    def test_interrupted_queue_removal_retry_refuses_a_symlinked_path(self):
+        plan, directory = self.installed_with_state()
+        with mock.patch.object(wake.os, "unlink", side_effect=OSError(5, "fault")):
+            self.assertEqual(self.remove(kind="queue")[0], 75)
+        self.assertTrue(os.path.exists(directory / "remove-intent.json"))
+        wake_root = directory.parent
+        outside = self.base / "moved-wake"
+        os.rename(wake_root, outside)
+        os.symlink(outside, wake_root)
+        before = tree(str(outside), str(self.unit_dir))
+        self.assertEqual(self.remove(kind="queue"), (78, {"status": "stopped", "code": "instance_dir_unsafe"}))
+        self.assertEqual(tree(str(outside), str(self.unit_dir)), before)  # unit, data and intent kept
+
     def test_symlinked_wake_root_reports_its_own_code(self):
         self.test_symlinked_wake_root_is_refused_and_nothing_outside_is_deleted()
         self.assertEqual(self.codes, ["instance_dir_unsafe", "instance_dir_unsafe"])
