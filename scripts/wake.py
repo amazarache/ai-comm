@@ -24,11 +24,13 @@ exit 75 (transient) or 78 (permanent). Standard library only.
 from __future__ import annotations
 
 import argparse
+import grp
 import hashlib
 import importlib.util
 import json
 import os
 from pathlib import Path
+import pwd
 import re
 import stat
 import subprocess
@@ -479,17 +481,42 @@ def freeze_bundle(project, bundle_dir, files, bundle_doc):
         raise WakeError("bundle_conflict")
 
 
+def exclusive_primary_group(gid):
+    """True only when the databases positively show that no other account is in this group.
+
+    An account can belong to a group through its primary gid without appearing in the
+    group's member list, so both are checked. Any lookup failure, or an enumeration that
+    does not include this user, is False. This trusts what pwd and grp can enumerate here:
+    where a directory service does not enumerate its accounts, keep the directory 0755."""
+    try:
+        me = pwd.getpwuid(os.getuid())
+        group = grp.getgrgid(gid)
+        accounts = pwd.getpwall()
+    except (KeyError, OSError):
+        return False
+    if gid != os.getgid() or me.pw_gid != gid or group.gr_gid != gid:
+        return False
+    if any(member != me.pw_name for member in group.gr_mem):
+        return False
+    if not any(a.pw_uid == me.pw_uid and a.pw_gid == gid for a in accounts):
+        return False
+    return not any(a.pw_gid == gid and a.pw_uid != me.pw_uid for a in accounts)
+
+
 def unit_destination_check(unit_path):
     """The unit directory's existing ancestors pass the ancestor rule; the directory itself,
-    if it exists, is owned by this user; an existing unit is a regular file owned by this
-    user and not writable by another account (review 1371 R1)."""
+    if it exists, is owned by this user and writable by no other account (decision 1443);
+    an existing unit is a regular file owned by this user and not writable by another
+    account (review 1371 R1)."""
     unit_dir = Path(unit_path).parent
     trusted_ancestry(unit_dir, "unit_dir_unsafe")
     if os.path.lexists(unit_dir):
         info = os.lstat(unit_dir)
-        # The terminal directory gets no sticky or private-group exemption (review 1397):
-        # owned by this user, writable by nobody else.
-        if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o022:
+        # Sticky gives no exemption (review 1397). Group write is accepted only for a group
+        # positively shown to hold no other account: 0775 is the user-private-group default.
+        mode = stat.S_IMODE(info.st_mode)
+        if (info.st_uid != os.getuid() or mode & 0o002
+                or (mode & 0o020 and not exclusive_primary_group(info.st_gid))):
             raise WakeError("unit_dir_unsafe")
     if os.path.lexists(unit_path):
         info = os.lstat(unit_path)

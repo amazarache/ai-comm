@@ -78,7 +78,12 @@ reused only if it is byte-identical and still private:
 
 Otherwise `install` stops with `bundle_unsafe` and changes no permissions. The unit
 directory's existing ancestors may not be symlinks or writable by another account, and
-the directory itself must be yours (`unit_dir_unsafe`).
+the directory itself must be yours and writable by no other account (`unit_dir_unsafe`).
+Group write on it is accepted only for your own private group, when the account databases
+positively show that nobody else is in it: 0775 is the normal default with user-private
+groups. That judgement rests on what `pwd` and `grp` can enumerate on this machine. If a
+directory service does not enumerate its accounts here, another account could exist unseen,
+so keep the directory 0755. `wake` never changes its mode.
 - **For exit,** that is all it does.
 - **For queue,** it checks every destination first. Then, under `instance.lock`, it writes
   `config.json` (the ownership record), then the unit file

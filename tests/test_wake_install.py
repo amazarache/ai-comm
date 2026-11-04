@@ -535,17 +535,75 @@ class CorrectionTests(Base):
         self.assertEqual(self.run_wake(argv)[1]["code"], "unit_dir_unsafe")  # writable parent of a missing dir
         self.assertFalse(os.path.exists(self.base / "home" / ".config"))
 
-    def test_group_or_world_writable_terminal_unit_dir_is_refused(self):
-        """Review 1397: no sticky or private-group exemption for the unit directory itself."""
+    def accounts(self, explicit=(), others=()):
+        """Mocked pwd and grp records around the real uid and gid: only the databases are fake."""
+        import types
+        uid, gid = os.getuid(), os.getgid()
+        me = types.SimpleNamespace(pw_name="me", pw_uid=uid, pw_gid=gid)
+        rows = [me] + [types.SimpleNamespace(pw_name=f"u{i}", pw_uid=u, pw_gid=g) for i, (u, g) in enumerate(others)]
+        group = types.SimpleNamespace(gr_gid=gid, gr_mem=list(explicit))
+        return (mock.patch.object(wake.pwd, "getpwuid", return_value=me),
+                mock.patch.object(wake.grp, "getgrgid", return_value=group),
+                mock.patch.object(wake.pwd, "getpwall", return_value=rows))
+
+    def exclusive(self, *patches):
+        with patches[0], patches[1], patches[2]:
+            return wake.exclusive_primary_group(os.getgid())
+
+    def test_exclusive_primary_group_needs_positive_evidence(self):
+        """Decision 1443: the real predicate, with mocked account databases."""
+        uid, gid = os.getuid(), os.getgid()
+        self.assertTrue(self.exclusive(*self.accounts()))
+        self.assertTrue(self.exclusive(*self.accounts(explicit=["me"])))
+        self.assertFalse(self.exclusive(*self.accounts(explicit=["other"])))
+        self.assertFalse(self.exclusive(*self.accounts(others=[(uid + 1, gid)])), "primary member, empty gr_mem")
+        self.assertTrue(self.exclusive(*self.accounts(others=[(uid + 1, gid + 1)])))
+        a, b, _ = self.accounts()
+        with a, b:
+            with mock.patch.object(wake.pwd, "getpwall", return_value=[]):
+                self.assertFalse(wake.exclusive_primary_group(gid), "an empty enumeration proves nothing")
+            with mock.patch.object(wake.pwd, "getpwall", side_effect=OSError(5, "fault")):
+                self.assertFalse(wake.exclusive_primary_group(gid))
+            import types
+            stranger = [types.SimpleNamespace(pw_name="x", pw_uid=uid + 1, pw_gid=gid + 1)]
+            with mock.patch.object(wake.pwd, "getpwall", return_value=stranger):
+                self.assertFalse(wake.exclusive_primary_group(gid), "this user is not enumerated")
+        a, b, c = self.accounts()
+        with b, c, mock.patch.object(wake.pwd, "getpwuid", side_effect=KeyError(uid)):
+            self.assertFalse(wake.exclusive_primary_group(gid))
+        with a, c, mock.patch.object(wake.grp, "getgrgid", side_effect=KeyError(gid)):
+            self.assertFalse(wake.exclusive_primary_group(gid))
+        a, b, c = self.accounts()
+        with a, b, c:
+            self.assertFalse(wake.exclusive_primary_group(gid + 1), "not the primary group")
+
+    def test_unit_dir_group_write_needs_an_exclusive_group(self):
         plan = self.plan(kind="queue")
         argv = self.args("install", kind="queue", extra=["--plan-sha256", plan["plan_sha256"], "--confirm"])
         self.unit_dir.mkdir(parents=True, mode=0o700)
-        for mode in (0o1777, 0o775, 0o1775, 0o770):
-            os.chmod(self.unit_dir, mode)
-            before = self.snapshot_all()
-            self.assertEqual(self.run_wake(argv), (78, {"status": "stopped", "code": "unit_dir_unsafe"}), oct(mode))
-            self.assertEqual(self.snapshot_all(), before, oct(mode))
-            self.assertEqual(stat.S_IMODE(os.lstat(self.unit_dir).st_mode), mode)
+        for parent in (self.unit_dir.parent, self.unit_dir.parent.parent):
+            os.chmod(parent, 0o755)
+        patches = self.accounts()
+        with patches[0], patches[1], patches[2]:
+            for mode in (0o1777, 0o777, 0o757):
+                os.chmod(self.unit_dir, mode)
+                before = self.snapshot_all()
+                self.assertEqual(self.run_wake(argv), (78, {"status": "stopped", "code": "unit_dir_unsafe"}), oct(mode))
+                self.assertEqual(self.snapshot_all(), before, oct(mode))
+        shared = self.accounts(others=[(os.getuid() + 1, os.getgid())])
+        with shared[0], shared[1], shared[2]:
+            for mode in (0o775, 0o770, 0o1775):
+                os.chmod(self.unit_dir, mode)
+                before = self.snapshot_all()
+                self.assertEqual(self.run_wake(argv), (78, {"status": "stopped", "code": "unit_dir_unsafe"}), oct(mode))
+                self.assertEqual(self.snapshot_all(), before, oct(mode))
+        with patches[0], patches[1], patches[2]:
+            for mode in (0o775, 0o770):
+                os.chmod(self.unit_dir, mode)
+                self.assertEqual(wake.unit_destination_check(Path(plan["unit_path"])), None, oct(mode))
+            self.assertEqual(self.run_wake(argv)[0], 0)
+            self.assertEqual(stat.S_IMODE(os.lstat(self.unit_dir).st_mode), 0o770)  # never chmodded
+            self.assertEqual(stat.S_IMODE(os.lstat(plan["unit_path"]).st_mode), 0o600)
 
     def test_user_owned_traversable_unit_dir_is_accepted(self):
         self.unit_dir.mkdir(parents=True, mode=0o755)

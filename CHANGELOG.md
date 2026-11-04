@@ -23,7 +23,8 @@
     intent;
   - `integration` prints one exact declaration item for the guided upgrade controller.
 
-  Bundles and unit destinations must be private to the user.
+  Bundles must be private to the user, and a unit directory must be writable by no other account; group write is
+  accepted only for a group positively shown to hold no other account.
 - Guided upgrade phases (probe, pause, rebind, check, resume) for both adapters, run from a frozen bundle outside the
   pin. No upgrade-controller change.
 - **Validation status:** isolated fixtures and fakes, plus a single-machine rehearsal with scripted handles of the real
