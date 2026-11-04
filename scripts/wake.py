@@ -381,6 +381,18 @@ def owned_private_dir(path, code):
         raise WakeError(code)
 
 
+def instance_dir_check(directory):
+    """Read-only: no component of the instance path is a symlink, and the wake root and the
+    instance directory are real private directories owned by this user (review 1379 R6)."""
+    try:
+        common._reject_symlinked_ancestors(str(directory))
+    except WakeError as exc:
+        raise WakeError("instance_dir_unsafe") from exc
+    trusted_ancestry(Path(directory).parents[1], "instance_dir_unsafe")
+    owned_private_dir(Path(directory).parent, "instance_dir_unsafe")
+    owned_private_dir(directory, "instance_dir_unsafe")
+
+
 def bundle_chain(project):
     local = Path(project) / ".ai-comm-local"
     return local, local / "upgrade", local / "upgrade" / "adapters"
@@ -635,10 +647,11 @@ def remove_exit(ident):
     directory = instance_dir(ident["project"]["path"], ident["instance"])
     if not os.path.lexists(directory):
         return {"status": "removed", "kind": "exit", "instance": ident["instance"], "removed": []}
-    owned_private_dir(directory, "instance_dir_unsafe")
+    instance_dir_check(directory)
     check_entries(directory, LOCK_NAMES | set(EXIT_DATA))
     fds = hold(directory, ("phase.lock", "lock", "instance.lock"))
     try:
+        instance_dir_check(directory)
         check_entries(directory, LOCK_NAMES | set(EXIT_DATA))
         removed = []
         for name in EXIT_DATA:
@@ -738,11 +751,11 @@ def remove_queue(ident, pin, host, args):
             not any(os.path.lexists(directory / n) for n in (*QUEUE_DATA, INTENT))
             and not os.path.lexists(unit_path)):
         return {"status": "removed", "kind": "queue", "instance": ident["instance"], "removed": []}
+    instance_dir_check(directory)  # read-only, before anything inside is examined (review 1379 R6)
     # Read-only refusal before any lock file can be created (decision 1335 note).
     if not os.path.lexists(directory / INTENT) and not os.path.lexists(directory / "state.json") \
             and os.path.lexists(directory / "config.json"):
         raise WakeError("state_missing")
-    owned_private_dir(directory, "instance_dir_unsafe")
     allowed = LOCK_NAMES | set(QUEUE_DATA) | {INTENT}
     check_entries(directory, allowed)
     queue = load_queue_module(pin.dir / "adapters", pin.adapter_files("queue"), "pin")
@@ -751,6 +764,7 @@ def remove_queue(ident, pin, host, args):
     fds = hold(directory, ("guided.lock", "observer.lock", "instance.lock"))
     try:
         # Everything is re-validated under the locks, before the intent is written (R5).
+        instance_dir_check(directory)
         check_entries(directory, allowed)
         intent, config, raw, unit_sha = queue_removal_record(directory, ident, unit_path, args, queue)
         unit_inactive(host, ident["instance"], unit_path)

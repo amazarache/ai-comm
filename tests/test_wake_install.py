@@ -441,6 +441,30 @@ class CorrectionTests(Base):
     def snapshot_all(self):
         return tree(str(self.project / ".ai-comm-local"), str(self.base / "home"))
 
+    # R6 ------------------------------------------------------------------------------------
+    def test_symlinked_wake_root_is_refused_and_nothing_outside_is_deleted(self):
+        """Review 1379: a symlinked .ai-comm-local/wake must not lead removal elsewhere."""
+        for kind in ("exit", "queue"):
+            with self.subTest(kind=kind):
+                self.setUp()
+                instance = self.plan(kind=kind)["instance"]
+                outside = self.base / "outside"
+                (outside / instance).mkdir(parents=True, mode=0o700)
+                os.chmod(outside, 0o700)
+                names = ("cursor.json",) if kind == "exit" else ("config.json", "state.json")
+                for name in names:
+                    wake.common.write_private_json(str(outside / instance), name, {"v": 1})
+                os.symlink(outside, self.project / ".ai-comm-local" / "wake")
+                before = tree(str(outside))
+                code, result = self.remove(kind=kind)
+                self.assertEqual(code, 78, result)
+                self.assertEqual(tree(str(outside)), before)  # nothing outside the project deleted
+                self.codes = getattr(self, "codes", []) + [result["code"]]
+
+    def test_symlinked_wake_root_reports_its_own_code(self):
+        self.test_symlinked_wake_root_is_refused_and_nothing_outside_is_deleted()
+        self.assertEqual(self.codes, ["instance_dir_unsafe", "instance_dir_unsafe"])
+
     # R1 ------------------------------------------------------------------------------------
     def test_unsafe_existing_bundle_is_refused_without_publishing(self):
         plan = self.plan(kind="queue")
