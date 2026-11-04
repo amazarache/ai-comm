@@ -112,8 +112,8 @@
     },
     {
       "path": "docs/WAKE.md",
-      "bytes": 11572,
-      "sha256": "92a9d3b7aaebc585214566c092e00c294fc1406f574c0f760998fff6573c0988"
+      "bytes": 11772,
+      "sha256": "4aaa259bf1776cfd1c7a685cf00edc974529da7d26caceb374362749abe724a0"
     },
     {
       "path": "entry/ai-comm/SKILL.md",
@@ -207,8 +207,8 @@
     },
     {
       "path": "scripts/wake.py",
-      "bytes": 47823,
-      "sha256": "cef36db16743481bf62bdbc7a11a9eb449a6ce6e7feccf71ef289f83faa15df7"
+      "bytes": 48363,
+      "sha256": "cf7026c26b1ec7149dd28ad7941fdf75c070424c140ec026696fc0e2f1c416bd"
     },
     {
       "path": "skills/ai-comm/SKILL.md",
@@ -312,8 +312,8 @@
     },
     {
       "path": "tests/test_wake_install.py",
-      "bytes": 48801,
-      "sha256": "f734e95a705a72ec23f17b498841ec0f31ca2d857e515bbf6b36d0fe0f13b132"
+      "bytes": 51226,
+      "sha256": "a1c55c2e4d37d582bd78b21260e2610c3aafe3c99e6b59a28f5f3229f771e0ab"
     },
     {
       "path": "upgrade_controller.py",

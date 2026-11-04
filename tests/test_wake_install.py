@@ -105,12 +105,12 @@ class Base(unittest.TestCase):
         self.host = FakeHost(self)
         self.unit_dir = self.base / "home" / ".config" / "systemd" / "user"
 
-    def make_pin(self, names=None):
+    def make_pin(self, names=None, override=None):
         entries = []
         files = {"ai_comm.py": b"# cli\n"}
         for name in names if names is not None else ("exit_wake.py", "common.py", "queue_wake.py", "queue-wake@.service",
                               "queue_wake.lock"):
-            files["adapters/" + name] = (ROOT / "adapters" / name).read_bytes()
+            files["adapters/" + name] = (override or {}).get(name) or (ROOT / "adapters" / name).read_bytes()
         for rel, data in files.items():
             (self.pin / rel).write_bytes(data)
             entries.append({"path": rel, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()})
@@ -729,8 +729,14 @@ class IntegrationTests(Base):
         self.exit_installed()
         item = self.integrate()[1]["item"]
         before = self.validate(item)
-        (self.pin / "adapters" / "exit_wake.py").write_bytes(b"# a newer adapter\n")
-        self.make_pin()  # the manifest now records different bytes, as a new verified package would
+        old_adapter = (self.pin / "adapters" / "exit_wake.py").read_bytes()
+        old_manifest = (self.pin / "RELEASE-MANIFEST.json").read_bytes()
+        newer = old_adapter + b"\n# a newer adapter release\n"
+        self.make_pin(override={"exit_wake.py": newer})  # a new verified package with different adapter bytes
+        self.assertEqual((self.pin / "adapters" / "exit_wake.py").read_bytes(), newer)  # the mutation took effect
+        self.assertNotEqual((self.pin / "RELEASE-MANIFEST.json").read_bytes(), old_manifest)
+        self.assertNotEqual(wake.Pin(str(self.project), self.host).package["manifest_sha256"],
+                            hashlib.sha256(old_manifest).hexdigest())
         after_item = self.integrate()[1]["item"]
         self.assertEqual(after_item, item)
         self.assertEqual(self.validate(after_item), before)
@@ -776,6 +782,40 @@ class IntegrationTests(Base):
         (bundle / "BUNDLE.json").write_bytes(wake.canonical(dict(doc, kind="queue")))
         os.chmod(bundle / "BUNDLE.json", 0o400)
         self.assertEqual(self.integrate()[1]["code"], "bundle_conflict")
+
+    def test_malformed_bundle_metadata_is_a_fixed_refusal(self):
+        """Review 1400 I1: strict BUNDLE.json schema and parsing, never a traceback.
+
+        Each malformed record is tried in place and as a self-addressed bundle (a directory
+        named by the record's own digest, with the real adapter files)."""
+        plan = self.exit_installed()
+        bundle = Path(plan["bundle"]["dir"])
+        doc = json.loads((bundle / "BUNDLE.json").read_text())
+        bodies = [
+            b'{"files":{},"kind":"exit","package":{"commit":NaN,"manifest_sha256":"x"}}\n',
+            wake.canonical(dict(doc, package=None)),
+            wake.canonical(dict(doc, package={"commit": "c" * 40})),
+            wake.canonical(dict(doc, package=dict(doc["package"], extra=1))),
+            wake.canonical(dict(doc, files=dict(doc["files"], **{"common.py": 7}))),
+            b'{"files":{},"files":{},"kind":"exit","package":{}}\n',
+        ]
+        for body in bodies:
+            digest = hashlib.sha256(body).hexdigest()
+            twin = bundle.parent / digest
+            twin.mkdir(mode=0o700)
+            for name in ("exit_wake.py", "common.py"):
+                (twin / name).write_bytes((bundle / name).read_bytes())
+                os.chmod(twin / name, 0o400)
+            (twin / "BUNDLE.json").write_bytes(body)
+            os.chmod(twin / "BUNDLE.json", 0o400)
+            before = self.everything()
+            self.assertEqual(self.integrate(bundle=digest), (78, {"status": "stopped", "code": "bundle_conflict"}),
+                             body)
+            self.assertEqual(self.everything(), before)
+        os.chmod(bundle / "BUNDLE.json", 0o600)
+        (bundle / "BUNDLE.json").write_bytes(bodies[0])
+        os.chmod(bundle / "BUNDLE.json", 0o400)
+        self.assertEqual(self.integrate(), (78, {"status": "stopped", "code": "bundle_conflict"}))
 
     # queue ---------------------------------------------------------------------------------
     def queue_setup(self):

@@ -145,6 +145,9 @@ The item:
 - `code_files` are the bundle's files, so the controller checks those frozen bytes in
   every phase.
 
+The output is `{"status": "integration", "item": …, "item_sha256": …}`: add `item` itself, and use
+`item_sha256` (the sha256 of its canonical JSON) to confirm that it was not changed in transit.
+
 The handle must still be the channel's current binding for that session. The item is
 not a release or an activation.
 

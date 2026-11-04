@@ -856,12 +856,19 @@ def selected_bundle(project, kind, digest):
         raise WakeError("bundle_conflict")
     raw = read_regular(bundle_dir / "BUNDLE.json")
     try:
-        doc = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, ValueError) as exc:
+        # Strict parsing: duplicate keys, NaN/Infinity, overflow and excessive depth refuse (review 1400 I1).
+        doc = common.read_small_json(str(bundle_dir / "BUNDLE.json"))
+    except WakeError as exc:
         raise WakeError("bundle_conflict") from exc
-    if (not isinstance(doc, dict) or set(doc) != {"kind", "package", "files"} or canonical(doc) != raw
-            or sha256(raw) != digest or doc["kind"] != kind or not isinstance(doc["files"], dict)
-            or set(doc["files"]) != set(KINDS[kind])):
+    package = doc.get("package")
+    files_doc = doc.get("files")
+    if (set(doc) != {"kind", "package", "files"} or doc["kind"] != kind
+            or not isinstance(package, dict) or set(package) != {"commit", "manifest_sha256"}
+            or not isinstance(package["commit"], str) or not COMMIT_RE.fullmatch(package["commit"])
+            or not isinstance(package["manifest_sha256"], str) or not HEX.fullmatch(package["manifest_sha256"])
+            or not isinstance(files_doc, dict) or set(files_doc) != set(KINDS[kind])
+            or not all(isinstance(v, str) and HEX.fullmatch(v) for v in files_doc.values())
+            or canonical(doc) != raw or sha256(raw) != digest):
         raise WakeError("bundle_conflict")
     files = {}
     for name in KINDS[kind]:
