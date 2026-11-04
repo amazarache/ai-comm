@@ -468,11 +468,24 @@ class KindGateTests(Base):
 
 
 class PhaseTests(Base):
-    def phase(self, name, generation=1, key=None, clock=lambda: 0.0, sleep=lambda s: None):
-        argv = [name] + self.argv(generation=generation, key=key)
+    def phase(self, name, generation=1, key=None, clock=lambda: 0.0, sleep=lambda s: None, session=SESSION_A,
+              participants=None):
+        argv = [name] + self.argv(generation=generation, key=key, session=session)
         out = io.StringIO()
-        code = exit_wake.main(argv, out=out, clock=clock, sleep=sleep)
+        cli = FakeCli("left", SESSION_A, participants=participants)
+        code = exit_wake.main(argv, runner=cli, out=out, clock=clock, sleep=sleep)
         return code, json.loads(out.getvalue())
+
+    def snapshot(self):
+        """Every entry of the instance directory with its mode and bytes, or None if absent."""
+        state = self.state_dir()
+        if not os.path.lexists(state):
+            return None
+        entries = {".": stat.S_IMODE(os.lstat(state).st_mode)}
+        for name in sorted(os.listdir(state)):
+            path = os.path.join(state, name)
+            entries[name] = (stat.S_IMODE(os.lstat(path).st_mode), Path(path).read_bytes())
+        return entries
 
     def receipt(self, read, seen=None, generation=1):
         runtime = os.path.join(self.project, ".ai-comm", "ai-comm-runtime")
@@ -549,7 +562,7 @@ class PhaseTests(Base):
     def test_identity_and_receipt_refusals(self):
         self.receipt(0)
         self.assertEqual(self.phase("probe", key="0" * 16), (78, {"error": "project_key_mismatch"}))
-        self.assertEqual(self.phase("probe", generation=2), (78, {"error": "receipt_invalid"}))
+        self.assertEqual(self.phase("probe", generation=2), (78, {"error": "generation_mismatch"}))
         os.unlink(os.path.join(self.project, ".ai-comm", "ai-comm-runtime", "left.json"))
         self.assertEqual(self.phase("probe"), (78, {"error": "receipt_missing"}))
 
@@ -568,6 +581,87 @@ class PhaseTests(Base):
         self.run_main(self.argv(), FakeCli("left", SESSION_A))
         os.chmod(self.state_dir(), 0o755)
         self.assertEqual(self.phase("probe"), (78, {"error": "state_dir_not_private"}))
+
+    def test_binding_is_checked_before_any_change_when_stopped(self):
+        """Review 1326: a stopped instance cannot be probed, paused or resumed under another binding."""
+        self.receipt(0)
+        self.run_main(self.argv(), FakeCli("left", SESSION_A))  # an existing, stopped instance
+        common.write_private_json(self.state_dir(), "pause", {"v": 1, "nonce": "c" * 32})
+        cases = [
+            ({"session": "wrong-session"}, "session_mismatch"),
+            ({"participants": [{"handle": "left", "session": SESSION_A, "generation": 2}]}, "generation_mismatch"),
+            ({"participants": [{"handle": "right", "session": SESSION_B, "generation": 1}]}, "handle_not_joined"),
+        ]
+        for kwargs, code in cases:
+            for phase in exit_wake.PHASES:
+                before = self.snapshot()
+                self.assertEqual(self.phase(phase, **kwargs), (78, {"error": code}), (phase, code))
+                self.assertEqual(self.snapshot(), before, (phase, code))
+
+    def test_absent_instance_is_not_created_by_a_refused_phase(self):
+        self.receipt(0)
+        for phase in ("pause", "resume", "check"):
+            self.assertEqual(self.phase(phase, session="wrong-session"), (78, {"error": "session_mismatch"}))
+        self.assertFalse(os.path.exists(os.path.join(self.project, ".ai-comm-local", "wake")))
+
+    def test_receipt_problems_refuse_before_writing(self):
+        self.run_main(self.argv(), FakeCli("left", SESSION_A))
+        before = self.snapshot()
+        self.assertEqual(self.phase("pause"), (78, {"error": "receipt_missing"}))
+        self.receipt(0, generation=2)
+        self.assertEqual(self.phase("pause"), (78, {"error": "receipt_invalid"}))
+        self.assertEqual(self.snapshot(), before)
+
+    def run_in_background(self, rounds=20):
+        self.receipt(0)
+        started = threading.Event()
+        cli = FakeCli("left", SESSION_A)
+
+        def slow_wait():
+            started.set()
+            time.sleep(0.05)
+
+        cli.on_wait = slow_wait
+        result = {}
+        thread = threading.Thread(target=lambda: result.setdefault("run", exit_wake.main(
+            self.argv(extra=["--rounds", str(rounds)]), runner=cli, out=io.StringIO(),
+            sleep=lambda s: time.sleep(0.01))))
+        thread.start()
+        self.assertTrue(started.wait(10))
+        return cli, thread, result
+
+    def test_wrong_session_cannot_pause_a_live_run(self):
+        cli, thread, result = self.run_in_background()
+        before = self.snapshot()
+        self.assertEqual(self.phase("pause", session="wrong-session"), (78, {"error": "session_mismatch"}))
+        self.assertFalse(os.path.exists(os.path.join(self.state_dir(), "pause")))
+        self.assertEqual({k: v for k, v in self.snapshot().items() if k not in ("cursor.json", "run.json")},
+                         {k: v for k, v in before.items() if k not in ("cursor.json", "run.json")})
+        thread.join(30)
+        self.assertEqual(result["run"], 0)
+
+    def test_wrong_session_cannot_resume_a_paused_run(self):
+        cli, thread, result = self.run_in_background(rounds=40)
+        self.assertEqual(self.phase("pause", sleep=lambda s: time.sleep(0.02))[1]["paused"], True)
+        waits = cli.subcommands().count("wait")
+        self.assertEqual(self.phase("resume", session="wrong-session"), (78, {"error": "session_mismatch"}))
+        time.sleep(0.3)
+        self.assertTrue(os.path.exists(os.path.join(self.state_dir(), "pause")))
+        self.assertTrue(os.path.exists(os.path.join(self.state_dir(), "pause-ack")))
+        self.assertEqual(cli.subcommands().count("wait"), waits)  # still paused
+        self.assertEqual(self.phase("resume")[0], 0)
+        thread.join(30)
+        self.assertEqual(result["run"], 0)
+
+    def test_mismatched_live_run_record_refuses_before_pause(self):
+        cli, thread, result = self.run_in_background()
+        run_path = os.path.join(self.state_dir(), "run.json")
+        record = common.read_small_json(run_path)
+        record["generation"] = 2
+        common.write_private_json(self.state_dir(), "run.json", record)
+        self.assertEqual(self.phase("pause"), (78, {"error": "run_identity_unverified"}))
+        self.assertFalse(os.path.exists(os.path.join(self.state_dir(), "pause")))
+        thread.join(30)
 
     def test_bad_arguments_are_json(self):
         out = io.StringIO()

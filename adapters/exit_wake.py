@@ -31,7 +31,10 @@ and publishes ``run.json``. The gate is never held across a channel wait.
 Guided upgrade phases: ``exit_wake.py probe|pause|rebind|check|resume`` with the
 same identity arguments print one JSON object (``running``, ``paused``,
 ``pending``, ``bound_cli_sha256``) or ``{"error": CODE}`` with exit 75 or 78. A
-probe creates nothing. Phases never launch a run: only the host does that.
+probe creates nothing. Before any change, and again under the phase lock, every
+phase checks the channel's current binding for this handle (session and
+generation), the receipt, the kind marker and any live run's record; a refusal
+changes nothing. Phases never launch a run: only the host does that.
 
 Exit codes come from common.py: 0 for a wake, expiry or alarm; 75 for a transient
 failure; 78 for a permanent one (unsafe state, identity or binding mismatch).
@@ -596,8 +599,9 @@ def file_digest(path):
 class Instance:
     """One declared instance: identity verified exactly as a run verifies it."""
 
-    def __init__(self, args, git_run=subprocess.run):
+    def __init__(self, args, git_run=subprocess.run, runner=None):
         self.args = args
+        self.runner = runner or run_cli
         self.layout = Layout(args.project, args.project_key, args.handle)
         self.identity = project_identity(self.layout, git_run)
         if common.project_key(self.identity) != args.project_key:
@@ -661,6 +665,24 @@ def observe(inst, sleep=time.sleep):
             "bound_cli_sha256": file_digest(inst.layout.cli)}
 
 
+def preflight(inst, sleep):
+    """Every check a phase needs before it may change anything; reads only (review 1326).
+
+    The channel's current binding for this handle must be exactly the declared session
+    and generation, even when no run is active; the receipt must be valid for that
+    generation; a queue instance is refused; and a running instance must have
+    recorded exactly this identity."""
+    a = inst.args
+    check_binding(inst.runner(cli_base(inst.layout, "state", a, identity=False), CLI_TIMEOUT),
+                  a.handle, a.session, a.generation)
+    receipt_read(inst)
+    if existing_private_dir(inst.state):
+        if os.path.lexists(os.path.join(inst.state, QUEUE_MARKER)):
+            raise common.WakeError("instance_kind_conflict")
+        if lock_held(inst.state):
+            validated_run(inst, sleep)
+
+
 class PhaseLock:
     def __init__(self, state_dir, clock, sleep):
         self.state_dir, self.clock, self.sleep = state_dir, clock, sleep
@@ -685,13 +707,15 @@ class PhaseLock:
 
 
 def run_phase(phase, inst, clock=time.monotonic, sleep=time.sleep):
+    if phase not in PHASES:
+        raise common.WakeError("unknown_phase")
+    preflight(inst, sleep)  # before creating, tightening or writing anything
     if phase == "probe":
         return observe(inst, sleep)
     common.private_dir(inst.layout.wake_root)
     common.private_dir(inst.state)
     with PhaseLock(inst.state, clock, sleep):
-        if os.path.lexists(os.path.join(inst.state, QUEUE_MARKER)):
-            raise common.WakeError("instance_kind_conflict")  # before any write
+        preflight(inst, sleep)  # again, immediately before the mutation
         if phase in ("check", "rebind"):
             # A run holds no package binding: it calls the pin's CLI each round.
             return observe(inst, sleep)
@@ -712,11 +736,11 @@ def run_phase(phase, inst, clock=time.monotonic, sleep=time.sleep):
     raise common.WakeError("unknown_phase")
 
 
-def phase_main(argv, out, clock, sleep, git_run):
+def phase_main(argv, out, clock, sleep, git_run, runner=None):
     try:
         phase, rest = argv[0], argv[1:]
         args = parse_args(rest)
-        result = run_phase(phase, Instance(args, git_run), clock, sleep)
+        result = run_phase(phase, Instance(args, git_run, runner), clock, sleep)
     except common.WakeError as exc:
         print(json.dumps({"error": exc.code}), file=out)
         return exc.exit_code
@@ -779,7 +803,7 @@ def main(argv=None, runner=run_cli, out=sys.stdout, clock=time.monotonic, sleep=
          git_run=subprocess.run):
     argv = sys.argv[1:] if argv is None else argv
     if argv and argv[0] in PHASES:
-        return phase_main(argv, out, clock, sleep, git_run)
+        return phase_main(argv, out, clock, sleep, git_run, runner)
     try:
         args = parse_args(argv)
         return watch(args, runner, out, clock, sleep, wall, git_run)
