@@ -122,6 +122,32 @@ never stops or disables a unit.
 Any unexpected entry in the instance directory refuses removal
 (`instance_unexpected_files`) and changes nothing.
 
+## Declaring an adapter to the guided upgrade controller
+
+`install.sh --user wake integration …` prints one exact declaration item for the
+upgrade controller. It writes nothing: the owner reviews the item and adds it with the
+project's declaration tool. Arguments:
+- the same identity arguments as `plan`;
+- `--bundle-sha256 D`, which selects an **existing** frozen bundle explicitly. A rebind
+  keeps an older bundle, so the item always names the bundle the instance actually runs,
+  never one computed from the current pin;
+- one or more `--pair FROM TO` (directed 40-hex commits). There is no "any version".
+
+Queue also needs `--config` (the instance's own `config.json`) and
+`--transition ABS --transition-sha256 D`. The transition is validated by the selected
+bundle's own code: its identity, its code and its two endpoints. Each pair must be that
+transition's direction or its exact reverse.
+
+The item:
+- `id` is `exit-wake-<handle>` or `queue-wake-<handle>`, and `owner` is the handle;
+- `probe` is run by the owner;
+- `steps` are `pause`, `rebind`, `check` and `resume`;
+- `code_files` are the bundle's files, so the controller checks those frozen bytes in
+  every phase.
+
+The handle must still be the channel's current binding for that session. The item is
+not a release or an activation.
+
 ## Owner recovery
 
 **`unit_orphan`** means a unit file exists for this instance but no config records it,

@@ -59,6 +59,7 @@ QUEUE_DATA = ("config.json", "state.json", "paused.json")
 INTENT = "remove-intent.json"
 REBIND = re.compile(r"rebind-[0-9a-f]{12}\Z")
 HEX = re.compile(r"[0-9a-f]{64}\Z")
+COMMIT_RE = re.compile(r"[0-9a-f]{40}\Z")
 MIN_SYSTEMD = 254
 MAX_FILE = 4 * 1024 * 1024
 MAX_CLI_OUTPUT = 256 * 1024
@@ -230,7 +231,10 @@ def load_queue_module(directory, files, tag):
     for name, data in files.items():
         if read_regular(Path(directory) / name) != data:
             raise WakeError("pin_changed")
-    return _load(f"ai_comm_wake_queue_{tag}", Path(directory) / "queue_wake.py")
+    # The module name includes its directory, so a module loaded from one directory is
+    # never reused for another (its own HERE checks the files beside it).
+    where = sha256(str(Path(directory)).encode("utf-8"))[:16]
+    return _load(f"ai_comm_wake_queue_{tag}_{where}", Path(directory) / "queue_wake.py")
 
 
 def renderer_call(fn, *args, module):
@@ -828,6 +832,94 @@ def remove(args, host):
     return remove_queue(ident, pin, host, args)
 
 
+# --------------------------------------------------------------------------- integration
+
+
+PHASE_STEPS = ("pause", "rebind", "check", "resume")
+
+
+def selected_bundle(project, kind, digest):
+    """The explicitly selected, already frozen bundle (decision 1396, proposal 056 R2).
+
+    It holds exactly the kind's fixed file set plus BUNDLE.json; BUNDLE.json's canonical
+    digest is the selected digest and names this kind; every file is private 0400 with
+    the recorded digest. Never a freshly computed bundle from the current pin."""
+    bundle_dir = bundle_root(project) / digest
+    trusted_ancestry(Path(project) / ".ai-comm-local", "bundle_unsafe")
+    if not os.path.lexists(bundle_dir):
+        raise WakeError("bundle_missing")
+    owned_private_dir(bundle_dir, "bundle_unsafe")
+    info = os.lstat(bundle_dir / "BUNDLE.json") if os.path.lexists(bundle_dir / "BUNDLE.json") else None
+    if info is None or not stat.S_ISREG(info.st_mode):
+        raise WakeError("bundle_conflict")
+    raw = read_regular(bundle_dir / "BUNDLE.json")
+    try:
+        doc = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise WakeError("bundle_conflict") from exc
+    if (not isinstance(doc, dict) or set(doc) != {"kind", "package", "files"} or canonical(doc) != raw
+            or sha256(raw) != digest or doc["kind"] != kind or not isinstance(doc["files"], dict)
+            or set(doc["files"]) != set(KINDS[kind])):
+        raise WakeError("bundle_conflict")
+    files = {}
+    for name in KINDS[kind]:
+        data = read_regular(bundle_dir / name)
+        if data is None or sha256(data) != doc["files"][name]:
+            raise WakeError("bundle_conflict")
+        files[name] = data
+    bundle_state(bundle_dir, files, doc)  # private chain, 0400 user-owned files, exact names and bytes
+    return bundle_dir, files
+
+
+def integration(args, host):
+    """One exact declaration item for the owner to review; writes nothing (proposal 056)."""
+    uc = _uc()
+    try:
+        identity = uc.Project(args.project).project_id()
+    except uc.Stop as exc:
+        raise WakeError("project_invalid") from exc
+    pin = Pin(identity["path"], host)
+    check_binding(host.registry(pin.dir / "ai_comm.py", identity["channel_path"]),
+                  args.handle, args.session, args.generation)
+    key = common.project_key(identity)
+    instance = common.instance_name(key, args.handle)
+    bundle_dir, files = selected_bundle(identity["path"], args.kind, args.bundle_sha256)
+    code_files = [str(bundle_dir.relative_to(identity["path"]) / name) for name in sorted(KINDS[args.kind])]
+    pairs = [list(pair) for pair in args.pair]
+    if args.kind == "exit":
+        base = [sys.executable, "-I", str(bundle_dir / "exit_wake.py")]
+        tail = ["--project", identity["path"], "--project-key", key, "--handle", args.handle,
+                f"--session={args.session}", "--generation", str(args.generation)]
+        argv = {phase: base + [phase] + tail for phase in ("probe", *PHASE_STEPS)}
+    else:
+        directory = instance_dir(identity["path"], instance)
+        if args.config != str(directory / "config.json"):
+            raise WakeError("config_path_invalid")
+        instance_dir_check(directory)
+        queue = load_queue_module(bundle_dir, files, "bundle_" + args.bundle_sha256[:16])
+        ident = {"project": identity, "instance": instance, "handle": args.handle, "session": args.session,
+                 "generation": args.generation}
+        unit_path = host.unit_dir() / f"queue-wake@{instance}.service"
+        config, _ = recorded_config(directory, ident, unit_path, args, queue)
+        try:
+            transition = queue.load_transition(config, Path(args.transition), args.transition_sha256)
+        except (queue.Invalid, queue.common.WakeError) as exc:
+            raise WakeError("transition_invalid") from exc
+        allowed = {(transition["from"]["commit"], transition["to"]["commit"]),
+                   (transition["to"]["commit"], transition["from"]["commit"])}
+        if any(tuple(pair) not in allowed for pair in pairs):
+            raise WakeError("pair_not_in_transition")
+        base = [args.python, "-I", "-B", str(bundle_dir / "queue_wake.py")]
+        tail = ["--config", args.config, "--handle", args.handle, "--session", args.session,
+                "--generation", str(args.generation), "--transition", args.transition,
+                "--sha256", args.transition_sha256]
+        argv = {phase: base + [phase] + tail for phase in ("probe", *PHASE_STEPS)}
+    item = {"id": f"{args.kind}-wake-{args.handle}", "owner": args.handle, "supports": {"pairs": pairs},
+            "probe": {"argv": argv["probe"], "run_by": "owner"},
+            "steps": {phase: argv[phase] for phase in PHASE_STEPS}, "code_files": code_files}
+    return {"status": "integration", "item": item, "item_sha256": sha256(canonical(item))}
+
+
 # --------------------------------------------------------------------------- arguments
 
 
@@ -838,7 +930,7 @@ class _Parser(argparse.ArgumentParser):
 
 def parse_args(argv):
     p = _Parser(prog="install.sh --user wake", add_help=False)
-    p.add_argument("command", choices=("plan", "install", "remove"))
+    p.add_argument("command", choices=("plan", "install", "remove", "integration"))
     p.add_argument("--project", required=True)
     p.add_argument("--handle", required=True)
     p.add_argument("--kind", required=True, choices=tuple(KINDS))
@@ -848,7 +940,29 @@ def parse_args(argv):
     for name in ("--python", "--socket", "--binary", "--binary-sha256", "--thread", "--plan-sha256"):
         p.add_argument(name)
     p.add_argument("--confirm", action="store_true")
+    for name in ("--bundle-sha256", "--config", "--transition", "--transition-sha256"):
+        p.add_argument(name)
+    p.add_argument("--pair", nargs=2, action="append", default=[])
     args = p.parse_args(argv)
+    integration_args = (args.bundle_sha256, args.config, args.transition, args.transition_sha256)
+    if args.command != "integration":
+        if any(v is not None for v in integration_args) or args.pair:
+            raise WakeError("arguments_invalid")
+    else:
+        if not (args.bundle_sha256 and HEX.fullmatch(args.bundle_sha256)) or not args.pair \
+                or args.confirm or args.plan_sha256:
+            raise WakeError("arguments_invalid")
+        if not all(COMMIT_RE.fullmatch(c) for pair in args.pair for c in pair) \
+                or any(a == b for a, b in args.pair) or len({tuple(p) for p in args.pair}) != len(args.pair):
+            raise WakeError("pair_invalid")
+        queue_only = (args.config, args.transition, args.transition_sha256)
+        if args.kind == "queue":
+            if any(v is None for v in queue_only) or not HEX.fullmatch(args.transition_sha256) \
+                    or not all(os.path.isabs(v) and os.path.normpath(v) == v
+                               for v in (args.config, args.transition)):
+                raise WakeError("arguments_invalid")
+        elif any(v is not None for v in queue_only):
+            raise WakeError("arguments_invalid")
     if not os.path.isabs(args.project) or os.path.normpath(args.project) != args.project:
         raise WakeError("project_path_invalid")
     common.validate_handle(args.handle)
@@ -885,6 +999,8 @@ def main(argv=None, host=None, out=sys.stdout):
             result = compute(args, host)[0]
         elif args.command == "install":
             result = install(args, host)
+        elif args.command == "integration":
+            result = integration(args, host)
         else:
             result = remove(args, host)
     except WakeError as exc:

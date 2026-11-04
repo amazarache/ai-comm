@@ -11,6 +11,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from unittest import mock
 
@@ -657,6 +658,191 @@ class CorrectionTests(Base):
         self.assertFalse(os.path.exists(directory / "remove-intent.json"))
         self.assertEqual({k: v for k, v in after.items() if not k.endswith(".lock")},
                          {k: v for k, v in before.items() if not k.endswith(".lock")})
+
+
+class IntegrationTests(Base):
+    """`wake integration` (decision 1396, proposal 056)."""
+
+    queue_module = QueueTests.queue_module
+    installed_with_state = QueueTests.installed_with_state
+    OLD, NEW = "1" * 40, "2" * 40
+
+    def controller(self):
+        return wake._uc()
+
+    def integrate(self, kind="exit", bundle=None, pairs=None, extra=()):
+        bundle = bundle or self.bundle_sha
+        argv = self.args("integration", kind=kind, extra=["--bundle-sha256", bundle, *extra])
+        for a, b in (pairs or [(self.OLD, self.NEW)]):
+            argv += ["--pair", a, b]
+        return self.run_wake(argv)
+
+    def exit_installed(self):
+        plan, (code, _) = self.install()
+        self.assertEqual(code, 0)
+        self.bundle_sha = plan["bundle"]["sha256"]
+        return plan
+
+    def validate(self, item):
+        uc = self.controller()
+        identity = uc.Project(str(self.project)).project_id()
+        manifest = {"v": 1, "schema": uc.PROJECT_SCHEMA, "status": "declared",
+                    "project_id": {"path": identity["path"], "channel": identity["channel"]}, "integrations": [item]}
+        uc.validate_project_manifest(wake.canonical(manifest), {"path": identity["path"],
+                                                                "channel": identity["channel"]})
+        return uc.code_hashes(uc.Project(str(self.project)), item)
+
+    def test_exit_item_is_exact_valid_and_read_only(self):
+        plan = self.exit_installed()
+        before = self.everything()
+        code, result = self.integrate()
+        self.assertEqual(code, 0, result)
+        self.assertEqual(self.everything(), before)
+        item = result["item"]
+        self.assertEqual(item["id"], "exit-wake-left")
+        self.assertEqual(item["supports"], {"pairs": [[self.OLD, self.NEW]]})
+        self.assertNotIn("sources", item)
+        self.assertEqual(item["probe"]["run_by"], "owner")
+        bundle = Path(plan["bundle"]["dir"])
+        probe = item["probe"]["argv"]
+        self.assertEqual(probe[:4], [sys.executable, "-I", str(bundle / "exit_wake.py"), "probe"])
+        self.assertIn("--project-key", probe)
+        self.assertNotIn("--kind", probe)
+        self.assertEqual(sorted(item["steps"]), ["check", "pause", "rebind", "resume"])
+        hashes = self.validate(item)
+        self.assertEqual(hashes, {f".ai-comm-local/upgrade/adapters/{self.bundle_sha}/{n}": plan["bundle"]["files"][n]
+                                  for n in ("common.py", "exit_wake.py")})
+
+    def test_selected_bundle_is_stable_after_the_pin_changes(self):
+        self.exit_installed()
+        item = self.integrate()[1]["item"]
+        before = self.validate(item)
+        (self.pin / "adapters" / "exit_wake.py").write_bytes(b"# a newer adapter\n")
+        self.make_pin()  # the manifest now records different bytes, as a new verified package would
+        after_item = self.integrate()[1]["item"]
+        self.assertEqual(after_item, item)
+        self.assertEqual(self.validate(after_item), before)
+        pinned = dict(item, code_files=[".tools/ai-comm/adapters/exit_wake.py"])  # the negative control
+        old = self.controller().code_hashes(self.controller().Project(str(self.project)), pinned)
+        (self.pin / "adapters" / "exit_wake.py").write_bytes(b"# yet another\n")
+        self.assertNotEqual(self.controller().code_hashes(self.controller().Project(str(self.project)), pinned), old)
+
+    def test_exit_probe_runs_through_the_controller(self):
+        self.exit_installed()
+        item = self.integrate()[1]["item"]
+        (self.pin / "ai_comm.py").write_text(textwrap.dedent(f"""\
+            import json, sys
+            if sys.argv[3] == "registry":
+                print(json.dumps({{"head": "h", "next": 1, "more": False,
+                                  "items": [{{"handle": "left", "session": "{SESSION}", "generation": 1}}]}}))
+            else:
+                sys.exit(2)
+            """))
+        runtime = self.project / ".ai-comm" / "ai-comm-runtime"
+        runtime.mkdir()
+        (runtime / "left.json").write_text('{"v":2,"generation":1,"read":0,"seen":0}')
+        uc = self.controller()
+        observed = uc.probe(uc.Project(str(self.project)), item)
+        self.assertEqual(set(observed), {"paused", "running", "pending", "bound_cli_sha256"})
+        self.assertEqual((observed["paused"], observed["running"], observed["pending"]), (False, False, False))
+
+    def test_exit_refusals(self):
+        self.assertEqual(self.integrate(bundle="0" * 64)[1]["code"], "bundle_missing")
+        plan = self.exit_installed()
+        self.assertEqual(self.integrate(pairs=[(self.OLD, self.OLD)])[1]["code"], "pair_invalid")
+        self.assertEqual(self.integrate(pairs=[(self.OLD, "x")])[1]["code"], "pair_invalid")
+        self.host.participants = [{"handle": "left", "session": OTHER, "generation": 1}]
+        self.assertEqual(self.integrate()[1]["code"], "session_mismatch")
+        self.host.participants = [{"handle": "left", "session": SESSION, "generation": 1}]
+        bundle = Path(plan["bundle"]["dir"])
+        os.chmod(bundle / "exit_wake.py", 0o644)
+        self.assertEqual(self.integrate()[1]["code"], "bundle_unsafe")
+        os.chmod(bundle / "exit_wake.py", 0o400)
+        os.chmod(bundle, 0o700)
+        os.chmod(bundle / "BUNDLE.json", 0o600)
+        doc = json.loads((bundle / "BUNDLE.json").read_text())
+        (bundle / "BUNDLE.json").write_bytes(wake.canonical(dict(doc, kind="queue")))
+        os.chmod(bundle / "BUNDLE.json", 0o400)
+        self.assertEqual(self.integrate()[1]["code"], "bundle_conflict")
+
+    # queue ---------------------------------------------------------------------------------
+    def queue_setup(self):
+        plan, directory = self.installed_with_state()
+        self.bundle_sha = plan["bundle"]["sha256"]
+        queue = self.queue_module()
+        config = json.loads(Path(plan["config_path"]).read_text())
+        def endpoint(version, package):
+            return {"version": version, "tag": "v" + version, "tag_object": "a" * 40, **package}
+        other = dict(config["package"], commit=self.NEW)
+        config["package"] = dict(config["package"], commit=self.OLD)
+        wake.common.write_private_json(str(directory), "config.json", config)
+        state = json.loads((directory / "state.json").read_text())
+        state["binding"] = queue.digest(queue.canonical(config))
+        wake.common.write_private_json(str(directory), "state.json", state)
+        transition = {"v": 1, "schema": queue.TRANSITION_SCHEMA, "identity": queue.transition_identity(config),
+                      "from": endpoint("1.9.0", config["package"]), "to": endpoint("1.9.1", other),
+                      "code": dict(plan["bundle"]["files"])}
+        wake.common.write_private_json(str(directory), "transition.json", transition)
+        self.transition = directory / "transition.json"
+        self.transition_sha = hashlib.sha256(self.transition.read_bytes()).hexdigest()
+        return plan
+
+    def queue_extra(self, plan, transition_sha=None):
+        return ["--config", plan["config_path"], "--transition", str(self.transition),
+                "--transition-sha256", transition_sha or self.transition_sha]
+
+    def test_queue_item_binds_the_transition_and_its_pairs(self):
+        plan = self.queue_setup()
+        before = self.everything()
+        code, result = self.integrate(kind="queue", extra=self.queue_extra(plan),
+                                      pairs=[(self.OLD, self.NEW), (self.NEW, self.OLD)])
+        self.assertEqual(code, 0, result)
+        self.assertEqual(self.everything(), before)
+        item = result["item"]
+        self.assertEqual(item["id"], "queue-wake-left")
+        self.assertEqual(item["probe"]["argv"][-4:], ["--transition", str(self.transition),
+                                                      "--sha256", self.transition_sha])
+        self.assertEqual(len(self.validate(item)), 4)
+
+    def test_queue_probe_argv_parses_and_binds_the_transition(self):
+        plan = self.queue_setup()
+        item = self.integrate(kind="queue", extra=self.queue_extra(plan))[1]["item"]
+        argv = item["probe"]["argv"]
+        bundle_dir = Path(argv[3]).parent
+        bundle_queue = wake.load_queue_module(bundle_dir, {n: (bundle_dir / n).read_bytes()
+                                                           for n in wake.KINDS["queue"]},
+                                              "bundle_" + self.bundle_sha[:16])
+        seen = {}
+
+        def fake_probe(guided):
+            seen["transition"] = guided.transition
+            return {"paused": False, "running": False, "pending": False}
+
+        out = io.StringIO()
+        with mock.patch.object(bundle_queue.Guided, "probe", fake_probe), mock.patch("sys.stdout", out):
+            code = bundle_queue.main(argv[4:])
+        self.assertEqual(code, 0, out.getvalue())
+        self.assertEqual(seen["transition"]["to"]["commit"], self.NEW)
+
+    def test_queue_refusals(self):
+        plan = self.queue_setup()
+        cases = [
+            (dict(extra=self.queue_extra(plan, "0" * 64)), "transition_invalid"),
+            (dict(extra=self.queue_extra(plan), pairs=[(self.OLD, "3" * 40)]), "pair_not_in_transition"),
+            (dict(extra=["--config", str(self.base / "elsewhere.json"), "--transition", str(self.transition),
+                         "--transition-sha256", self.transition_sha]), "config_path_invalid"),
+        ]
+        for kwargs, code in cases:
+            before = self.everything()
+            self.assertEqual(self.integrate(kind="queue", **kwargs)[1]["code"], code, kwargs)
+            self.assertEqual(self.everything(), before)
+        transition = json.loads(self.transition.read_text())
+        for change in ({"identity": dict(transition["identity"], session=OTHER)},
+                       {"code": dict(transition["code"], **{"queue_wake.py": "0" * 64})}):
+            wake.common.write_private_json(str(self.transition.parent), "transition.json", dict(transition, **change))
+            sha = hashlib.sha256(self.transition.read_bytes()).hexdigest()
+            self.assertEqual(self.integrate(kind="queue", extra=self.queue_extra(plan, sha))[1]["code"],
+                             "transition_invalid")
 
 
 class RegistryReaderTests(Base):
