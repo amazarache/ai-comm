@@ -389,6 +389,55 @@ class FaultInjectionTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "state_io_failed")
         self.assertEqual(Path(self.target).read_bytes(), self.original)
 
+    def test_directory_sync_failure_after_replace_is_commit_uncertain(self):
+        real_fsync = os.fsync
+        calls = []
+
+        def second_fails(fd):
+            calls.append(fd)
+            if len(calls) == 2:  # the first syncs the temporary file, the second the directory
+                raise OSError(5, "synthetic private diagnostic")
+            return real_fsync(fd)
+
+        with mock.patch.object(common.os, "fsync", second_fails):
+            with self.assertRaises(common.WakeError) as ctx:
+                common.write_private_json(self.root, "config.json", {"binding": "replacement"})
+        self.assertEqual(ctx.exception.code, "state_commit_uncertain")
+        self.assertEqual(ctx.exception.exit_code, 75)
+        self.assertEqual(len(calls), 2)
+        # The new bytes are in place; the caller reads back rather than restoring the old value.
+        self.assertEqual(common.read_small_json(self.target), {"binding": "replacement"})
+        self.assertEqual(os.listdir(self.root), ["config.json"])
+
+    def test_close_failure_closes_once_and_keeps_the_original(self):
+        real_close = os.close
+        closed = []
+
+        def failing_close(fd):
+            closed.append(fd)
+            real_close(fd)
+            if len(closed) == 1:
+                raise OSError(5, "synthetic private diagnostic")
+
+        with mock.patch.object(common.os, "close", failing_close):
+            with self.assertRaises(common.WakeError) as ctx:
+                common.write_private_json(self.root, "config.json", {"binding": "replacement"})
+        self.assertEqual(ctx.exception.code, "state_io_failed")
+        self.assertEqual(len(closed), 1)
+        self.assertEqual(Path(self.target).read_bytes(), self.original)
+        self.assertEqual(os.listdir(self.root), ["config.json"])
+
+    def test_inaccessible_ancestor_is_permanent(self):
+        if os.geteuid() == 0:
+            self.skipTest("root bypasses permissions")
+        sealed = os.path.join(self.root, "sealed")
+        os.mkdir(sealed, 0o000)
+        self.addCleanup(os.chmod, sealed, 0o700)
+        with self.assertRaises(common.WakeError) as ctx:
+            common.private_dir(os.path.join(sealed, "inner", "state"))
+        self.assertEqual(ctx.exception.code, "state_access_denied")
+        self.assertEqual(ctx.exception.exit_code, 78)
+
     def test_numeric_overflow_is_refused(self):
         bodies = [b'{"n":1e400}', b'{"n":-1e400}', b'{"a":[{"b":1E+999}]}', b'{"n":1.5e309}']
         for body in bodies:

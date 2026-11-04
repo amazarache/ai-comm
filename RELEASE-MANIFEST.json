@@ -52,8 +52,8 @@
     },
     {
       "path": "adapters/common.py",
-      "bytes": 13132,
-      "sha256": "052ce005c095305fa2a9ce60277c4a1c41ac60b51362535af02b24d4ed8323f2"
+      "bytes": 13565,
+      "sha256": "4d327abe3022faa811639b5401259b10f5509fabcb42483d2db6ede66a3c5c66"
     },
     {
       "path": "ai_comm.py",
@@ -187,8 +187,8 @@
     },
     {
       "path": "tests/test_common.py",
-      "bytes": 20319,
-      "sha256": "8c5159e4d7b08d2e98da7ac8ffc2991c237b6d3a861a23888854e86712873803"
+      "bytes": 22639,
+      "sha256": "b913b52b1dfcab6fc3d2419d52aaae62cd175c95744ff4ebc4f4dca763eeacd6"
     },
     {
       "path": "tests/test_declare_project.py",

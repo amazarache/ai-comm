@@ -134,10 +134,8 @@ def _reject_symlinked_ancestors(path):
             info = os.lstat(current)
         except FileNotFoundError:
             return
-        except NotADirectoryError as exc:
-            raise WakeError("state_parent_not_directory") from exc
         except OSError as exc:
-            raise WakeError("state_io_failed", "transient") from exc
+            raise _os_error(exc) from exc
         if stat.S_ISLNK(info.st_mode):
             raise WakeError("state_path_symlink")
 
@@ -279,8 +277,14 @@ def write_private_json(directory, name, value):
     """Atomically replace `directory/name` with canonical JSON, mode 0600, fsynced.
 
     `name` must be a plain file name; the directory must be a private directory.
-    The target is replaced only after every byte is written and fsynced; on any
-    failure the previous file is left as it was and the temporary file is removed.
+    The target is replaced only after every byte is written and fsynced. Two outcomes on failure:
+
+    - before the replace: the previous file is left as it was and the temporary file is
+      removed; the error is the mapped filesystem code;
+    - after the replace (syncing the directory entry): the new bytes are already the
+      file's content, but the rename may not be durable yet. This raises the transient
+      `state_commit_uncertain`. The caller re-reads the file before acting and never
+      writes the old value back blindly.
     """
     if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", name):
         raise WakeError("state_name_invalid")
@@ -300,15 +304,10 @@ def write_private_json(directory, name, value):
                 raise WakeError("state_io_failed", "transient")
             view = view[written:]
         os.fsync(fd)
-        os.close(fd)
-        fd = None
+        owned, fd = fd, None  # never closed twice, even if this close fails
+        os.close(owned)
         os.replace(tmp, os.path.join(directory, name))
         tmp = None
-        dfd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            os.fsync(dfd)
-        finally:
-            os.close(dfd)
     except OSError as exc:
         raise _os_error(exc) from exc
     finally:
@@ -319,6 +318,14 @@ def write_private_json(directory, name, value):
                 os.unlink(tmp)
             except OSError:
                 pass
+    try:
+        dfd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+        try:
+            os.fsync(dfd)
+        finally:
+            _close_quietly(dfd)
+    except OSError as exc:
+        raise WakeError("state_commit_uncertain", "transient") from exc
 
 
 def acquire_lock(directory, name="lock", sleep=time.sleep, attempts=LOCK_ATTEMPTS):
