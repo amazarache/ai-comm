@@ -58,6 +58,7 @@ class FakeHost(wake.Host):
         self.systemd = "systemd 255 (255.4)"
         self.show = {"LoadState": "not-found", "ActiveState": "inactive", "UnitFileState": "",
                      "FragmentPath": ""}
+        self.show_raw = None
         self.calls = []
 
     def verify(self, project):
@@ -75,6 +76,8 @@ class FakeHost(wake.Host):
         if args == ("--version",):
             return 0, self.systemd + "\n"
         if args[:2] == ("--user", "show"):
+            if self.show_raw is not None:
+                return self.show_raw
             return 0, "".join(f"{k}={v}\n" for k, v in self.show.items())
         raise AssertionError("unexpected systemctl call")
 
@@ -211,8 +214,10 @@ class ExitTests(Base):
     def test_different_existing_bundle_is_refused(self):
         plan = self.plan()
         bundle = Path(plan["bundle"]["dir"])
-        bundle.mkdir(parents=True, mode=0o700)
+        for directory in (bundle.parents[1], bundle.parent, bundle):
+            directory.mkdir(mode=0o700)
         (bundle / "exit_wake.py").write_text("other")
+        os.chmod(bundle / "exit_wake.py", 0o400)
         code, result = self.run_wake(self.args("install", extra=["--plan-sha256", plan["plan_sha256"], "--confirm"]))
         self.assertEqual((code, result["code"]), (78, "bundle_conflict"))
         self.assertEqual(os.listdir(bundle), ["exit_wake.py"])
@@ -306,9 +311,10 @@ class QueueTests(Base):
     def test_orphan_and_foreign_objects_change_nothing(self):
         plan = self.plan(kind="queue")
         argv = self.args("install", kind="queue", extra=["--plan-sha256", plan["plan_sha256"], "--confirm"])
-        self.unit_dir.mkdir(parents=True)
+        self.unit_dir.mkdir(parents=True, mode=0o700)
         unit = Path(plan["unit_path"])
         unit.write_bytes(b"[Unit]\n")
+        os.chmod(unit, 0o644)
         before = self.everything()
         self.assertEqual(self.run_wake(argv)[1]["code"], "unit_exists")
         self.assertEqual(self.everything(), before)
@@ -424,6 +430,180 @@ class QueueTests(Base):
         self.assertEqual(self.remove(kind="queue")[0], 0)
         self.assertEqual(sorted(os.listdir(directory)),
                          ["guided.lock", "instance.lock", "lock", "observer.lock", "phase.lock"])
+
+
+class CorrectionTests(Base):
+    """Review 1371 R1-R5 and review 1373 (plan 051)."""
+
+    queue_module = QueueTests.queue_module
+    installed_with_state = QueueTests.installed_with_state
+
+    def snapshot_all(self):
+        return tree(str(self.project / ".ai-comm-local"), str(self.base / "home"))
+
+    # R1 ------------------------------------------------------------------------------------
+    def test_unsafe_existing_bundle_is_refused_without_publishing(self):
+        plan = self.plan(kind="queue")
+        bundle = Path(plan["bundle"]["dir"])
+        for directory in (bundle.parents[1], bundle.parent, bundle):
+            directory.mkdir(mode=0o700)
+        for name, data in {"queue_wake.py": None, "common.py": None, "queue-wake@.service": None,
+                           "queue_wake.lock": None}.items():
+            (bundle / name).write_bytes((ROOT / "adapters" / name).read_bytes())
+        doc = {"kind": "queue", "package": {"commit": COMMIT, "manifest_sha256": hashlib.sha256(
+            (self.pin / "RELEASE-MANIFEST.json").read_bytes()).hexdigest()}, "files": plan["bundle"]["files"]}
+        (bundle / "BUNDLE.json").write_bytes(wake.canonical(doc))
+        for directory in (bundle.parents[1], bundle.parent, bundle):
+            os.chmod(directory, 0o777)
+        for name in os.listdir(bundle):
+            os.chmod(bundle / name, 0o666)
+        before = self.snapshot_all()
+        argv = self.args("install", kind="queue", extra=["--plan-sha256", plan["plan_sha256"], "--confirm"])
+        self.assertEqual(self.run_wake(argv), (78, {"status": "stopped", "code": "bundle_unsafe"}))
+        self.assertEqual(self.snapshot_all(), before)  # modes unchanged, no config, no unit
+        self.assertFalse(os.path.exists(plan["unit_path"]))
+
+    def test_unsafe_unit_destinations_are_refused(self):
+        plan = self.plan(kind="queue")
+        argv = self.args("install", kind="queue", extra=["--plan-sha256", plan["plan_sha256"], "--confirm"])
+        self.unit_dir.mkdir(parents=True, mode=0o700)
+        os.chmod(self.unit_dir, 0o777)
+        self.assertEqual(self.run_wake(argv)[1]["code"], "unit_dir_unsafe")
+        self.assertFalse(os.path.exists(plan["config_path"]))
+        shutil.rmtree(self.base / "home")
+        (self.base / "home").mkdir(mode=0o700)
+        os.symlink(self.base / "elsewhere", self.base / "home" / ".config")
+        (self.base / "elsewhere").mkdir(mode=0o700)
+        self.assertEqual(self.run_wake(self.args("plan", kind="queue"))[0], 0)  # plan reads nothing there
+        self.assertEqual(self.run_wake(argv)[1]["code"], "unit_dir_unsafe")
+        os.unlink(self.base / "home" / ".config")
+        os.chmod(self.base / "home", 0o777)
+        self.assertEqual(self.run_wake(argv)[1]["code"], "unit_dir_unsafe")  # writable parent of a missing dir
+        self.assertFalse(os.path.exists(self.base / "home" / ".config"))
+
+    def test_user_owned_traversable_unit_dir_is_accepted(self):
+        self.unit_dir.mkdir(parents=True, mode=0o755)
+        for directory in (self.unit_dir, self.unit_dir.parent, self.unit_dir.parent.parent):
+            os.chmod(directory, 0o755)
+        plan, (code, result) = self.install(kind="queue")
+        self.assertEqual(code, 0, result)
+        self.assertTrue(os.path.exists(plan["unit_path"]))
+
+    # R2 ------------------------------------------------------------------------------------
+    def test_unknown_service_state_refuses_before_any_change(self):
+        plan, directory = self.installed_with_state()
+        good = {"LoadState": "loaded", "ActiveState": "inactive", "UnitFileState": "disabled",
+                "FragmentPath": plan["unit_path"]}
+        lines = lambda values: "".join(f"{k}={v}\n" for k, v in values.items())  # noqa: E731
+        cases = [
+            ((0, ""), "service_state_invalid"),
+            ((0, "LoadState=loaded\nActiveState=inactive\n"), "service_state_invalid"),
+            ((0, lines(good) + "ActiveState=inactive\n"), "service_state_invalid"),
+            ((0, lines(dict(good, LoadState="masked"))), "service_state_invalid"),
+            ((0, lines(dict(good, ActiveState="activating"))), "instance_active"),
+            ((0, lines(dict(good, UnitFileState="enabled"))), "instance_active"),
+            ((0, lines(dict(good, FragmentPath="/elsewhere.service"))), "wrong_service_fragment"),
+            ((1, lines(dict(good))), "service_manager_unavailable"),
+        ]
+        for raw, code in cases:
+            self.host.show_raw = raw
+            before = self.snapshot_all()
+            self.assertEqual(self.remove(kind="queue")[1]["code"], code, raw)
+            data_only = lambda t: {k: v for k, v in t.items() if not k.endswith(".lock")}  # noqa: E731
+            self.assertEqual(data_only(self.snapshot_all()), data_only(before), raw)
+            self.assertFalse(os.path.exists(directory / "remove-intent.json"))
+        self.host.show_raw = (0, lines(good))
+        self.assertEqual(self.remove(kind="queue")[0], 0)
+
+    # R3 ------------------------------------------------------------------------------------
+    def rebind(self, plan, directory):
+        """What a guided rebind does: a new package binding, the old frozen unit kept."""
+        queue = self.queue_module()
+        config = json.loads(Path(plan["config_path"]).read_text())
+        config["package"] = dict(config["package"], commit="d" * 40, manifest_sha256="f" * 64)
+        wake.common.write_private_json(str(directory), "config.json", config)
+        state = json.loads((directory / "state.json").read_text())
+        state["binding"] = queue.digest(queue.canonical(config))
+        wake.common.write_private_json(str(directory), "state.json", state)
+
+    def test_remove_after_a_guided_rebind(self):
+        plan, directory = self.installed_with_state()
+        self.rebind(plan, directory)
+        code, result = self.remove(kind="queue")
+        self.assertEqual(code, 0, result)
+        self.assertFalse(os.path.exists(plan["unit_path"]))
+        self.assertEqual(sorted(os.listdir(directory)), ["guided.lock", "instance.lock", "observer.lock"])
+
+    def test_interrupted_remove_after_rebind_resumes(self):
+        plan, directory = self.installed_with_state()
+        self.rebind(plan, directory)
+        real = os.unlink
+        state = {"n": 0}
+
+        def second_fails(path, *a, **k):
+            if not str(path).endswith(".lock") and ".queue-wake." not in str(path):
+                state["n"] += 1
+                if state["n"] == 2:
+                    raise OSError(5, "fault")
+            return real(path, *a, **k)
+
+        with mock.patch.object(wake.os, "unlink", second_fails):
+            self.assertEqual(self.remove(kind="queue")[0], 75)
+        self.assertEqual(self.remove(kind="queue")[0], 0)
+
+    def test_config_for_another_binding_is_refused(self):
+        plan, directory = self.installed_with_state()
+        before = self.snapshot_all()
+        argv = self.args("remove", kind="queue", extra=["--confirm"])
+        argv[argv.index("--socket") + 1] = str(self.base / "other.sock")
+        self.assertEqual(self.run_wake(argv)[1]["code"], "config_binding_mismatch")
+        self.assertEqual({k: v for k, v in self.snapshot_all().items() if not k.endswith(".lock")},
+                         {k: v for k, v in before.items() if not k.endswith(".lock")})
+
+    def test_exit_remove_keeps_the_current_registry_check(self):
+        exit_plan = self.plan()
+        directory = self.project / ".ai-comm-local" / "wake" / exit_plan["instance"]
+        directory.mkdir(parents=True, mode=0o700)
+        os.chmod(directory.parent, 0o700)
+        wake.common.write_private_json(str(directory), "cursor.json", {"v": 1, "notification_through": 9})
+        before = tree(str(directory))
+        self.assertEqual(self.remove(session=OTHER)[1]["code"], "session_mismatch")
+        self.host.participants = [{"handle": "left", "session": SESSION, "generation": 2}]
+        self.assertEqual(self.remove(generation=1)[1]["code"], "generation_mismatch")
+        self.assertEqual(tree(str(directory)), before)
+
+    # R4 ------------------------------------------------------------------------------------
+    def test_malformed_intent_is_refused_even_when_its_files_are_gone(self):
+        plan, directory = self.installed_with_state()
+        with mock.patch.object(wake.os, "unlink", side_effect=OSError(5, "fault")):
+            self.remove(kind="queue")
+        original = json.loads((directory / "remove-intent.json").read_text())
+        os.unlink(directory / "config.json")
+        os.unlink(directory / "state.json")
+        cases = [dict(original, config_sha256=123, state_sha256=456), dict(original, v=True),
+                 dict(original, state_sha256=None), dict(original, unit={"path": "/x.service",
+                                                                         "sha256": original["unit"]["sha256"]}),
+                 dict(original, extra=1), dict(original, pending={"through": 1, "phase": "queued"})]
+        for intent in cases:
+            wake.common.write_private_json(str(directory), "remove-intent.json", intent)
+            before = self.snapshot_all()
+            self.assertEqual(self.remove(kind="queue")[1]["code"], "removal_intent_invalid", intent)
+            self.assertEqual(self.snapshot_all(), before)
+            self.assertTrue(os.path.exists(plan["unit_path"]))
+
+    # R5 ------------------------------------------------------------------------------------
+    def test_changed_unit_refuses_before_any_intent(self):
+        plan, directory = self.installed_with_state()
+        unit = Path(plan["unit_path"])
+        os.chmod(unit, 0o600)
+        with open(unit, "ab") as handle:
+            handle.write(b"# local note\n")
+        before = self.snapshot_all()
+        self.assertEqual(self.remove(kind="queue")[1]["code"], "unit_changed")
+        after = self.snapshot_all()
+        self.assertFalse(os.path.exists(directory / "remove-intent.json"))
+        self.assertEqual({k: v for k, v in after.items() if not k.endswith(".lock")},
+                         {k: v for k, v in before.items() if not k.endswith(".lock")})
 
 
 class RegistryReaderTests(Base):

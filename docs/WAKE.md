@@ -72,7 +72,13 @@ For queue, `plan` also refuses a service manager older than systemd 254
 **`install`** recomputes the plan and requires the same digest, so it writes exactly what
 the owner read. It freezes the adapter files from the verified pin into
 `.ai-comm-local/upgrade/adapters/<sha256>/` (0700, files 0400). An existing bundle is
-reused only if it is byte-identical.
+reused only if it is byte-identical and still private:
+- every directory on its path is owned by you, with no group or other permissions;
+- every file is yours and mode 0400.
+
+Otherwise `install` stops with `bundle_unsafe` and changes no permissions. The unit
+directory's existing ancestors may not be symlinks or writable by another account, and
+the directory itself must be yours (`unit_dir_unsafe`).
 - **For exit,** that is all it does.
 - **For queue,** it checks every destination first. Then, under `instance.lock`, it writes
   `config.json` (the ownership record), then the unit file
@@ -87,13 +93,21 @@ reads the runtime. Those are the owner's printed steps:
 For exit, the session launches the printed argv with its host's background mechanism.
 
 **`remove`** deletes only this instance's unchanged data, its config and its recorded
-unit. It never deletes a lock file, a bundle, a receipt, the channel or the pin, and it
+unit. It removes what is **installed**, not a fresh plan, so it also works after a guided
+upgrade has rebound the package:
+- **queue:** it checks the installed config, which must match the requested project,
+  handle, session, generation and runtime. It does not require that binding to still be
+  the handle's current one, so a stale instance can be removed after a takeover.
+- **exit:** an exit instance keeps no record of its session, so `remove` still requires
+  the handle's current binding. It never deletes a lock file, a bundle, a receipt, the channel or the pin, and it
 never stops or disables a unit.
 - **exit:** the run lock must be free. Under `phase.lock`, then `lock`, then
   `instance.lock`, it deletes `cursor.json`, `run.json`, `pause`, `pause-ack` and
   `peer-alarm.json`.
 - **queue:** the conditions:
-  - the unit must be inactive and disabled;
+  - the unit must be inactive and disabled. `systemctl --user show` must answer with
+    exactly the four requested properties, and an empty, partial, duplicated or unknown
+    answer refuses (`service_state_invalid`);
   - `state.json` must be valid, with no pending attempt (otherwise `pending_attempt`);
   - there must be no `rebind-*` recovery directory (otherwise `recovery_data_present`).
 

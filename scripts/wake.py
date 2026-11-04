@@ -354,17 +354,61 @@ def identity_argv(args):
 # --------------------------------------------------------------------------- install
 
 
+def _uc():
+    return _load("ai_comm_upgrade_controller", RELEASE / "upgrade_controller.py")
+
+
+def trusted_ancestry(path, code):
+    """Every existing component of `path`: not a symlink, a directory owned by root or this
+    user, not writable by another account unless sticky (the controller's ancestor rule)."""
+    uc = _uc()
+    current = Path(Path(path).anchor)
+    for part in Path(path).parts[1:]:
+        current = current / part
+        try:
+            info = os.lstat(current)
+        except FileNotFoundError:
+            return
+        if not uc._mode_ok_ancestor(info):
+            raise WakeError(code)
+
+
+def owned_private_dir(path, code):
+    """An existing directory: real, owned by this user, no group or other bits."""
+    info = os.lstat(path)
+    if (stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
+            or stat.S_IMODE(info.st_mode) & 0o077):
+        raise WakeError(code)
+
+
+def bundle_chain(project):
+    local = Path(project) / ".ai-comm-local"
+    return local, local / "upgrade", local / "upgrade" / "adapters"
+
+
 def bundle_state(bundle_dir, files, bundle_doc):
-    """'absent', 'identical', or a refusal: an existing bundle is reused only if exactly equal."""
+    """'absent', 'identical', or a refusal (review 1371 R1).
+
+    An existing bundle is reused only if every directory on its chain is private and owned
+    by this user, and every file is a regular 0400 file owned by this user with exactly the
+    expected bytes. Modes are never changed silently."""
+    project = Path(bundle_dir).parents[3]
+    local, upgrade, adapters = bundle_chain(project)
+    trusted_ancestry(local, "bundle_unsafe")
+    for directory in (upgrade, adapters):
+        if os.path.lexists(directory):
+            owned_private_dir(directory, "bundle_unsafe")
     if not os.path.lexists(bundle_dir):
         return "absent"
-    info = os.lstat(bundle_dir)
-    if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode):
-        raise WakeError("bundle_conflict")
+    owned_private_dir(bundle_dir, "bundle_unsafe")
     expected = dict(files, **{"BUNDLE.json": canonical(bundle_doc)})
     if sorted(os.listdir(bundle_dir)) != sorted(expected):
         raise WakeError("bundle_conflict")
     for name, data in expected.items():
+        info = os.lstat(bundle_dir / name)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                or stat.S_IMODE(info.st_mode) != 0o400):
+            raise WakeError("bundle_unsafe")
         if read_regular(bundle_dir / name) != data:
             raise WakeError("bundle_conflict")
     return "identical"
@@ -373,13 +417,20 @@ def bundle_state(bundle_dir, files, bundle_doc):
 def freeze_bundle(project, bundle_dir, files, bundle_doc):
     if bundle_state(bundle_dir, files, bundle_doc) == "identical":
         return
-    common.private_dir(str(Path(project) / ".ai-comm-local" / "upgrade"))
-    root = common.private_dir(str(bundle_root(project)))
+    _, upgrade, adapters = bundle_chain(project)
+    for directory in (upgrade, adapters):  # created 0700 if missing; an existing one was checked above
+        try:
+            os.mkdir(directory, 0o700)
+        except FileExistsError:
+            pass
+        owned_private_dir(directory, "bundle_unsafe")
+    root = str(adapters)
     tmp = tempfile.mkdtemp(prefix=".bundle-", dir=root)
     try:
         for name, data in dict(files, **{"BUNDLE.json": canonical(bundle_doc)}).items():
             fd = os.open(os.path.join(tmp, name), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o400)
             try:
+                os.fchmod(fd, 0o400)
                 view = memoryview(data)
                 while view:
                     view = view[os.write(fd, view):]
@@ -401,12 +452,42 @@ def freeze_bundle(project, bundle_dir, files, bundle_doc):
         raise WakeError("bundle_conflict")
 
 
+def unit_destination_check(unit_path):
+    """The unit directory's existing ancestors pass the ancestor rule; the directory itself,
+    if it exists, is owned by this user; an existing unit is a regular file owned by this
+    user and not writable by another account (review 1371 R1)."""
+    unit_dir = Path(unit_path).parent
+    trusted_ancestry(unit_dir, "unit_dir_unsafe")
+    if os.path.lexists(unit_dir):
+        info = os.lstat(unit_dir)
+        if info.st_uid != os.getuid():
+            raise WakeError("unit_dir_unsafe")
+    if os.path.lexists(unit_path):
+        info = os.lstat(unit_path)
+        if (stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                or stat.S_IMODE(info.st_mode) & 0o022):
+            raise WakeError("unit_unsafe")
+
+
+def make_unit_dir(unit_dir):
+    """Create each missing component 0700, only below a validated existing ancestor."""
+    missing = []
+    current = Path(unit_dir)
+    while not os.path.lexists(current):
+        missing.append(current)
+        current = current.parent
+    for directory in reversed(missing):
+        os.mkdir(directory, 0o700)
+    trusted_ancestry(unit_dir, "unit_dir_unsafe")
+
+
 def destination_check(directory, unit_path, config_bytes, unit_bytes):
     """Read-only preflight of every queue destination. Returns (config_present, unit_present)."""
     if any(os.path.lexists(directory / n) for n in ("cursor.json", "run.json")):
         raise WakeError("instance_kind_conflict")
     if os.path.lexists(directory / INTENT):
         raise WakeError("removal_in_progress")
+    unit_destination_check(unit_path)
     config = read_regular(directory / "config.json") if os.path.lexists(directory / "config.json") else None
     if os.path.lexists(directory / "config.json") and config != config_bytes:
         raise WakeError("config_exists")
@@ -430,9 +511,8 @@ def write_config(directory, config, config_bytes):
 def publish_unit(unit_path, unit_bytes):
     """Exclusive publication: write a temporary file, then link it to the final name."""
     unit_dir = unit_path.parent
-    if os.path.lexists(unit_dir) and (os.path.islink(unit_dir) or not unit_dir.is_dir()):
-        raise WakeError("unit_dir_invalid")
-    os.makedirs(unit_dir, mode=0o700, exist_ok=True)
+    make_unit_dir(unit_dir)
+    unit_destination_check(unit_path)
     fd, tmp = tempfile.mkstemp(prefix=".queue-wake.", dir=unit_dir)
     try:
         os.fchmod(fd, 0o600)
@@ -532,11 +612,30 @@ def hold(directory, names):
         raise
 
 
-def remove_exit(plan):
-    directory = instance_dir(plan["project"]["path"], plan["instance"])
+def removal_identity(args, host):
+    """Who is being removed. Trust (cache release, verified pin) is unchanged; nothing is
+    rendered (review 1371 R3). Exit keeps the current registry check, because an exit
+    instance holds no durable record of its session (review 1373); queue is checked
+    against its own installed records instead."""
+    uc = _uc()
+    try:
+        identity = uc.Project(args.project).project_id()
+    except uc.Stop as exc:
+        raise WakeError("project_invalid") from exc
+    pin = Pin(identity["path"], host)
+    if args.kind == "exit":
+        check_binding(host.registry(pin.dir / "ai_comm.py", identity["channel_path"]),
+                      args.handle, args.session, args.generation)
+    instance = common.instance_name(common.project_key(identity), args.handle)
+    return {"kind": args.kind, "project": identity, "instance": instance, "handle": args.handle,
+            "session": args.session, "generation": args.generation}, pin
+
+
+def remove_exit(ident):
+    directory = instance_dir(ident["project"]["path"], ident["instance"])
     if not os.path.lexists(directory):
-        return {"status": "removed", "kind": "exit", "instance": plan["instance"], "removed": []}
-    common.private_dir(str(directory))
+        return {"status": "removed", "kind": "exit", "instance": ident["instance"], "removed": []}
+    owned_private_dir(directory, "instance_dir_unsafe")
     check_entries(directory, LOCK_NAMES | set(EXIT_DATA))
     fds = hold(directory, ("phase.lock", "lock", "instance.lock"))
     try:
@@ -549,46 +648,139 @@ def remove_exit(plan):
     finally:
         for fd in reversed(fds):
             os.close(fd)
-    return {"status": "removed", "kind": "exit", "instance": plan["instance"], "removed": removed}
+    return {"status": "removed", "kind": "exit", "instance": ident["instance"], "removed": removed}
 
 
-def unit_inactive(host, plan):
-    code, out = host.systemctl("--user", "show", f"queue-wake@{plan['instance']}.service",
-                               "--property=LoadState", "--property=ActiveState", "--property=UnitFileState",
-                               "--property=FragmentPath")
-    values = dict(line.partition("=")[::2] for line in out.splitlines() if "=" in line)
-    if code != 0 and values.get("LoadState") != "not-found":
+SERVICE_PROPERTIES = ("LoadState", "ActiveState", "UnitFileState", "FragmentPath")
+
+
+def unit_inactive(host, instance, unit_path):
+    """Affirmative proof that the unit is stopped and disabled; anything else refuses (R2)."""
+    code, out = host.systemctl("--user", "show", f"queue-wake@{instance}.service",
+                               *(f"--property={p}" for p in SERVICE_PROPERTIES))
+    values = {}
+    for line in out.splitlines():
+        key, separator, value = line.partition("=")
+        if not separator or key not in SERVICE_PROPERTIES or key in values:
+            raise WakeError("service_state_invalid")
+        values[key] = value
+    if set(values) != set(SERVICE_PROPERTIES) or values["LoadState"] not in ("loaded", "not-found"):
+        raise WakeError("service_state_invalid")
+    if code != 0 and values["LoadState"] != "not-found":
         raise WakeError("service_manager_unavailable", "transient")
-    if values.get("LoadState") not in (None, "not-found") and values.get("FragmentPath") != plan["unit_path"]:
-        raise WakeError("wrong_service_fragment")
-    if values.get("ActiveState") not in ("inactive", "failed", None) \
-            or values.get("UnitFileState") not in ("disabled", "", None):
+    if values["ActiveState"] not in ("inactive", "failed"):
         raise WakeError("instance_active")
+    if values["LoadState"] == "loaded":
+        if values["FragmentPath"] != str(unit_path):
+            raise WakeError("wrong_service_fragment")
+        if values["UnitFileState"] != "disabled":
+            raise WakeError("instance_active")
+    elif values["FragmentPath"] != "" or values["UnitFileState"] not in ("", "disabled"):
+        raise WakeError("service_state_invalid")
 
 
-def remove_queue(plan, private, host):
-    directory = Path(plan["config_path"]).parent
-    unit_path = Path(plan["unit_path"])
-    if not os.path.lexists(directory):
-        return {"status": "removed", "kind": "queue", "instance": plan["instance"], "removed": []}
-    if not any(os.path.lexists(directory / n) for n in (*QUEUE_DATA, INTENT)) and not os.path.lexists(unit_path):
-        return {"status": "removed", "kind": "queue", "instance": plan["instance"], "removed": []}
+def validate_intent(intent, ident, unit_path):
+    """The removal intent's exact schema, validated whether or not its files remain (R4)."""
+    keys = {"v", "instance", "project", "handle", "session", "generation", "config_sha256", "unit",
+            "state_sha256", "pending"}
+    if (not isinstance(intent, dict) or set(intent) != keys or type(intent["v"]) is not int or intent["v"] != 1
+            or type(intent["generation"]) is not int
+            or any(intent[k] != ident[k] for k in ("instance", "project", "handle", "session", "generation"))
+            or intent["pending"] is not None
+            or not all(isinstance(intent[k], str) and HEX.fullmatch(intent[k])
+                       for k in ("config_sha256", "state_sha256"))
+            or not isinstance(intent["unit"], dict) or set(intent["unit"]) != {"path", "sha256"}
+            or intent["unit"]["path"] != str(unit_path)
+            or not isinstance(intent["unit"]["sha256"], str) or not HEX.fullmatch(intent["unit"]["sha256"])):
+        raise WakeError("removal_intent_invalid")
+    return intent
+
+
+def recorded_config(directory, ident, unit_path, args, queue):
+    """The installed config, valid and bound to exactly the requested instance (R3).
+
+    It may name any frozen bundle and any package: a guided rebind keeps the original unit."""
+    raw = read_regular(directory / "config.json")
+    try:
+        config = queue.validate_config(common.read_small_json(str(directory / "config.json")))
+    except (queue.Invalid, queue.common.WakeError) as exc:
+        raise WakeError("config_invalid") from exc
+    runtime = {"socket": args.socket, "binary": args.binary, "sha256": args.binary_sha256,
+               "approved_thread": args.thread}
+    if (any(config[k] != ident[k] for k in ("project", "instance", "handle", "session", "generation"))
+            or config["runtime"] != runtime or config["service"] is None
+            or config["service"]["path"] != str(unit_path)):
+        raise WakeError("config_binding_mismatch")
+    return config, raw
+
+
+def queue_removal_record(directory, ident, unit_path, args, queue):
+    """(intent or None, config or None, config bytes, unit digest) from what is installed."""
+    intent = None
+    if os.path.lexists(directory / INTENT):
+        intent = validate_intent(common.read_small_json(str(directory / INTENT)), ident, unit_path)
+    config, raw = (recorded_config(directory, ident, unit_path, args, queue)
+                   if os.path.lexists(directory / "config.json") else (None, None))
+    if intent is None and config is None:
+        raise WakeError("config_missing")
+    if intent is not None and raw is not None and sha256(raw) != intent["config_sha256"]:
+        raise WakeError("removal_intent_invalid")
+    unit_sha = intent["unit"]["sha256"] if intent is not None else config["service"]["sha256"]
+    if intent is not None and config is not None and config["service"]["sha256"] != unit_sha:
+        raise WakeError("removal_intent_invalid")
+    return intent, config, raw, unit_sha
+
+
+def remove_queue(ident, pin, host, args):
+    directory = instance_dir(ident["project"]["path"], ident["instance"])
+    unit_path = host.unit_dir() / f"queue-wake@{ident['instance']}.service"
+    if not os.path.lexists(directory) or (
+            not any(os.path.lexists(directory / n) for n in (*QUEUE_DATA, INTENT))
+            and not os.path.lexists(unit_path)):
+        return {"status": "removed", "kind": "queue", "instance": ident["instance"], "removed": []}
     # Read-only refusal before any lock file can be created (decision 1335 note).
     if not os.path.lexists(directory / INTENT) and not os.path.lexists(directory / "state.json") \
             and os.path.lexists(directory / "config.json"):
         raise WakeError("state_missing")
+    owned_private_dir(directory, "instance_dir_unsafe")
     allowed = LOCK_NAMES | set(QUEUE_DATA) | {INTENT}
     check_entries(directory, allowed)
-    unit_inactive(host, plan)
-    queue = load_queue_module(Path(private["pin"].dir) / "adapters", private["files"], "pin")
+    queue = load_queue_module(pin.dir / "adapters", pin.adapter_files("queue"), "pin")
+    queue_removal_record(directory, ident, unit_path, args, queue)
+    unit_inactive(host, ident["instance"], unit_path)
     fds = hold(directory, ("guided.lock", "observer.lock", "instance.lock"))
     try:
+        # Everything is re-validated under the locks, before the intent is written (R5).
         check_entries(directory, allowed)
-        intent = intent_for(plan, directory, unit_path, queue)
-        removed = []
+        intent, config, raw, unit_sha = queue_removal_record(directory, ident, unit_path, args, queue)
+        unit_inactive(host, ident["instance"], unit_path)
+        unit_destination_check(unit_path)
         unit = read_regular(unit_path) if os.path.lexists(unit_path) else None
+        if unit is not None and sha256(unit) != unit_sha:
+            raise WakeError("unit_changed")
+        state_raw = read_regular(directory / "state.json") if os.path.lexists(directory / "state.json") else None
+        if intent is None:
+            if state_raw is None:
+                raise WakeError("state_missing")
+            try:
+                state = queue.Store(directory, config).load()
+            except (queue.Invalid, queue.common.WakeError) as exc:
+                raise WakeError("state_invalid") from exc
+            if state["pending"] is not None:
+                raise WakeError("pending_attempt")
+            intent = dict(ident, v=1, config_sha256=sha256(raw), unit={"path": str(unit_path), "sha256": unit_sha},
+                          state_sha256=sha256(state_raw), pending=None)
+            del intent["kind"]
+            try:
+                common.write_private_json(str(directory), INTENT, intent)
+            except WakeError as exc:
+                if exc.code != "state_commit_uncertain" or read_regular(directory / INTENT) != canonical(intent):
+                    raise
+        elif state_raw is not None and sha256(state_raw) != intent["state_sha256"]:
+            raise WakeError("removal_state_changed")
+        removed = []
         if unit is not None:
-            if sha256(unit) != intent["unit"]["sha256"]:
+            if read_regular(unit_path) != unit:  # checked again immediately before unlinking
                 raise WakeError("unit_changed")
             os.unlink(unit_path)
             removed.append(str(unit_path))
@@ -599,60 +791,14 @@ def remove_queue(plan, private, host):
     finally:
         for fd in reversed(fds):
             os.close(fd)
-    return {"status": "removed", "kind": "queue", "instance": plan["instance"], "removed": removed}
-
-
-def intent_for(plan, directory, unit_path, queue):
-    """Validate or create the durable removal intent (design v3 §4b, v4)."""
-    identity = {k: plan[k] for k in ("instance", "project", "handle", "session", "generation")}
-    present = {n: read_regular(directory / n) for n in ("config.json", "state.json")
-               if os.path.lexists(directory / n)}
-    existing = read_regular(directory / INTENT) if os.path.lexists(directory / INTENT) else None
-    if existing is not None:
-        intent = common.read_small_json(str(directory / INTENT))
-        if (set(intent) != {"v", *identity, "config_sha256", "unit", "state_sha256", "pending"}
-                or intent["v"] != 1 or any(intent[k] != v for k, v in identity.items())
-                or intent["pending"] is not None or intent["unit"] != {"path": str(unit_path),
-                                                                     "sha256": plan["unit_sha256"]}):
-            raise WakeError("removal_intent_invalid")
-        if "config.json" in present and sha256(present["config.json"]) != intent["config_sha256"]:
-            raise WakeError("removal_intent_invalid")
-        if "state.json" in present and sha256(present["state.json"]) != intent["state_sha256"]:
-            raise WakeError("removal_state_changed")
-        return intent
-    if "config.json" not in present:
-        raise WakeError("config_missing")
-    if present["config.json"] != canonical(plan["config"]):
-        raise WakeError("config_changed")
-    if "state.json" not in present:
-        raise WakeError("state_missing")
-    try:
-        state = queue.Store(directory, plan["config"]).load()
-    except (queue.Invalid, queue.common.WakeError) as exc:
-        raise WakeError("state_invalid") from exc
-    if state["pending"] is not None:
-        raise WakeError("pending_attempt")
-    intent = dict(identity, v=1, config_sha256=sha256(present["config.json"]),
-                  unit={"path": str(unit_path), "sha256": plan["unit_sha256"]},
-                  state_sha256=sha256(present["state.json"]), pending=None)
-    try:
-        common.write_private_json(str(directory), INTENT, intent)
-    except WakeError as exc:
-        if exc.code != "state_commit_uncertain" or read_regular(directory / INTENT) != canonical(intent):
-            raise
-    return intent
+    return {"status": "removed", "kind": "queue", "instance": ident["instance"], "removed": removed}
 
 
 def remove(args, host):
-    plan, private = compute_for_remove(args, host)
+    ident, pin = removal_identity(args, host)
     if args.kind == "exit":
-        return remove_exit(plan)
-    return remove_queue(plan, private, host)
-
-
-def compute_for_remove(args, host):
-    """The same identity as plan; an existing instance is not a kind conflict for its own kind."""
-    return compute(args, host)
+        return remove_exit(ident)
+    return remove_queue(ident, pin, host, args)
 
 
 # --------------------------------------------------------------------------- arguments
