@@ -61,6 +61,21 @@
       "sha256": "21de110d818a667f72a8d2f31e7c54839b4310eefcdee0b5d2948ed38a3946ea"
     },
     {
+      "path": "adapters/queue-wake@.service",
+      "bytes": 437,
+      "sha256": "c2402acba427b784a08b75ecae2839a0ebf44a92af863eab164ff02dcfaa4c89"
+    },
+    {
+      "path": "adapters/queue_wake.lock",
+      "bytes": 13182,
+      "sha256": "214b3b5a4b408a69feb721bc323b808924da878d7f611a028d8effd8b2d7ed2d"
+    },
+    {
+      "path": "adapters/queue_wake.py",
+      "bytes": 52585,
+      "sha256": "f044b50243c7027ee65208b1c7213d33e64d7c3343badcc410b212724a8e7812"
+    },
+    {
       "path": "ai_comm.py",
       "bytes": 160318,
       "sha256": "345ddfc47cc61304c996320bbec095a533c82c1fa871b466be5d2bb89836138e"
@@ -84,6 +99,11 @@
       "path": "docs/PERFORMANCE.md",
       "bytes": 3083,
       "sha256": "cfcdc55e137ed8b10833e767a338d516eff571c21ecb16cfcacb491f709c001d"
+    },
+    {
+      "path": "docs/QUEUE-WAKE.md",
+      "bytes": 15240,
+      "sha256": "64592820b75ef231357b0b0bc721ffd866cdc19146849b6b40a1cb0994313d14"
     },
     {
       "path": "docs/RELEASES.md",
@@ -234,6 +254,11 @@
       "path": "tests/test_protocol.py",
       "bytes": 91938,
       "sha256": "92de0c9c9b6e509d92143e65ea0e1f549f9bfe46e2b520db19509164397d676a"
+    },
+    {
+      "path": "tests/test_queue_wake.py",
+      "bytes": 63763,
+      "sha256": "d31b948ef48143437512a0e2410118aaa1009577fcdd2233c934486e6f0b3f0f"
     },
     {
       "path": "tests/test_release_check.py",

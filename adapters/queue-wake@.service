@@ -1,0 +1,19 @@
+[Unit]
+Description=ai-comm queue notification @INSTANCE@
+StartLimitIntervalSec=1800
+StartLimitBurst=8
+
+[Service]
+Type=simple
+WorkingDirectory=@ROOT@
+ExecStart=:@PYTHON@ -I -B @ADAPTER@ run --config @CONFIG@ --handle @HANDLE@ --session @SESSION@ --generation @GENERATION@
+Restart=on-failure
+RestartSec=5s
+RestartSteps=6
+RestartMaxDelaySec=5min
+RestartPreventExitStatus=78
+UMask=0077
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target
