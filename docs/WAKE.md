@@ -83,7 +83,10 @@ Group write on it is accepted only for your own private group, when the account 
 positively show that nobody else is in it: 0775 is the normal default with user-private
 groups. That judgement rests on what `pwd` and `grp` can enumerate on this machine. If a
 directory service does not enumerate its accounts here, another account could exist unseen,
-so keep the directory 0755. `wake` never changes its mode.
+so keep the directory 0755. Group write also needs a definite answer that the directory
+carries no ACL attribute, because with an extended ACL the group bits are the ACL mask:
+any ACL, or a filesystem or platform where that cannot be inspected, refuses, and the 0755
+route stays open. `wake` never changes the mode or an ACL.
 - **For exit,** that is all it does.
 - **For queue,** it checks every destination first. Then, under `instance.lock`, it writes
   `config.json` (the ownership record), then the unit file

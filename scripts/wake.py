@@ -24,6 +24,7 @@ exit 75 (transient) or 78 (permanent). Standard library only.
 from __future__ import annotations
 
 import argparse
+import errno
 import grp
 import hashlib
 import importlib.util
@@ -503,9 +504,21 @@ def exclusive_primary_group(gid):
     return not any(a.pw_gid == gid and a.pw_uid != me.pw_uid for a in accounts)
 
 
+def no_extended_acl(path):
+    """True only on a definite empty answer: inspection succeeded and shows no ACL attribute.
+    Any failure, including a filesystem or platform without attribute support, is unknown,
+    and unknown refuses. With an extended ACL the group mode bits are the ACL mask, so they
+    say nothing about a named entry's writers (decision 1454)."""
+    try:
+        names = os.listxattr(path, follow_symlinks=False)
+    except (AttributeError, OSError):
+        return False
+    return not any("acl" in name.lower() for name in names)
+
+
 def unit_destination_check(unit_path):
     """The unit directory's existing ancestors pass the ancestor rule; the directory itself,
-    if it exists, is owned by this user and writable by no other account (decision 1443);
+    if it exists, is owned by this user and writable by no other account (decisions 1443, 1454);
     an existing unit is a regular file owned by this user and not writable by another
     account (review 1371 R1)."""
     unit_dir = Path(unit_path).parent
@@ -513,10 +526,12 @@ def unit_destination_check(unit_path):
     if os.path.lexists(unit_dir):
         info = os.lstat(unit_dir)
         # Sticky gives no exemption (review 1397). Group write is accepted only for a group
-        # positively shown to hold no other account: 0775 is the user-private-group default.
+        # positively shown to hold no other account, on a directory with no extended ACL:
+        # 0775 is the user-private-group default.
         mode = stat.S_IMODE(info.st_mode)
         if (info.st_uid != os.getuid() or mode & 0o002
-                or (mode & 0o020 and not exclusive_primary_group(info.st_gid))):
+                or (mode & 0o020 and not (exclusive_primary_group(info.st_gid)
+                                          and no_extended_acl(unit_dir)))):
             raise WakeError("unit_dir_unsafe")
     if os.path.lexists(unit_path):
         info = os.lstat(unit_path)

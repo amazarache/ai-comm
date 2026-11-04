@@ -24,7 +24,7 @@
   - `integration` prints one exact declaration item for the guided upgrade controller.
 
   Bundles must be private to the user, and a unit directory must be writable by no other account; group write is
-  accepted only for a group positively shown to hold no other account.
+  accepted only for a group positively shown to hold no other account, on a directory shown to carry no ACL attribute.
 - Guided upgrade phases (probe, pause, rebind, check, resume) for both adapters, run from a frozen bundle outside the
   pin. No upgrade-controller change.
 - **Validation status:** isolated fixtures and fakes, plus a single-machine rehearsal with scripted handles of the real

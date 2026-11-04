@@ -1,6 +1,7 @@
 """Tests for scripts/wake.py (installer design v4). Isolated: a temporary project, a fake
 trusted verifier, a fake channel state and a fake service manager. Nothing live is read,
 installed, reloaded, enabled or started."""
+import errno
 import hashlib
 import io
 import json
@@ -604,6 +605,80 @@ class CorrectionTests(Base):
             self.assertEqual(self.run_wake(argv)[0], 0)
             self.assertEqual(stat.S_IMODE(os.lstat(self.unit_dir).st_mode), 0o770)  # never chmodded
             self.assertEqual(stat.S_IMODE(os.lstat(plan["unit_path"]).st_mode), 0o600)
+
+    def test_no_extended_acl_needs_a_definite_answer(self):
+        """Decision 1454: these mock cases run on every suite, whatever the host supports."""
+        for names in ([], ["user.note"], ["security.selinux"]):
+            with mock.patch.object(wake.os, "listxattr", return_value=names):
+                self.assertTrue(wake.no_extended_acl("/any"), names)
+        for name in ("system.posix_acl_access", "system.posix_acl_default", "system.nfs4_acl"):
+            with mock.patch.object(wake.os, "listxattr", return_value=["user.note", name]):
+                self.assertFalse(wake.no_extended_acl("/any"), name)
+        for code in (errno.EIO, errno.EACCES, errno.ENOTSUP, errno.ENOENT):
+            with mock.patch.object(wake.os, "listxattr", side_effect=OSError(code, "fault")):
+                self.assertFalse(wake.no_extended_acl("/any"), code)
+        with mock.patch.object(wake.os, "listxattr", side_effect=AttributeError("listxattr")):
+            self.assertFalse(wake.no_extended_acl("/any"), "no inspection API")
+
+    def test_unit_dir_group_write_refused_when_acl_status_is_not_clean(self):
+        plan = self.plan(kind="queue")
+        argv = self.args("install", kind="queue", extra=["--plan-sha256", plan["plan_sha256"], "--confirm"])
+        self.unit_dir.mkdir(parents=True, mode=0o775)
+        os.chmod(self.unit_dir, 0o775)
+        for parent in (self.unit_dir.parent, self.unit_dir.parent.parent):
+            os.chmod(parent, 0o755)
+        patches = self.accounts()
+        cases = [{"return_value": ["system.posix_acl_access"]}, {"side_effect": OSError(errno.EIO, "fault")},
+                 {"side_effect": OSError(errno.ENOTSUP, "unsupported")}, {"side_effect": AttributeError("listxattr")}]
+        with patches[0], patches[1], patches[2]:
+            for case in cases:
+                before = self.snapshot_all()
+                with mock.patch.object(wake.os, "listxattr", **case):
+                    self.assertEqual(self.run_wake(argv), (78, {"status": "stopped", "code": "unit_dir_unsafe"}), case)
+                self.assertEqual(self.snapshot_all(), before, case)
+                self.assertEqual(stat.S_IMODE(os.lstat(self.unit_dir).st_mode), 0o775)
+            os.chmod(self.unit_dir, 0o755)  # without group write the status is not consulted
+            with mock.patch.object(wake.os, "listxattr", side_effect=OSError(errno.EIO, "fault")):
+                self.assertEqual(wake.unit_destination_check(Path(plan["unit_path"])), None)
+
+    def set_real_acl(self, path, spec):
+        """A real ACL on a disposable directory; a host that cannot set one skips, stated."""
+        if shutil.which("setfacl") is None:
+            self.skipTest("setfacl is not installed: the real ACL case did not run here")
+        done = subprocess.run(["setfacl", "-m", spec, str(path)], capture_output=True, text=True, check=False)
+        if done.returncode != 0:
+            self.skipTest(f"this filesystem refused an ACL: the real ACL case did not run here: {done.stderr.strip()}")
+
+    def test_real_named_acl_on_group_writable_unit_dir_is_refused(self):
+        plan = self.plan(kind="queue")
+        argv = self.args("install", kind="queue", extra=["--plan-sha256", plan["plan_sha256"], "--confirm"])
+        self.unit_dir.mkdir(parents=True, mode=0o775)
+        for parent in (self.unit_dir.parent, self.unit_dir.parent.parent):
+            os.chmod(parent, 0o755)
+        patches = self.accounts()
+        for spec in ("u:65534:rwx", "g:65534:rwx"):
+            os.chmod(self.unit_dir, 0o775)
+            self.set_real_acl(self.unit_dir, spec)
+            acl = os.getxattr(self.unit_dir, "system.posix_acl_access")
+            before = self.snapshot_all()
+            with patches[0], patches[1], patches[2]:
+                self.assertTrue(wake.exclusive_primary_group(os.getgid()), "the group really is exclusive here")
+                self.assertEqual(self.run_wake(argv), (78, {"status": "stopped", "code": "unit_dir_unsafe"}), spec)
+            self.assertEqual(self.snapshot_all(), before, spec)
+            self.assertEqual(os.getxattr(self.unit_dir, "system.posix_acl_access"), acl, spec)
+            self.assertEqual(stat.S_IMODE(os.lstat(self.unit_dir).st_mode), 0o775, spec)
+            subprocess.run(["setfacl", "-b", str(self.unit_dir)], check=True)
+
+    def test_real_named_acl_without_write_in_the_mask_stays_accepted(self):
+        plan = self.plan(kind="queue")
+        self.unit_dir.mkdir(parents=True, mode=0o755)
+        for directory in (self.unit_dir, self.unit_dir.parent, self.unit_dir.parent.parent):
+            os.chmod(directory, 0o755)
+        # The mask is explicit: a plain setfacl -m would recalculate it to rwx, which is 0775.
+        self.set_real_acl(self.unit_dir, "u:65534:rwx,m::r-x")
+        self.assertEqual(stat.S_IMODE(os.lstat(self.unit_dir).st_mode), 0o755)
+        self.assertFalse(wake.no_extended_acl(self.unit_dir))
+        self.assertEqual(wake.unit_destination_check(Path(plan["unit_path"])), None)
 
     def test_user_owned_traversable_unit_dir_is_accepted(self):
         self.unit_dir.mkdir(parents=True, mode=0o755)
