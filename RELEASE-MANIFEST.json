@@ -27,8 +27,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 21145,
-      "sha256": "324b7a8e9cf7ecd8ade2c17c46091330b41f4bda88420a45acc2e9bfebe0e8c6"
+      "bytes": 21294,
+      "sha256": "510063e0096ab504a3e563d316e490b3edcb422a668c24e19e35b4dcf4f2e965"
     },
     {
       "path": "LICENSE",
@@ -112,8 +112,8 @@
     },
     {
       "path": "docs/WAKE.md",
-      "bytes": 14133,
-      "sha256": "0083442a34543d508f06d0e3d6d5c79bca3d3e3cec60e2976477118ef6387d88"
+      "bytes": 15836,
+      "sha256": "5e2fe4f0267ec640b076bc43054f10aa7be0f850d3025e8dbebf3e4fc7c65382"
     },
     {
       "path": "entry/ai-comm/SKILL.md",

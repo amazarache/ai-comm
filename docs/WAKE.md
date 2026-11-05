@@ -69,6 +69,13 @@ and starts nothing. It prints:
 For queue, `plan` also refuses a service manager older than systemd 254
 (`service_manager_unsupported`).
 
+`wake` has no `--help`: it refuses unknown arguments with `arguments_invalid`, so use the forms above.
+
+A host sandbox can show `/` or `/home` as owned by another user, and `plan` and `install` then stop with `project_invalid`. That
+code alone does not show the project is safe. If inspection confirms that a host sandbox maps otherwise trusted ancestors this
+way, request the host's ordinary approval for that command with the intended `XDG_CONFIG_HOME`. Never relax the check or change
+ownership to get past it.
+
 **`install`** recomputes the plan and requires the same digest, so it writes exactly what
 the owner read. It freezes the adapter files from the verified pin into
 `.ai-comm-local/upgrade/adapters/<sha256>/` (0700, files 0400). An existing bundle is
@@ -97,6 +104,10 @@ reads the runtime. Those are the owner's printed steps:
 1. queue `init`, which is the first live runtime read;
 2. `systemctl --user daemon-reload`;
 3. `systemctl --user enable --now queue-wake@<instance>.service`.
+
+After joining, the bound session must read its own inbox and evaluate every returned page (acknowledging only after reading)
+before the owner runs queue `init`; this creates its receipt, even if the inbox is empty. Without it `init` stops with
+`receipt_missing`, before any queue state or runtime call; lock files may remain.
 
 For exit, the session launches the printed argv with its host's background mechanism.
 
@@ -237,11 +248,20 @@ transaction completes.
   - queue-wake's plan and install, and `systemd-analyze` on its real rendered unit.
 
   The "sessions" in those rehearsals were scripted handles, not models, and no queue instance ran.
+- **What was shown live, in a developer preview of this release's adapter code:** real, independently bound model sessions
+  on one machine, with the owner approving each target, and a preview-only tag and release index:
+  - all three pair types: exit-wake with queue-wake, exit-wake twice, and queue-wake twice;
+  - in each pair and each direction, a PING, PONG and ACK in which each idle session woke with no relay and replied itself;
+  - two real queue units on a real service manager: activation, `enable --now`, removal;
+  - on one of those units only: a killed main process restarted, 5 s then 10 s later, far below the start limit, and a bad
+    config stopped with exit 78, `failed`, and no restart, then recovered after an exact restore. That instance then woke
+    its session again.
 - **What has not been shown:**
-  - **No genuine session pair has been run** (mixed, two of one host, two of the other). Live acceptance with real,
-    independently bound sessions and owner approval for each target is still outstanding.
-  - **The service manager's real restart and backoff behaviour, and activation, are unproven.** The unit file is only
-    syntax-checked with `systemd-analyze`.
+  - **The published release path.** The preview used a lab cache, not a public tag or index.
+  - **Exit 75 from a live run.** The restart evidence is a signal failure.
+  - **Guided pause and resume on a live queue unit, and a guided upgrade of one.** These rest on fixtures. A live exit-wake
+    pause was rehearsed with scripted handles.
+  - **Other machines, hosts and service-manager versions.** This was one machine, systemd 255.
   - **queue-wake's runtime contract has a known race:** the resume flag can load an unloaded session after the
     readiness check. A deployment that needs a strict "never loads" guarantee cannot use it.
 - **Default:** installing the package activates nothing.
