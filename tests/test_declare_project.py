@@ -41,10 +41,10 @@ class DeclareTests(unittest.TestCase):
         self.cache.write_bindings({"v": 1, "bindings": {"1.5.1": self.binding}})
         self.sentinel = self.base / "integration-ran"
 
-    def channel(self):
-        channel = self.project / ".ai-comm"
+    def channel(self, name=".ai-comm"):
+        channel = self.project / name
         tip.git(self.project, "init", "-q", str(channel))
-        tip.git(channel, "commit", "-q", "--allow-empty", "-m", "root")
+        tip.git(channel, "commit", "-q", "--allow-empty", "-m", "root " + name)
         return tip.git(channel, "rev-list", "--max-parents=0", "HEAD").strip()
 
     def declaration(self, channel, **change):
@@ -175,6 +175,43 @@ class DeclareTests(unittest.TestCase):
         channel = self.channel()
         path, digest = self.declaration(channel)
         self.assertEqual(self.install(path, digest, "absent")["status"], "declared")
+
+    def test_selected_channel_installs_exact_bytes_and_rejects_other_root(self):
+        other = self.channel()
+        selected = self.channel(".ai-comm-v3")
+        path, digest = self.declaration(selected)
+        result = dp.install(self.project, candidate=path, sha256=digest, previous="absent",
+                            cache=self.cache, channel=".ai-comm-v3")
+        self.assertEqual(result["status"], "declared")
+        self.assertEqual(self.live(), path.read_bytes())
+        before = self.live()
+        wrong, wrong_digest = self.declaration(other)
+        err = self.stop(dp.install, self.project, candidate=wrong, sha256=wrong_digest,
+                        previous=digest, cache=self.cache, channel=str(self.project / ".ai-comm-v3"))
+        self.assertEqual(err.code, "project_identity_mismatch")
+        self.assertEqual(self.live(), before)
+        self.assertFalse(self.sentinel.exists())
+
+    def test_alternate_only_cli_and_path_refusals_preserve_declaration(self):
+        import subprocess
+        selected = self.channel(".ai-comm-v3")
+        path, digest = self.declaration(selected)
+        command = [sys.executable, "-I", str(ROOT / "scripts" / "declare_project.py"),
+                   "--cache", str(self.cache.root), "install", "--project", str(self.project),
+                   "--file", str(path), "--sha256", digest, "--previous", "absent",
+                   "--channel", ".ai-comm-v3"]
+        done = subprocess.run(command, capture_output=True, timeout=120, check=False)
+        self.assertEqual((done.returncode, json.loads(done.stdout)["status"]), (0, "declared"))
+        before = self.live()
+        alias = self.project / "alias"
+        alias.symlink_to(self.project / ".ai-comm-v3", target_is_directory=True)
+        for selection in (str(alias), str(alias / ".." / ".ai-comm-v3"), str(self.base),
+                          str(self.project / ".tools" / "ai-comm"), str(path)):
+            with self.subTest(channel=selection):
+                err = self.stop(dp.install, self.project, candidate=path, sha256=digest,
+                                previous=digest, cache=self.cache, channel=selection)
+                self.assertIn(err.code, {"unsafe_ancestry", "channel_path_invalid"})
+                self.assertEqual(self.live(), before)
 
     def test_cli(self):
         import subprocess

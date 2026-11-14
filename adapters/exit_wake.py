@@ -66,6 +66,7 @@ from datetime import datetime, timezone  # noqa: E402
 
 import common  # noqa: E402
 
+CHANNEL_SELECTION = 1  # Read as data by the installer before printing non-default argv.
 KEY = re.compile(r"[0-9a-f]{16}\Z")
 COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 NONCE = re.compile(r"[0-9a-f]{32}\Z")
@@ -116,9 +117,9 @@ class CliError(common.WakeError):
 class Layout:
     """Fixed paths derived from the project root, as the upgrade controller lays them out."""
 
-    def __init__(self, project, key, handle):
+    def __init__(self, project, key, handle, channel=None):
         self.project = project
-        self.channel = os.path.join(project, ".ai-comm")
+        self.channel = common.channel_path(project, channel)
         self.pin = os.path.join(project, ".tools", "ai-comm")
         self.cli = os.path.join(self.pin, "ai_comm.py")
         self.wake_root = os.path.join(project, ".ai-comm-local", "wake")
@@ -514,7 +515,7 @@ def cli_base(layout, subcommand, args, identity=True):
 
 def watch(args, runner=run_cli, out=sys.stdout, clock=time.monotonic, sleep=time.sleep, wall=time.time,
           git_run=subprocess.run):
-    layout = Layout(args.project, args.project_key, args.handle)
+    layout = Layout(args.project, args.project_key, args.handle, args.channel)
     identity = project_identity(layout, git_run)
     if common.project_key(identity) != args.project_key:
         raise common.WakeError("project_key_mismatch")
@@ -646,7 +647,7 @@ class Instance:
     def __init__(self, args, git_run=subprocess.run, runner=None):
         self.args = args
         self.runner = runner or run_cli
-        self.layout = Layout(args.project, args.project_key, args.handle)
+        self.layout = Layout(args.project, args.project_key, args.handle, args.channel)
         self.identity = project_identity(self.layout, git_run)
         if common.project_key(self.identity) != args.project_key:
             raise common.WakeError("project_key_mismatch")
@@ -813,6 +814,7 @@ class _Parser(argparse.ArgumentParser):
 def parse_args(argv):
     p = _Parser(add_help=False)
     p.add_argument("--project", required=True)
+    p.add_argument("--channel")
     p.add_argument("--project-key", required=True)
     p.add_argument("--handle", required=True)
     p.add_argument("--session", required=True)

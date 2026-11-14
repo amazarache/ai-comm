@@ -24,6 +24,7 @@ exit 75 (transient) or 78 (permanent). Standard library only.
 from __future__ import annotations
 
 import argparse
+import ast
 import errno
 import grp
 import hashlib
@@ -279,16 +280,54 @@ def advisory_kind_check(kind, directory):
         raise WakeError("instance_kind_conflict")
 
 
+def selected_project(args):
+    """Resolve the selection once for identity and every generated command."""
+    uc = _uc()
+    try:
+        channel = common.channel_path(args.project, args.channel)
+        project = uc.Project(args.project, channel)
+    except (uc.Stop, WakeError) as exc:
+        raise WakeError("project_invalid") from exc
+    args.channel = str(project.channel)
+    return project
+
+
+def channel_argv(args):
+    return ([] if args.channel == os.path.join(args.project, ".ai-comm")
+            else ["--channel", args.channel])
+
+
+def check_channel_support(args, files):
+    """An old verified/frozen exit adapter must not receive an unsupported flag.
+
+    Inspect the manifest-checked bytes as data; never import or run the adapter.
+    Default-channel bundles and the existing queue config contract are unchanged.
+    """
+    if args.kind != "exit" or not channel_argv(args):
+        return
+    try:
+        declarations = [node.value.value for node in ast.parse(files["exit_wake.py"]).body
+                        if isinstance(node, ast.Assign) and len(node.targets) == 1
+                        and isinstance(node.targets[0], ast.Name)
+                        and node.targets[0].id == "CHANNEL_SELECTION"
+                        and isinstance(node.value, ast.Constant)]
+    except (SyntaxError, ValueError, RecursionError) as exc:
+        raise WakeError("channel_selection_unsupported") from exc
+    if len(declarations) != 1 or type(declarations[0]) is not int or declarations[0] != 1:
+        raise WakeError("channel_selection_unsupported")
+
+
 def compute(args, host):
     """Everything plan prints and install writes. Writes nothing."""
     uc = _load("ai_comm_upgrade_controller", RELEASE / "upgrade_controller.py")
     try:
-        project = uc.Project(args.project)
+        project = selected_project(args)
         identity = project.project_id()
     except uc.Stop as exc:
         raise WakeError("project_invalid") from exc
     pin = Pin(identity["path"], host)
     files = pin.adapter_files(args.kind)
+    check_channel_support(args, files)
     check_binding(host.registry(pin.dir / "ai_comm.py", identity["channel_path"]),
                   args.handle, args.session, args.generation)
     key = common.project_key(identity)
@@ -308,6 +347,7 @@ def compute(args, host):
         launch = [sys.executable, "-I", str(bundle_dir / "exit_wake.py"), "--project", identity["path"],
                   "--project-key", key, "--handle", args.handle, f"--session={args.session}",
                   "--generation", str(args.generation)]
+        launch += channel_argv(args)
         if args.peer:
             launch += ["--peer", args.peer]
         plan["launch"] = launch
@@ -350,6 +390,7 @@ def steps(args, plan):
 def identity_argv(args):
     argv = ["--project", args.project, "--handle", args.handle, "--kind", args.kind,
             f"--session={args.session}", "--generation", str(args.generation)]
+    argv += channel_argv(args)
     if args.kind == "exit" and args.peer:
         argv += ["--peer", args.peer]
     if args.kind == "queue":
@@ -690,7 +731,7 @@ def removal_identity(args, host):
     against its own installed records instead."""
     uc = _uc()
     try:
-        identity = uc.Project(args.project).project_id()
+        identity = selected_project(args).project_id()
     except uc.Stop as exc:
         raise WakeError("project_invalid") from exc
     pin = Pin(identity["path"], host)
@@ -926,7 +967,7 @@ def integration(args, host):
     """One exact declaration item for the owner to review; writes nothing (proposal 056)."""
     uc = _uc()
     try:
-        identity = uc.Project(args.project).project_id()
+        identity = selected_project(args).project_id()
     except uc.Stop as exc:
         raise WakeError("project_invalid") from exc
     pin = Pin(identity["path"], host)
@@ -935,12 +976,14 @@ def integration(args, host):
     key = common.project_key(identity)
     instance = common.instance_name(key, args.handle)
     bundle_dir, files = selected_bundle(identity["path"], args.kind, args.bundle_sha256)
+    check_channel_support(args, files)
     code_files = [str(bundle_dir.relative_to(identity["path"]) / name) for name in sorted(KINDS[args.kind])]
     pairs = [list(pair) for pair in args.pair]
     if args.kind == "exit":
         base = [sys.executable, "-I", str(bundle_dir / "exit_wake.py")]
         tail = ["--project", identity["path"], "--project-key", key, "--handle", args.handle,
                 f"--session={args.session}", "--generation", str(args.generation)]
+        tail += channel_argv(args)
         argv = {phase: base + [phase] + tail for phase in ("probe", *PHASE_STEPS)}
     else:
         directory = instance_dir(identity["path"], instance)
@@ -983,6 +1026,7 @@ def parse_args(argv):
     p = _Parser(prog="install.sh --user wake", add_help=False)
     p.add_argument("command", choices=("plan", "install", "remove", "integration"))
     p.add_argument("--project", required=True)
+    p.add_argument("--channel")
     p.add_argument("--handle", required=True)
     p.add_argument("--kind", required=True, choices=tuple(KINDS))
     p.add_argument("--session", required=True)

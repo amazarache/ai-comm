@@ -14,10 +14,12 @@ this contract need a renewed independent review. Standard library only.
 """
 import errno
 import fcntl
+import grp
 import hashlib
 import json
 import math
 import os
+import pwd
 import re
 import stat
 import tempfile
@@ -93,6 +95,48 @@ def validate_generation(value):
     if type(value) is not int or not 1 <= value <= 99999999:
         raise WakeError("generation_invalid")
     return value
+
+
+def channel_path(project, selection=None):
+    """Validate an in-project channel without following links or writing anything.
+
+    Relative selections are relative to the project, not the process cwd. Walk
+    the original components before normalization so a link followed by ``..``
+    cannot disappear. The ancestor ownership rule matches upgrade_controller;
+    this copy must remain self-contained in the frozen adapter bundle.
+    """
+    project = os.fspath(project)
+    if not os.path.isabs(project) or os.path.normpath(project) != project:
+        raise WakeError("channel_path_invalid")
+    if selection is None:
+        selection = ".ai-comm"
+    selection = os.fspath(selection)
+    if not selection or "\x00" in selection:
+        raise WakeError("channel_path_invalid")
+    raw = os.path.join(project, selection)
+    current = os.sep
+    try:
+        for part in [""] + raw.split(os.sep):
+            current = os.path.join(current, part)
+            info = os.lstat(current)
+            mode = info.st_mode
+            if (not stat.S_ISDIR(mode) or stat.S_ISLNK(mode)
+                    or info.st_uid not in (0, os.getuid())):
+                raise WakeError("channel_path_invalid")
+            if not mode & stat.S_ISVTX:
+                if mode & stat.S_IWOTH:
+                    raise WakeError("channel_path_invalid")
+                if mode & stat.S_IWGRP:
+                    user = pwd.getpwuid(os.getuid()).pw_name
+                    if info.st_gid != os.getgid() or set(grp.getgrgid(info.st_gid).gr_mem) - {user}:
+                        raise WakeError("channel_path_invalid")
+    except (OSError, ValueError, KeyError) as exc:
+        raise WakeError("channel_path_invalid") from exc
+    path = os.path.abspath(raw)
+    if (path == project or os.path.commonpath((project, path)) != project
+            or path == os.path.join(project, ".tools", "ai-comm")):
+        raise WakeError("channel_path_invalid")
+    return path
 
 
 def project_key(identity):

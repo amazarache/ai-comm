@@ -47,10 +47,32 @@ is `verified`. Only two pieces of pin code run, and only after that verification
 - the queue renderer, loaded from bytes compared with the trusted manifest.
 
 ```text
-install.sh --user wake plan    --project DIR --handle H --kind exit|queue --session=S --generation G [kind options]
+install.sh --user wake plan    --project DIR [--channel PATH] --handle H --kind exit|queue --session=S --generation G [kind options]
 install.sh --user wake install …same… --plan-sha256 D --confirm
 install.sh --user wake remove  …same… --confirm
 ```
+
+`--channel PATH` applies to all four commands, including `integration`. It defaults
+to `<project>/.ai-comm`; pass it when the live channel is elsewhere, for example
+`--channel .ai-comm-v3`. Relative paths are relative to `--project`, independently
+of the working directory. Generated commands and configs use absolute paths and
+omit the flag for the canonical default. A channel must be an existing directory
+strictly inside the project and distinct from `.tools/ai-comm`; symlinks, unsafe
+ancestors and external channels are refused. This does not change the generic
+upgrade controller's channel-path rules.
+
+For non-default exit-wake setup, the project's verified pin and the selected
+frozen bundle must contain an exit adapter with channel-selection support (added
+in 1.10.0). An older adapter is refused with `channel_selection_unsupported` before
+printing unusable launch or phase commands. Existing frozen bundles are never
+edited. A new release produces a new bundle, not necessarily a new instance;
+replacement remains the owner-controlled remove-then-install flow. A changed
+queue config still refuses `config_exists` until the old installation is removed.
+
+Two copies of a channel with the same root commit, in the same project and for
+the same handle, share an exit-wake instance and its stopped state. They cannot
+be independent exit installations. Live phase checks still require the full run
+identity; queue installation and removal still check the full stored identity.
 
 **Kind options:**
 - exit: optionally `--peer P`, which enables the peer-overdue alarm;
@@ -215,8 +237,11 @@ No message text, path from a peer, or raw tool output is printed.
 
 ```text
 python3 -I BUNDLE/exit_wake.py --project DIR --project-key K --handle H --session=S --generation G
-        [--peer P] [--rounds N] [--wait-timeout S]
+        [--channel PATH] [--peer P] [--rounds N] [--wait-timeout S]
 ```
+
+The same `--channel` selection is required on each guided phase (`probe`, `pause`,
+`rebind`, `check`, `resume`); `wake integration` prints it for a non-default channel.
 
 - **Before its first wait,** it recomputes the project key from the channel's root commit,
   checks the handle's binding, refuses a queue instance or a pending removal, keeps

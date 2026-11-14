@@ -441,6 +441,7 @@ class SourceTests(Fixture):
         self.addCleanup(mock.patch.stopall)
         mock.patch.object(wake, "check_package").start()
         mock.patch.object(wake, "git_read", return_value="a" * 40).start()
+        self.real_cli = wake.cli
         self.cli = mock.patch.object(wake, "cli", side_effect=self.answer).start()
 
     def write_receipt(self, **updates):
@@ -470,6 +471,22 @@ class SourceTests(Fixture):
         self.assertEqual(set(result["messages"][0]), {"seq", "from", "to", "act"})
         self.assertNotIn("Private", json.dumps(result))
         self.assertEqual([call.args[1] for call in self.cli.call_args_list], ["state", "registry", "log", "log"])
+
+    def test_source_uses_alternate_channel_for_root_cli_and_receipt(self):
+        original = Path(self.config["project"]["channel_path"])
+        alternate = self.root / ".ai-comm-v3"
+        original.rename(alternate)
+        self.config["project"]["channel_path"] = str(alternate)
+        with mock.patch.object(wake, "git_read", return_value="a" * 40) as git_read:
+            self.assertEqual(wake.Source(self.config).inspect(0)["read"], 0)
+        self.assertEqual(git_read.call_args.args[0], alternate)
+        for call in self.cli.call_args_list:
+            self.assertEqual(call.args[0]["project"]["channel_path"], str(alternate))
+        # Also exercise the real CLI argv builder, with only subprocess mocked.
+        with mock.patch.object(wake, "run", return_value=(0, b'{}', b'')) as run:
+            self.assertEqual(self.real_cli(self.config, "state"), {})
+        argv = run.call_args.args[0]
+        self.assertEqual(argv[argv.index("--channel") + 1], str(alternate))
 
     def test_malformed_page_fields_are_rejected_without_tracebacks(self):
         for field, bad in (("id", []), ("from", {}), ("act", []), ("to", [{}])):

@@ -1,5 +1,21 @@
 # Changes
 
+## 1.10.0
+
+- Add optional `--channel PATH` to wake plan, install, remove and integration, to
+  exit-wake runs and guided phases, and to declaration installation. Omitted means
+  `<project>/.ai-comm`; relative paths are relative to the project. Channels must
+  be real directories strictly inside the project, distinct from the pin, with
+  safe ancestry and no symlinks.
+- Carry the selected channel through generated commands, plan/config identity,
+  registry and receipt reads. This supports projects whose live channel moved
+  after a protocol migration while the frozen predecessor remains at `.ai-comm`.
+- Keep default command shapes, instance keys, frozen bundles, binding checks and
+  removal locks. Non-default exit commands require a bundle that declares channel
+  selection support; older bundles are refused without executing their code.
+- Document that same-root channel copies share exit instance state. Protocol
+  bytes, the generic upgrade controller and queue runtime remain unchanged.
+
 ## 1.9.0
 
 - Add two optional wake adapters, inactive until the owner sets one up:

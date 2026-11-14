@@ -989,6 +989,31 @@ class IntegrationTests(Base):
                                                       "--sha256", self.transition_sha])
         self.assertEqual(len(self.validate(item)), 4)
 
+    def test_queue_integration_uses_an_alternate_only_channel(self):
+        live = self.project / ".ai-comm-v3"
+        (self.project / ".ai-comm").rename(live)
+        original_args = self.args
+
+        def selected_args(*args, **kwargs):
+            return original_args(*args, **kwargs) + ["--channel", live.name]
+
+        with mock.patch.object(self, "args", selected_args):
+            plan = self.queue_setup()
+            before = self.everything()
+            code, result = self.integrate(kind="queue", extra=self.queue_extra(plan))
+        self.assertEqual(code, 0, result)
+        self.assertEqual(self.everything(), before)
+        self.assertEqual(plan["config"]["project"]["channel_path"], str(live))
+        item = result["item"]
+        for argv in [item["probe"]["argv"], *item["steps"].values()]:
+            self.assertEqual(argv[argv.index("--config") + 1], plan["config_path"])
+        uc = self.controller()
+        identity = uc.Project(str(self.project), str(live)).project_id()
+        declaration = {"v": 1, "schema": uc.PROJECT_SCHEMA, "status": "declared",
+                       "project_id": {"path": identity["path"], "channel": identity["channel"]},
+                       "integrations": [item]}
+        uc.validate_project_manifest(wake.canonical(declaration), declaration["project_id"])
+
     def test_queue_probe_argv_parses_and_binds_the_transition(self):
         plan = self.queue_setup()
         item = self.integrate(kind="queue", extra=self.queue_extra(plan))[1]["item"]

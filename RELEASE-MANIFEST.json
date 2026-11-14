@@ -27,8 +27,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 21294,
-      "sha256": "510063e0096ab504a3e563d316e490b3edcb422a668c24e19e35b4dcf4f2e965"
+      "bytes": 22296,
+      "sha256": "bfcb76270c4b9a9d21e856bc3f344f727dda838fc0863a6b13210cde44123402"
     },
     {
       "path": "LICENSE",
@@ -42,8 +42,8 @@
     },
     {
       "path": "README.md",
-      "bytes": 24135,
-      "sha256": "08b90d274493a60db0e8d0dcdb183a066e1e9f2cf2b14cbdbee6bb477d737c16"
+      "bytes": 24299,
+      "sha256": "dab11390014595935ccaac6c3b63b5d9ca31f4fe1826064925eecae0dd3edf34"
     },
     {
       "path": "SECURITY.md",
@@ -52,13 +52,13 @@
     },
     {
       "path": "adapters/common.py",
-      "bytes": 13565,
-      "sha256": "4d327abe3022faa811639b5401259b10f5509fabcb42483d2db6ede66a3c5c66"
+      "bytes": 15541,
+      "sha256": "52b1fee7a1c7cccdef6b124fa80f4cbf69f04e2ed5f79fe57ba9233860a6c2a2"
     },
     {
       "path": "adapters/exit_wake.py",
-      "bytes": 38622,
-      "sha256": "21de110d818a667f72a8d2f31e7c54839b4310eefcdee0b5d2948ed38a3946ea"
+      "bytes": 38789,
+      "sha256": "cacf2fd93521401959a75b2ebad4ce1124d5bc71553c46851704d4780936f223"
     },
     {
       "path": "adapters/queue-wake@.service",
@@ -77,8 +77,8 @@
     },
     {
       "path": "ai_comm.py",
-      "bytes": 160318,
-      "sha256": "766d314e6c7dd27f4e4e263163fb14736f5df1d3213c0f11f65a323257ba9006"
+      "bytes": 160319,
+      "sha256": "2a3b5e232f97b0f656c70c21364d1a66df74e77f1cbc1a0d323f7b16afcc7027"
     },
     {
       "path": "docs/ERRORS.md",
@@ -92,8 +92,8 @@
     },
     {
       "path": "docs/INSTALL.md",
-      "bytes": 13751,
-      "sha256": "d55a34f4cf1ecc6f4c44915c200e0ff2abdda069eb58acf858a07e21515ba47a"
+      "bytes": 14235,
+      "sha256": "33db93f5520a185a2d00157fdeae2961e2e9182888e839657e1dd5515b5e0ed4"
     },
     {
       "path": "docs/PERFORMANCE.md",
@@ -112,8 +112,8 @@
     },
     {
       "path": "docs/WAKE.md",
-      "bytes": 15836,
-      "sha256": "5e2fe4f0267ec640b076bc43054f10aa7be0f850d3025e8dbebf3e4fc7c65382"
+      "bytes": 17526,
+      "sha256": "fc25604648bf8ad48314acc021305f153c4469dd76ca48ffcfd730064ef8afda"
     },
     {
       "path": "entry/ai-comm/SKILL.md",
@@ -157,8 +157,8 @@
     },
     {
       "path": "scripts/declare_project.py",
-      "bytes": 6345,
-      "sha256": "fbc7f9bab84039a3cdee92816a4ba219aaa7631c06ad84a944105ed119cacbcc"
+      "bytes": 6795,
+      "sha256": "84fe327f28ebeb1a282431fdba6aa672ece7a2aea17fe1421237f0d7105adb3a"
     },
     {
       "path": "scripts/extract_release_notes.py",
@@ -207,8 +207,8 @@
     },
     {
       "path": "scripts/wake.py",
-      "bytes": 50284,
-      "sha256": "ea90c0e46570df97674a98f42b17c539755a351e476225fb2f80f3974f929d93"
+      "bytes": 52073,
+      "sha256": "66e147871b74e18de385d9aee449db3afd18751fece0dc762033f53fc2dfbe7f"
     },
     {
       "path": "skills/ai-comm/SKILL.md",
@@ -227,8 +227,8 @@
     },
     {
       "path": "tests/test_declare_project.py",
-      "bytes": 9336,
-      "sha256": "890805744697accfd4d9c4a87fb95fd737b5f16e2ac15ef2dca135abd2c43ded"
+      "bytes": 11649,
+      "sha256": "9a1c7eaa812f04d42866525a2d894d7bf474c6ac59aa90d6d53f0db08269ce81"
     },
     {
       "path": "tests/test_exit_wake.py",
@@ -267,8 +267,8 @@
     },
     {
       "path": "tests/test_queue_wake.py",
-      "bytes": 63763,
-      "sha256": "d31b948ef48143437512a0e2410118aaa1009577fcdd2233c934486e6f0b3f0f"
+      "bytes": 64783,
+      "sha256": "43f006f6359c28cf8680831af958f5d6c8b4ce5591cccd0c4e9c77b8250db997"
     },
     {
       "path": "tests/test_release_check.py",
@@ -311,9 +311,14 @@
       "sha256": "442ecf123f6568690bd5bd466c965d00a821921e915291f50c0115fdd779807e"
     },
     {
+      "path": "tests/test_wake_channel.py",
+      "bytes": 13890,
+      "sha256": "24bd08462c260ea6343a16c678110959b9404b5b14baa34d2a9dbe41e7299494"
+    },
+    {
       "path": "tests/test_wake_install.py",
-      "bytes": 59815,
-      "sha256": "2aff25b00a3512cd84e6d955a2d12d3fa96f2764baf21365ee87889819a86bba"
+      "bytes": 61139,
+      "sha256": "b0adae31cc42a7924749497aa6bd0a2ce934940390b60107b8c94f08d32aa496"
     },
     {
       "path": "upgrade_controller.py",

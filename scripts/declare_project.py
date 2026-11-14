@@ -38,6 +38,7 @@ def _load(name, path):
 
 
 vp = _load("ai_comm_verify_pin", RELEASE / "scripts" / "verify_pin.py")
+common = _load("ai_comm_release_wake_common", RELEASE / "adapters" / "common.py")
 iu, ri, uc, Stop, need = vp.iu, vp.ri, vp.uc, vp.Stop, vp.need
 FINISHED = {"completed", "rolled_back"}
 
@@ -100,14 +101,19 @@ def init(project_dir, *, cache):
     return {"status": "initialized", "declaration": str(path), "sha256": uc.sha256_bytes(data)}
 
 
-def install(project_dir, *, candidate, sha256, previous, cache):
+def install(project_dir, *, candidate, sha256, previous, cache, channel=None):
     need(uc.HEX.fullmatch(sha256 or ""), "invalid_sha256")
     need(previous == "absent" or uc.HEX.fullmatch(previous or ""), "invalid_previous")
     project = _project(project_dir)
     _require_verified(project, cache)
     data = _read_candidate(candidate)
     need(uc.sha256_bytes(data) == sha256, "candidate_digest_mismatch")
-    upgrade = uc.Project(project)
+    uc.check_ancestry(project / (".ai-comm" if channel is None else channel))
+    try:
+        selected = common.channel_path(project, channel)
+    except common.WakeError as exc:
+        raise Stop("channel_path_invalid") from exc
+    upgrade = uc.Project(project, selected)
     live = upgrade.project_id()  # the real project, computed by this release's own code
     uc.validate_project_manifest(data, {"path": live["path"], "channel": live["channel"]})
     with upgrade.lock():
@@ -127,6 +133,7 @@ def main(argv=None):
     p.add_argument("--project", required=True)
     p = sub.add_parser("install")
     p.add_argument("--project", required=True)
+    p.add_argument("--channel", help="channel path, absolute or relative to the project")
     p.add_argument("--file", required=True)
     p.add_argument("--sha256", required=True)
     p.add_argument("--previous", required=True, help="sha256 of the live declaration, or `absent`")
@@ -143,7 +150,7 @@ def main(argv=None):
             result = init(args.project, cache=cache)
         else:
             result = install(args.project, candidate=args.file, sha256=args.sha256, previous=args.previous,
-                             cache=cache)
+                             cache=cache, channel=args.channel)
         print(json.dumps(result, sort_keys=True))
         return 0
     except Stop as exc:

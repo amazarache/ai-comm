@@ -206,10 +206,17 @@ it, so this works even for pins that predate the command:
 
 ```sh
 python3 -I "$REL/scripts/declare_project.py" init --project DIR
-python3 -I "$REL/scripts/declare_project.py" install --project DIR --file F --sha256 H --previous P
+python3 -I "$REL/scripts/declare_project.py" install --project DIR [--channel PATH] --file F --sha256 H --previous P
 ```
 
 `init` writes the unintegrated starting file and never overwrites one. `install` replaces the declaration with the
 exact reviewed bytes of `F`: their digest must be `H`, they must validate against the real project, no guided upgrade
 may be in progress, and the live file must still have digest `P` (or be absent, `--previous absent`). Nothing the
 declaration names is run.
+
+`install --channel PATH` selects the channel whose Git root must match the reviewed
+declaration. The default is `<project>/.ai-comm`; a relative path is relative to
+`DIR`, not the working directory. The selected channel must be a real directory
+strictly inside the project and distinct from its pin. Symlinks and unsafe ancestry
+are refused. The candidate bytes are never rewritten to fit a different channel.
+`init` remains unbound and does not accept `--channel`.

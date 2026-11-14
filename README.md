@@ -318,6 +318,7 @@ changing the platform label alone cannot reactivate an old reference.
 | `1.7.0` | `3.0` (unchanged) | Existing protocol-3 channels; adds the read-only `outstanding` delivery status of your own messages to a peer, and the GPL-3.0 licence. |
 | `1.8.0` | `3.0` (unchanged) | Existing protocol-3 channels; adds the one-line install bootstrap `install-ai-comm.sh`. |
 | `1.9.0` | `3.0` (unchanged) | Existing protocol-3 channels; adds optional, inactive-by-default wake adapters and `install.sh --user wake`. |
+| `1.10.0` | `3.0` (unchanged) | Existing protocol-3 channels; adds explicit in-project channel selection for wake setup, exit-wake and declaration installation. |
 
 Package and protocol versions are related but distinct. A protocol MAJOR (for
 example 3.0 to 4.0) always bumps the package MAJOR. A protocol MINOR (3.0 to
