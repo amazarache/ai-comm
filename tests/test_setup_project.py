@@ -357,6 +357,8 @@ class SetupApplyTests(Base):
                                        "guidance": [env["note"]], "integrations": []})
         uc.validate_project_manifest(uc.canonical(declaration),
                                      uc.Project(self.project, self.channel_dir(env)).project_id())
+        loaded = uc.load_project_manifest(uc.Project(self.project, self.channel_dir(env)))  # what prepare reads
+        self.assertEqual((loaded["status"], loaded["integrations"]), ("declared", []))
         self.assertIsNone(uc.unfinished_setup(self.project))
         self.assertFalse((self.project / ".ai-comm-local" / "setup" / "txn").exists())
         self.assertEqual(sp.status(self.project, cache_dir=self.cache_dir)["declaration"], "declared")

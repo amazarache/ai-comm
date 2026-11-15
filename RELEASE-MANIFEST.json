@@ -287,8 +287,13 @@
     },
     {
       "path": "tests/test_setup_project.py",
-      "bytes": 28868,
-      "sha256": "56645a61894b1d467390baaea62ac7831254d7cd3348026487a3dab9b36a3406"
+      "bytes": 29068,
+      "sha256": "441379490899d0eea8cbe81914e0fb536dc1447e6d986c1286cfce4dfc8fe18e"
+    },
+    {
+      "path": "tests/test_setup_real_boundary.py",
+      "bytes": 8287,
+      "sha256": "a645fae2ef7ea59469617f4a8fcb462aa0e5661cef95b8e199a26fe6d0467076"
     },
     {
       "path": "tests/test_skill.py",
