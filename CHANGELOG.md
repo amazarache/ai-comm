@@ -1,5 +1,36 @@
 # Changes
 
+## 1.11.0 (in development)
+
+- Test the declaration installer's channel query: Git execution failures and
+  timeouts are refused with `channel_path_invalid` and leave the declaration
+  unchanged; the queries of declaration installation and of the wake installer
+  run with the controller's clean Git environment.
+- docs/WAKE.md states how the installer classifies Git execution failures and
+  timeouts of the channel query, and that removal through either same-root copy
+  can also delete `run.json`.
+- The repository is public: README, ACTIVATE.md, docs/RELEASES.md and
+  docs/INSTALL.md no longer call it private; the manual install command no
+  longer passes `--use-git-credential-helper`.
+- README and ACTIVATE.md give the observed skill invocation forms (a slash
+  command and a `$` mention) without naming hosts.
+
+### Corrections to the 1.10.0 notes
+
+The 1.10.0 section below is kept as released. It omitted:
+
+- Declaration installation also changed its refusal code: a missing default
+  channel, which 1.9.0 refused with `project_missing`, is now
+  `channel_path_invalid` (exit 2).
+- Wake commands have a new refusal code, `channel_selection_unsupported`, for an
+  exit adapter without channel-selection support (documented in docs/WAKE.md).
+- A project spelled with two leading slashes (`//path`) now has the identity
+  `/path` in declaration installation. 1.9.0 bound `//path`, so a candidate
+  written with that spelling is refused with `project_identity_mismatch`;
+  write the candidate with `/path`.
+- "Preserve default plan/removal on non-UTF-8 filesystem paths" holds for the
+  exit kind only.
+
 ## 1.10.0
 
 - Add optional `--channel PATH` to wake plan, install, remove and integration, to
