@@ -27,8 +27,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 24675,
-      "sha256": "1d83e6e78452db3a1ca0d7d6d7b283c9862746f7f5029f7261fd04dd9dc32475"
+      "bytes": 25222,
+      "sha256": "334334e373ba1accc715e1f9b57eca122140720ba3b6b1e6c3c58da9035a5ea4"
     },
     {
       "path": "LICENSE",
@@ -92,8 +92,8 @@
     },
     {
       "path": "docs/INSTALL.md",
-      "bytes": 14512,
-      "sha256": "a0db3edbdf65eea3afbd89068da0ffdd959d11bea3b8a449e059d2812ccd7811"
+      "bytes": 15260,
+      "sha256": "fd7d6ef73d15f415445c62ccd11247807999bd121b3f147ebf858d116dac0736"
     },
     {
       "path": "docs/PERFORMANCE.md",
@@ -172,8 +172,8 @@
     },
     {
       "path": "scripts/install_user.py",
-      "bytes": 71950,
-      "sha256": "0f4447e665d7b246060589ff0a8b7caa8ff52bd371a0692ee7dbbbc59221de55"
+      "bytes": 73039,
+      "sha256": "83a69e98987aea9b0a1a570be2ce10ce60d15df938465a21377f507ac0b0dad7"
     },
     {
       "path": "scripts/leak_scan.py",
@@ -247,8 +247,8 @@
     },
     {
       "path": "tests/test_install_user.py",
-      "bytes": 36497,
-      "sha256": "15121e3b2e5494bc4aed03253779486c93a040f9960112e0d96172450e5594e5"
+      "bytes": 41832,
+      "sha256": "4fe316df1a6e5e1fd10a871a800026b3c2771af87da5d8c8052e825933b58bc7"
     },
     {
       "path": "tests/test_neutrality.py",

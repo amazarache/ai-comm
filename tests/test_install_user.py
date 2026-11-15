@@ -391,6 +391,103 @@ class UserCacheTests(unittest.TestCase):
         out = iu.check(fetch_permitted=True, root=self.root, source=src)
         self.assertEqual((out["offer"], out["unverified_newer"]), (False, ["1.5.1"]))
 
+    # -- strict index validation (design rev 7 section 4; T1, T10)
+
+    def snapshot(self):
+        """Every file and link under the cache, with its bytes or target."""
+        out = {}
+        for path in sorted(self.root.rglob("*")):
+            rel = path.relative_to(self.root).as_posix()
+            if path.is_symlink():
+                out[rel] = ("link", os.readlink(path))
+            elif path.is_file():
+                out[rel] = ("file", path.read_bytes())
+        return out
+
+    def test_refresh_stores_strict_validation_evidence_and_changes_only_metadata(self):
+        src, origin = self.own_source()
+        self.install("1.5.0", source=src)
+        before = self.snapshot()
+        iu.check(fetch_permitted=True, root=self.root, source=src, now=lambda: 4321)
+        after = self.snapshot()
+        changed = {k for k in set(before) | set(after) if before.get(k) != after.get(k)}
+        self.assertLessEqual(changed, {"index.json", "bindings.json", "refresh.json"})
+        self.assertEqual((self.link("current"), self.link("previous")), ("releases/1.5.0", None))
+        self.assertEqual(sorted(p.name for p in (self.root / "releases").iterdir()), ["1.5.0"])
+        tip.git(origin, "switch", "-q", "release-index")
+        raw = (origin / "RELEASES.json").read_bytes()
+        tip.git(origin, "switch", "-q", "main")
+        index = json.loads((self.root / "index.json").read_text())
+        self.assertEqual((index["validation"], index["index_sha256"], index["versions"], index["refreshed_at"]),
+                         ("strict", iu.uc.sha256_bytes(raw), ["1.5.0", "1.5.1"], 4321))
+
+    def test_a_malformed_duplicate_or_unsupported_index_stops_and_selects_nothing(self):
+        def drop_summary(releases):
+            del next(r for r in releases if r["package_version"] == "1.5.1")["summary"]
+
+        def bad_version(releases):
+            releases.append(dict(releases[-1], package_version="1.6", tag="v1.6"))
+
+        def duplicate(releases):
+            releases.append(dict(next(r for r in releases if r["package_version"] == "1.5.1")))
+
+        def not_a_record(releases):
+            releases.append("1.9.9")
+        cases = (("malformed highest record", drop_summary, "release_index_entry_invalid"),
+                 ("non-numeric version", bad_version, "release_index_entry_invalid"),
+                 ("record that is not an object", not_a_record, "release_index_entry_invalid"),
+                 ("duplicate version", duplicate, "release_index_duplicate_version"))
+        for label, change, code in cases:
+            with self.subTest(label):
+                self.tearDown_cache()
+                src, origin = self.own_source()
+                self.install("1.5.0", source=src)
+                before = {n: (self.root / n).read_bytes() for n in ("bindings.json", "index.json")}
+                self.edit_index(origin, change)
+                err = self.stop(iu.check, fetch_permitted=True, root=self.root, source=src)
+                self.assertEqual(err.code, code)
+                self.assertEqual({n: (self.root / n).read_bytes() for n in before}, before)
+                out = iu.check(root=self.root)
+                self.assertEqual((out["offer"], out["metadata"], out["verdict"]), (False, "failed", "unknown"))
+
+    def test_an_index_with_unknown_top_level_keys_is_unsupported(self):
+        src, origin = self.own_source()
+        self.install("1.5.0", source=src)
+        tip.git(origin, "switch", "-q", "release-index")
+        index = json.loads((origin / "RELEASES.json").read_text())
+        index["channel"] = "beta"
+        (origin / "RELEASES.json").write_text(json.dumps(index, sort_keys=True) + "\n")
+        tip.git(origin, "commit", "-q", "-am", "extra key")
+        tip.git(origin, "switch", "-q", "main")
+        self.assertEqual(self.stop(iu.check, fetch_permitted=True, root=self.root, source=src).code,
+                         "release_index_invalid")
+
+    def test_install_refuses_a_malformed_index_through_the_staged_release_status(self):
+        src, origin = self.own_source()
+
+        def drop_summary(releases):
+            del next(r for r in releases if r["package_version"] == "1.5.1")["summary"]
+        self.edit_index(origin, drop_summary)
+        err = self.stop(self.install, "1.5.0", source=src)
+        self.assertEqual((err.code, err.details.get("check")), ("verify_failed", "release_status"))
+        self.assertFalse((self.root / "releases" / "1.5.0").exists())
+
+    def test_install_does_not_store_an_index_that_fails_strict_validation(self):
+        """Defensive: a target whose own release-status is less strict still installs,
+        but the cache stores no index it cannot validate."""
+        refused = iu.Stop("release_index_entry_invalid")
+        with mock.patch.object(iu, "index_records", side_effect=refused) as records:
+            self.assertEqual(self.install("1.5.0")["status"], "installed")
+        self.assertTrue(records.called)
+        self.assertFalse((self.root / "index.json").exists())
+        self.assertEqual(iu.check(root=self.root)["metadata"], "missing")
+
+    def tearDown_cache(self):
+        """Start a subtest from an empty cache and a fresh fixture origin."""
+        shutil.rmtree(self.data, ignore_errors=True)
+        own = Path(self.temp.name).resolve() / "own"
+        shutil.rmtree(own, ignore_errors=True)
+
     def test_failed_refresh_changes_nothing_and_offers_nothing_new(self):
         src, origin = self.own_source()
         self.install("1.5.0", source=src)

@@ -135,8 +135,8 @@ class Cache:
     def index(self):
         return self._read("index.json", None)
 
-    def write_index(self, releases, refreshed_at):
-        self._write("index.json", {"v": 1, "refreshed_at": refreshed_at, "releases": releases})
+    def write_index(self, releases, refreshed_at, evidence=None):
+        self._write("index.json", {"v": 1, "refreshed_at": refreshed_at, "releases": releases, **(evidence or {})})
 
     def refresh(self):
         return self._read("refresh.json", None)
@@ -230,18 +230,32 @@ def binding_agrees(binding, record):
 
 
 def index_records(repo):
+    """The fetched index, validated as a whole before anything is selected from it.
+
+    Every entry must pass the core's own entry validation and every version must be
+    unique; one malformed or duplicate entry stops the read, so an older release can
+    never be called the newest because a newer entry was dropped. Returns the stored
+    projection of each record and the evidence kept with the refresh."""
     raw = ri.git(repo, "show", "refs/remotes/origin/release-index:RELEASES.json").encode()
     index = uc.parse_json(raw, "release_index_invalid")
-    need(isinstance(index, dict) and index.get("format") == "ai-comm-releases/1"
-         and isinstance(index.get("releases"), list), "release_index_invalid")
-    out = []
+    need(isinstance(index, dict) and set(index) == {"format", "releases"}
+         and index.get("format") == "ai-comm-releases/1" and isinstance(index.get("releases"), list),
+         "release_index_invalid")
+    ac = ri.release_check_module().ac
+    out, seen = [], set()
     for record in index["releases"]:
-        if (isinstance(record, dict) and isinstance(record.get("package_version"), str)
-                and uc.VERSION_RE.fullmatch(record["package_version"])
-                and all(isinstance(record.get(k), str) for k in ("commit", "tag", "manifest_sha256", "protocol_sha256"))):
-            out.append({k: record[k] for k in ("package_version", "commit", "tag", "manifest_sha256",
-                                               "protocol_sha256", "advisory") if k in record})
-    return out
+        try:
+            ac.validate_index_entry(record)
+        except (ac.ProtocolError, UnicodeError, TypeError, AttributeError) as exc:
+            raise Stop("release_index_entry_invalid") from exc
+        version = record["package_version"]
+        need(version not in seen, "release_index_duplicate_version", version=version)
+        seen.add(version)
+        out.append({k: record[k] for k in ("package_version", "commit", "tag", "manifest_sha256",
+                                           "protocol_sha256", "advisory") if k in record})
+    evidence = {"validation": "strict", "index_sha256": uc.sha256_bytes(raw),
+                "versions": sorted(seen, key=version_key)}
+    return out, evidence
 
 
 def version_key(version):
@@ -375,8 +389,15 @@ def _record_release(cache, version, tag, binding, path, origin):
     bindings["bindings"][version] = binding
     cache.write_bindings(bindings)
     if cache.index() is None:
-        # The installer fetched this index from the origin just now.
-        cache.write_index(index_records(path), int(time.time()))
+        # The installer fetched this index from the origin just now. An index that fails
+        # strict validation is not stored: metadata stays `missing`, and the next
+        # consented check stops with the named code instead of selecting around it.
+        try:
+            records, evidence = index_records(path)
+        except Stop:
+            pass
+        else:
+            cache.write_index(records, int(time.time()), evidence)
     cache.write_state(state)  # state last (section 10.3)
 
 
@@ -463,7 +484,7 @@ def _refresh(cache, src, use_helper, fetch, at):
                 fetch(repo, src["origin"], use_helper)
             else:
                 ri.isolated_fetch(repo, src["origin"], use_helper, ri.release_check_module().REFSPECS)
-            records = index_records(repo)
+            records, evidence = index_records(repo)
         except Stop as exc:
             cache.write_refresh(at, False, exc.code)  # later offline checks report the failure
             raise
@@ -480,7 +501,7 @@ def _refresh(cache, src, use_helper, fetch, at):
                 rebuilt[version] = old[version]  # tag not fetched now, but the new record still agrees
         # Bindings are rebuilt from this refresh only; offers re-check agreement
         # with the index too, so an interruption between the two writes is safe.
-        cache.write_index(records, at)
+        cache.write_index(records, at, evidence)
         cache.write_bindings({"v": 1, "bindings": rebuilt})
         cache.write_refresh(at, True)
     finally:

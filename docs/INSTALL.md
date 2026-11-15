@@ -148,6 +148,14 @@ metadata is fresh (refreshed within seven days, not dated in the future, last re
 `metadata` says `missing`, `stale` or `failed`, and the verdict is `unknown`. The cache follows the release origin of
 its first install; a different origin stops with `origin_changed`.
 
+A refresh validates the complete fetched index before using any of it: every entry must pass the same entry checks as
+`release-status` (fields, numeric `MAJOR.MINOR.PATCH` version, tag, digests) and every version must be unique. One bad
+entry stops the refresh with `release_index_entry_invalid`, a repeated version with `release_index_duplicate_version`,
+and a missing format or an unknown top-level key with `release_index_invalid`; nothing is selected around it, so an
+older release is never reported as the newest because a newer entry was dropped. The failure is recorded (`metadata`:
+`failed`). A successful refresh stores, with the index, the validation result, the SHA-256 of the fetched
+`RELEASES.json` and the full list of its versions.
+
 While an operation is unfinished (for example after an interruption), every command that changes something stops with
 `operation_pending` until `recover` has run. Recovery finishes an operation only from the exact state it left behind;
 anything it cannot prove is the cache's own is kept and reported, never deleted.

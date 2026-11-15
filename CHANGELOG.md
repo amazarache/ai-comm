@@ -2,6 +2,14 @@
 
 ## 1.11.0 (in development)
 
+- `install.sh --user check --fetch-permitted` validates the complete fetched
+  release index before selecting anything: one malformed entry stops with
+  `release_index_entry_invalid`, a repeated version with
+  `release_index_duplicate_version`, an unknown top-level key with
+  `release_index_invalid`. Earlier releases silently dropped malformed
+  entries and could collapse duplicates. The refresh now stores the
+  validation result, the index's SHA-256 and its full version list. An index
+  that fails validation during `install` is not stored.
 - Test the declaration installer's channel query: Git execution failures and
   timeouts are refused with `channel_path_invalid` and leave the declaration
   unchanged; the queries of declaration installation and of the wake installer
