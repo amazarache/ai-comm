@@ -22,6 +22,7 @@ import json
 import os
 from pathlib import Path
 import stat
+import subprocess
 import sys
 
 sys.dont_write_bytecode = True
@@ -108,11 +109,19 @@ def install(project_dir, *, candidate, sha256, previous, cache, channel=None):
     _require_verified(project, cache)
     data = _read_candidate(candidate)
     need(uc.sha256_bytes(data) == sha256, "candidate_digest_mismatch")
+
+    def query(option):
+        # Preserve filesystem bytes; the controller's generic Git helper decodes text.
+        result = subprocess.run(["git", "-C", selected, "rev-parse", option],
+                                capture_output=True, stdin=subprocess.DEVNULL,
+                                env=uc.clean_env(), timeout=30, check=False)
+        need(result.returncode == 0 and len(result.stdout) <= 16384, "channel_path_invalid")
+        return os.fsdecode(result.stdout)
+
     try:
         selected = common.channel_path(project, channel)
-        common.require_channel_repository(selected, lambda option: uc.git(
-            selected, "rev-parse", option, timeout=30))
-    except (common.WakeError, Stop) as exc:
+        common.require_channel_repository(selected, query)
+    except (common.WakeError, Stop, OSError, subprocess.TimeoutExpired) as exc:
         raise Stop("channel_path_invalid") from exc
     upgrade = uc.Project(project, selected)
     live = upgrade.project_id()  # the real project, computed by this release's own code

@@ -66,6 +66,12 @@ ancestors, missing paths and external channels are refused with
 installation). Raw ancestry is checked before collapsing `..`. This does not
 change the generic upgrade controller's channel-path rules; the channel CLI
 still requires its own initialized bare channel and validates its protocol.
+The pin exclusion is a path rule, not isolation of Git history: a `.git` pointer
+file or linked worktree can refer to repository metadata elsewhere. The exact
+declaration and the CLI's channel checks still apply. A Git execution failure or
+timeout in exit-wake remains transient `git_unavailable` (75); a nonzero Git
+result, oversized output or mismatched repository root is permanent
+`channel_path_invalid` (78).
 
 For non-default exit-wake setup, the project's verified pin and the selected
 frozen bundle must contain an exit adapter with channel-selection support (added
@@ -84,8 +90,9 @@ be independent exit installations. **Remove, pause and resume through either
 path act on that shared instance.** Binding checks use only the selected copy's
 registry, even if that copy has an older session/generation than the other copy.
 A stopped instance does not record a channel path or durable binding; removing
-through either copy can delete its shared cursor, and a subsequent run through
-either copy adopts the shared cursor. Use a channel with a different root commit
+through either copy can delete its shared cursor, `pause`, `pause-ack` and
+`peer-alarm.json`; a subsequent run through either copy adopts the shared cursor.
+Use a channel with a different root commit
 for an independent instance. Live phase checks still require the full run
 identity and refuse a different path; removal also retains its lock protections.
 Queue installation and removal still check the full stored identity. This

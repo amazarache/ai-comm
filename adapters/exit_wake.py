@@ -160,7 +160,7 @@ def project_identity(layout, run=subprocess.run):
                          capture_output=True, stdin=subprocess.DEVNULL,
                          env=git_env(), timeout=GIT_TIMEOUT, check=False)
         except (OSError, subprocess.TimeoutExpired) as exc:
-            raise common.WakeError("channel_path_invalid") from exc
+            raise common.WakeError("git_unavailable", "transient") from exc
         if result.returncode or len(result.stdout) > 16384:
             raise common.WakeError("channel_path_invalid")
         return os.fsdecode(result.stdout)

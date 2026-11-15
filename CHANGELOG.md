@@ -7,7 +7,8 @@
   `<project>/.ai-comm`; relative paths are relative to the project. Channels must
   be repository roots strictly inside the project, outside the pin and its
   descendants, with safe ancestry and no symlinks. Normalize leading slashes
-  consistently for project and channel, including the `//` spelling.
+  for wake commands and declaration installation, including the `//` spelling.
+  Declaration `init` keeps its existing behavior.
 - Carry the selected channel through generated commands, plan/config identity,
   registry and receipt reads. This supports projects whose live channel moved
   after a protocol migration while the frozen predecessor remains at `.ai-comm`.
@@ -15,9 +16,12 @@
   removal locks. Non-default exit commands require a bundle that declares channel
   selection support; older bundles are refused without executing their code.
 - Path refusals now use `channel_path_invalid` consistently across wake and
-  declaration installation. In exit-wake this includes a missing default channel
-  (previously `channel_identity_unavailable`) and ancestry/Git-root inspection
-  failures: permanent exit 78, rather than transient 75 for some I/O failures.
+  declaration installation. For wake installation this replaces `project_invalid`
+  on missing project/channel paths; in exit-wake it replaces
+  `channel_identity_unavailable` on a missing default channel. Unsafe ancestry,
+  invalid Git-root results and path inspection failures are permanent exit 78.
+  Exit-wake Git execution failures and timeouts remain transient
+  `git_unavailable` (75). Preserve default plan/removal on non-UTF-8 filesystem paths.
 - Document that same-root channel copies share exit instance state, including
   removal, pause/resume and cursor reuse through either path. Protocol
   bytes, the generic upgrade controller and queue runtime remain unchanged.

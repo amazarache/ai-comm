@@ -284,10 +284,19 @@ def selected_project(args):
     """Resolve the selection once for identity and every generated command."""
     uc = _uc()
     channel = common.channel_path(args.project, args.channel)
+
+    def query(option):
+        # Repository paths need filesystem decoding, not uc.git's text decoding.
+        result = subprocess.run(["git", "-C", channel, "rev-parse", option],
+                                capture_output=True, stdin=subprocess.DEVNULL,
+                                env=uc.clean_env(), timeout=30, check=False)
+        if result.returncode or len(result.stdout) > 16384:
+            raise WakeError("channel_path_invalid")
+        return os.fsdecode(result.stdout)
+
     try:
-        common.require_channel_repository(channel, lambda option: uc.git(
-            channel, "rev-parse", option, timeout=30))
-    except uc.Stop as exc:
+        common.require_channel_repository(channel, query)
+    except (OSError, subprocess.TimeoutExpired) as exc:
         raise WakeError("channel_path_invalid") from exc
     try:
         project = uc.Project(args.project, channel)

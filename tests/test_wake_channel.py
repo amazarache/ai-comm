@@ -104,6 +104,37 @@ class InstallerChannelTests(installer.Base):
         code, result = self.run_wake(self.args("plan", extra=["--channel", str(bare / "objects")]))
         self.assertEqual((code, result["code"]), (78, "channel_path_invalid"))
 
+    def test_non_utf8_project_keeps_default_plan_and_existing_exit_removal(self):
+        parent = self.base / os.fsdecode(b"n\xffx")
+        parent.mkdir()
+        moved = parent / "project"
+        self.project.rename(moved)
+        self.project = moved
+        self.pin = moved / ".tools" / "ai-comm"
+        # The old exit-state format has no channel-path field. Construct it as
+        # 1.9.0 does, without relying on the new selection validator to install it.
+        identity = installer.wake._uc().Project(self.project).project_id()
+        instance = installer.wake.common.instance_name(installer.wake.common.project_key(identity), "left")
+        directory = moved / ".ai-comm-local" / "wake" / instance
+        directory.mkdir(parents=True, mode=0o700)
+        os.chmod(directory.parent, 0o700)
+        exit_tests.exit_wake.write_cursor(str(directory), 5)
+        for command, extra in (("plan", []), ("remove", ["--confirm"])):
+            with self.subTest(command=command):
+                code, result = self.run_wake(self.args(command, extra=extra))
+                self.assertEqual(code, 0, result)
+        self.assertFalse((directory / "cursor.json").exists())
+
+    def test_repository_query_execution_failures_have_fixed_installer_code(self):
+        before = self.everything()
+        for error in (FileNotFoundError("fixture git unavailable"),
+                      subprocess.TimeoutExpired(["git"], 30)):
+            with self.subTest(error=type(error).__name__), \
+                    mock.patch.object(installer.wake.subprocess, "run", side_effect=error):
+                code, result = self.run_wake(self.args("plan"))
+                self.assertEqual((code, result.get("code")), (78, "channel_path_invalid"))
+        self.assertEqual(self.everything(), before)
+
     def test_alternate_only_install_remove_and_frozen_exit_phases(self):
         live = self.project / ".ai-comm-v3"
         (self.project / ".ai-comm").rename(live)
@@ -208,16 +239,21 @@ class InstallerChannelTests(installer.Base):
             installer.git(repo, "-c", "user.name=t", "-c", "user.email=t@example.invalid",
                           "commit", "-q", "--allow-empty", "-m", "parent")
         (live / "sub").mkdir()
+        outside = self.base / "outside.git"
+        nested_pin = self.pin / "nested.git"
+        for repository in (outside, nested_pin):
+            installer.git(self.project, "clone", "--bare", "-q", str(live), str(repository))
         cases = [str(alias), str(alias / ".." / live.name), str(self.base),
                  str(self.project), str(self.pin), str(file), str(file / ".." / live.name),
                  "/" + str(self.project), "/" + str(self.pin), str(self.pin / "adapters"),
                  str(self.project / ".tools"), str(self.project / ".ai-comm-local"),
-                 str(live / "sub"), "", ".", "..", "missing", "x" * 300, "a\x00b"]
+                 str(live / "sub"), str(outside), "../outside.git", str(nested_pin),
+                 "", ".", "..", "missing", "x" * 300, "a\x00b"]
         before = self.everything()
         for selection in cases:
             with self.subTest(channel=selection):
                 code, result = self.run_wake(self.args("plan", extra=["--channel", selection]))
-                self.assertEqual((code, result["code"]), (78, "channel_path_invalid"))
+                self.assertEqual((code, result.get("code")), (78, "channel_path_invalid"))
                 with self.assertRaises(exit_tests.common.WakeError) as caught:
                     layout = exit_tests.exit_wake.Layout(str(self.project), "0" * 16, "left", selection)
                     exit_tests.exit_wake.project_identity(layout)
@@ -226,27 +262,40 @@ class InstallerChannelTests(installer.Base):
 
     def test_unsafe_channel_ownership_and_modes_are_refused_by_bundled_check(self):
         live = self.channel()
-        # Keep ancestors non-group-writable so each injected defect is reached;
-        # a fake group membership must not make an earlier ancestor fail instead.
+        # Inject only the selected directory. Real ancestor checks must keep
+        # working even when TMPDIR itself has a safe, own-group-writable parent.
         os.chmod(self.project, 0o755)
         os.chmod(live, 0o755)
         real_lstat = os.lstat
+        real_getgrgid = installer.wake.common.grp.getgrgid
         for module in (installer.wake.common, exit_tests.common):
             self.assertEqual(module.channel_path(str(self.project), str(live)), str(live))
             for attributes in ({"st_uid": os.getuid() + 100000},
-                               {"st_mode": stat.S_IFDIR | 0o777},
+                               {"st_mode": stat.S_IFDIR | 0o757},
                                {"st_mode": stat.S_IFDIR | 0o770, "st_gid": os.getgid() + 100000},
                                {"st_mode": stat.S_IFDIR | 0o770, "st_gid": os.getgid()}):
                 with self.subTest(module=module.__name__, attributes=attributes):
+                    at_target = False
+
                     def unsafe(path):
+                        nonlocal at_target
                         info = real_lstat(path)
-                        if os.fspath(path) != str(live):
+                        at_target = os.fspath(path) == str(live)
+                        if not at_target:
                             return info
                         values = {name: getattr(info, name) for name in ("st_mode", "st_uid", "st_gid")}
                         return SimpleNamespace(**{**values, **attributes})
+
+                    def group(gid):
+                        if not at_target:
+                            return real_getgrgid(gid)
+                        # Distinguish wrong group from extra group members:
+                        # either individual guard must be necessary to refuse.
+                        return SimpleNamespace(gr_mem=[] if gid != os.getgid()
+                                               else ["another-fixture-user"])
+
                     with mock.patch.object(module.os, "lstat", side_effect=unsafe), \
-                            mock.patch.object(module.grp, "getgrgid", return_value=SimpleNamespace(
-                                gr_mem=["another-fixture-user"])):
+                            mock.patch.object(module.grp, "getgrgid", side_effect=group):
                         with self.assertRaises(module.WakeError) as caught:
                             module.channel_path(str(self.project), str(live))
                     self.assertEqual(caught.exception.code, "channel_path_invalid")
@@ -271,7 +320,7 @@ class InstallerChannelTests(installer.Base):
 
     def test_channel_selection_marker_requires_exact_integer_one(self):
         live = self.channel()
-        for value in ("0", "2", "True", "'1'"):
+        for value in ("0", "2", "True", "'1'", "1\nCHANNEL_SELECTION = 1"):
             with self.subTest(value=value):
                 self.make_pin(override={"exit_wake.py": ("CHANNEL_SELECTION = " + value + "\n").encode()})
                 code, result = self.run_wake(self.args("plan", extra=["--channel", live.name]))
@@ -351,6 +400,33 @@ class ExitChannelTests(exit_tests.Base):
         args = [phase, *self.argv(extra=["--channel", str(channel or self.live)])]
         code = exit_tests.exit_wake.main(args, runner=cli, out=out, sleep=lambda s: None)
         return code, json.loads(out.getvalue())
+
+    def test_git_execution_failures_remain_transient_for_watch_and_phases(self):
+        for error in (FileNotFoundError("fixture git unavailable"),
+                      subprocess.TimeoutExpired(["git"], 30)):
+            for selection in ([], ["--channel", self.live.name]):
+                for phase in (None, "probe", "pause", "rebind", "check", "resume"):
+                    with self.subTest(error=type(error).__name__, selection=selection, phase=phase):
+                        argv = ([phase] if phase else []) + self.argv(extra=selection)
+                        out = io.StringIO()
+                        code = exit_tests.exit_wake.main(argv, out=out, git_run=mock.Mock(side_effect=error))
+                        self.assertEqual(code, 75, out.getvalue())
+                        if phase:
+                            self.assertEqual(json.loads(out.getvalue()), {"error": "git_unavailable"})
+                        else:
+                            self.assertEqual(out.getvalue().strip(), "WAKE-ERROR git_unavailable")
+        self.assertFalse(Path(self.state_dir()).exists())
+
+    def test_invalid_repository_query_results_remain_permanent(self):
+        for responses in ((subprocess.CompletedProcess([], 1, b"", b"fixture error"),),
+                          (subprocess.CompletedProcess([], 0, b"x" * 16385, b""),),
+                          (subprocess.CompletedProcess([], 0, b"false\n", b""),
+                           subprocess.CompletedProcess([], 0, b"/different/root\n", b""))):
+            with self.subTest(responses=responses):
+                out = io.StringIO()
+                code = exit_tests.exit_wake.main(self.argv(), out=out, git_run=mock.Mock(side_effect=responses))
+                self.assertEqual((code, out.getvalue().strip()), (78, "WAKE-ERROR channel_path_invalid"))
+        self.assertFalse(Path(self.state_dir()).exists())
 
     def test_watch_and_every_phase_use_selected_path_and_receipt(self):
         cli = exit_tests.FakeCli("left", exit_tests.SESSION_A)

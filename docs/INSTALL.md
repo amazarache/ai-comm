@@ -216,7 +216,10 @@ declaration names is run.
 
 `install --channel PATH` selects the channel whose Git root must match the reviewed
 declaration. The default is `<project>/.ai-comm`; a relative path is relative to
-`DIR`, not the working directory. The selected channel must be a real directory
-strictly inside the project and distinct from its pin. Symlinks and unsafe ancestry
-are refused. The candidate bytes are never rewritten to fit a different channel.
-`init` remains unbound and does not accept `--channel`.
+`DIR`, not the working directory. The selected channel must be its own repository
+root (bare Git directory or worktree top level), strictly inside the project and
+outside the pin and its descendants. Enclosing-repository discovery, symlinks and
+unsafe ancestry are refused. Declaration installation normalizes leading slashes
+in project and channel paths to one POSIX root, including `//`. The candidate
+bytes are never rewritten to fit a different channel. `init` remains unchanged:
+unbound, with no `--channel` option or new project-path normalization.

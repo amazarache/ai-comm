@@ -226,6 +226,19 @@ class DeclareTests(unittest.TestCase):
         self.assertEqual(result["status"], "declared")
         self.assertEqual(self.live(), path.read_bytes())
 
+    def test_non_utf8_project_install_preserves_exact_candidate(self):
+        parent = self.base / os.fsdecode(b"n\xffx")
+        parent.mkdir()
+        moved = parent / "project"
+        self.project.rename(moved)
+        self.project = moved
+        selected = self.channel()
+        path, digest = self.declaration(selected)
+        result = dp.install(self.project, candidate=path, sha256=digest,
+                            previous="absent", cache=self.cache)
+        self.assertEqual(result["status"], "declared")
+        self.assertEqual(self.live(), path.read_bytes())
+
     def test_cli(self):
         import subprocess
         done = subprocess.run([sys.executable, "-I", str(ROOT / "scripts" / "declare_project.py"), "--cache",
