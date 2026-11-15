@@ -118,6 +118,7 @@ class Layout:
     """Fixed paths derived from the project root, as the upgrade controller lays them out."""
 
     def __init__(self, project, key, handle, channel=None):
+        project = common.normalize_leading_slashes(project)
         self.project = project
         self.channel = common.channel_path(project, channel)
         self.pin = os.path.join(project, ".tools", "ai-comm")
@@ -153,6 +154,18 @@ def channel_root(channel, run=subprocess.run):
 
 
 def project_identity(layout, run=subprocess.run):
+    def query(option):
+        try:
+            result = run(["git", "-C", layout.channel, "rev-parse", option],
+                         capture_output=True, stdin=subprocess.DEVNULL,
+                         env=git_env(), timeout=GIT_TIMEOUT, check=False)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise common.WakeError("channel_path_invalid") from exc
+        if result.returncode or len(result.stdout) > 16384:
+            raise common.WakeError("channel_path_invalid")
+        return os.fsdecode(result.stdout)
+
+    common.require_channel_repository(layout.channel, query)
     return {"path": layout.project, "channel": channel_root(layout.channel, run),
             "pin_path": os.path.realpath(layout.pin), "channel_path": os.path.realpath(layout.channel)}
 
@@ -825,6 +838,7 @@ def parse_args(argv):
     p.add_argument("--overdue-after", default="600")
     p.add_argument("--seen-overdue-after", default="3600")
     args = p.parse_args(argv)
+    args.project = common.normalize_leading_slashes(args.project)
     if (not os.path.isabs(args.project) or os.path.normpath(args.project) != args.project
             or args.project == os.sep):
         raise common.WakeError("project_path_invalid")

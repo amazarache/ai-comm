@@ -56,14 +56,23 @@ install.sh --user wake remove  …same… --confirm
 to `<project>/.ai-comm`; pass it when the live channel is elsewhere, for example
 `--channel .ai-comm-v3`. Relative paths are relative to `--project`, independently
 of the working directory. Generated commands and configs use absolute paths and
-omit the flag for the canonical default. A channel must be an existing directory
-strictly inside the project and distinct from `.tools/ai-comm`; symlinks, unsafe
-ancestors and external channels are refused. This does not change the generic
-upgrade controller's channel-path rules.
+omit the flag for the canonical default. Leading slashes, including `//`, are
+collapsed to one POSIX root for both project and channel paths. A channel must
+be an existing repository root (bare Git directory or worktree top level),
+strictly inside the project, and neither `.tools/ai-comm` nor anything beneath
+it. Git discovery of an enclosing repository is refused. Symlinks, unsafe
+ancestors, missing paths and external channels are refused with
+`channel_path_invalid` (exit 78 for wake commands, exit 2 for declaration
+installation). Raw ancestry is checked before collapsing `..`. This does not
+change the generic upgrade controller's channel-path rules; the channel CLI
+still requires its own initialized bare channel and validates its protocol.
 
 For non-default exit-wake setup, the project's verified pin and the selected
 frozen bundle must contain an exit adapter with channel-selection support (added
-in 1.10.0). An older adapter is refused with `channel_selection_unsupported` before
+in 1.10.0): exactly one top-level `CHANNEL_SELECTION = 1` assignment, with an
+integer literal (not a boolean, annotation or another value). This marker is
+read as data from manifest-verified bytes, not executed as a capability probe.
+An older adapter is refused with `channel_selection_unsupported` before
 printing unusable launch or phase commands. Existing frozen bundles are never
 edited. A new release produces a new bundle, not necessarily a new instance;
 replacement remains the owner-controlled remove-then-install flow. A changed
@@ -71,8 +80,17 @@ queue config still refuses `config_exists` until the old installation is removed
 
 Two copies of a channel with the same root commit, in the same project and for
 the same handle, share an exit-wake instance and its stopped state. They cannot
-be independent exit installations. Live phase checks still require the full run
-identity; queue installation and removal still check the full stored identity.
+be independent exit installations. **Remove, pause and resume through either
+path act on that shared instance.** Binding checks use only the selected copy's
+registry, even if that copy has an older session/generation than the other copy.
+A stopped instance does not record a channel path or durable binding; removing
+through either copy can delete its shared cursor, and a subsequent run through
+either copy adopts the shared cursor. Use a channel with a different root commit
+for an independent instance. Live phase checks still require the full run
+identity and refuse a different path; removal also retains its lock protections.
+Queue installation and removal still check the full stored identity. This
+release documents the shared-state limitation; it does not add a path-bound
+state migration.
 
 **Kind options:**
 - exit: optionally `--peer P`, which enables the peer-overdue alarm;

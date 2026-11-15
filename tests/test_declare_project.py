@@ -171,7 +171,7 @@ class DeclareTests(unittest.TestCase):
     def test_absent_previous_and_missing_channel(self):
         path, digest = self.declaration("0" * 40)
         err = self.stop(self.install, path, digest)
-        self.assertIn(err.code, {"channel_identity_unavailable", "git_failed", "project_missing"})
+        self.assertEqual(err.code, "channel_path_invalid")
         channel = self.channel()
         path, digest = self.declaration(channel)
         self.assertEqual(self.install(path, digest, "absent")["status"], "declared")
@@ -205,13 +205,26 @@ class DeclareTests(unittest.TestCase):
         before = self.live()
         alias = self.project / "alias"
         alias.symlink_to(self.project / ".ai-comm-v3", target_is_directory=True)
+        (self.project / ".ai-comm-v3" / "sub").mkdir()
         for selection in (str(alias), str(alias / ".." / ".ai-comm-v3"), str(self.base),
-                          str(self.project / ".tools" / "ai-comm"), str(path)):
+                          str(self.project / ".tools" / "ai-comm"), str(path),
+                          "/" + str(self.project), "/" + str(self.project / ".tools" / "ai-comm"),
+                          str(self.project / ".tools" / "ai-comm" / "scripts"),
+                          ".tools", ".ai-comm-v3/sub", "missing", "a\x00b", "x" * 300, ""):
             with self.subTest(channel=selection):
                 err = self.stop(dp.install, self.project, candidate=path, sha256=digest,
                                 previous=digest, cache=self.cache, channel=selection)
-                self.assertIn(err.code, {"unsafe_ancestry", "channel_path_invalid"})
+                self.assertEqual(err.code, "channel_path_invalid")
                 self.assertEqual(self.live(), before)
+
+    def test_double_slash_project_and_channel_keep_exact_declaration_identity(self):
+        selected = self.channel()
+        path, digest = self.declaration(selected)
+        result = dp.install("/" + str(self.project), candidate=path, sha256=digest,
+                            previous="absent", cache=self.cache,
+                            channel="/" + str(self.project / ".ai-comm"))
+        self.assertEqual(result["status"], "declared")
+        self.assertEqual(self.live(), path.read_bytes())
 
     def test_cli(self):
         import subprocess

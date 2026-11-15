@@ -5,15 +5,21 @@
 - Add optional `--channel PATH` to wake plan, install, remove and integration, to
   exit-wake runs and guided phases, and to declaration installation. Omitted means
   `<project>/.ai-comm`; relative paths are relative to the project. Channels must
-  be real directories strictly inside the project, distinct from the pin, with
-  safe ancestry and no symlinks.
+  be repository roots strictly inside the project, outside the pin and its
+  descendants, with safe ancestry and no symlinks. Normalize leading slashes
+  consistently for project and channel, including the `//` spelling.
 - Carry the selected channel through generated commands, plan/config identity,
   registry and receipt reads. This supports projects whose live channel moved
   after a protocol migration while the frozen predecessor remains at `.ai-comm`.
 - Keep default command shapes, instance keys, frozen bundles, binding checks and
   removal locks. Non-default exit commands require a bundle that declares channel
   selection support; older bundles are refused without executing their code.
-- Document that same-root channel copies share exit instance state. Protocol
+- Path refusals now use `channel_path_invalid` consistently across wake and
+  declaration installation. In exit-wake this includes a missing default channel
+  (previously `channel_identity_unavailable`) and ancestry/Git-root inspection
+  failures: permanent exit 78, rather than transient 75 for some I/O failures.
+- Document that same-root channel copies share exit instance state, including
+  removal, pause/resume and cursor reuse through either path. Protocol
   bytes, the generic upgrade controller and queue runtime remain unchanged.
 
 ## 1.9.0

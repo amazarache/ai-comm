@@ -104,14 +104,15 @@ def init(project_dir, *, cache):
 def install(project_dir, *, candidate, sha256, previous, cache, channel=None):
     need(uc.HEX.fullmatch(sha256 or ""), "invalid_sha256")
     need(previous == "absent" or uc.HEX.fullmatch(previous or ""), "invalid_previous")
-    project = _project(project_dir)
+    project = _project(common.normalize_leading_slashes(project_dir))
     _require_verified(project, cache)
     data = _read_candidate(candidate)
     need(uc.sha256_bytes(data) == sha256, "candidate_digest_mismatch")
-    uc.check_ancestry(project / (".ai-comm" if channel is None else channel))
     try:
         selected = common.channel_path(project, channel)
-    except common.WakeError as exc:
+        common.require_channel_repository(selected, lambda option: uc.git(
+            selected, "rev-parse", option, timeout=30))
+    except (common.WakeError, Stop) as exc:
         raise Stop("channel_path_invalid") from exc
     upgrade = uc.Project(project, selected)
     live = upgrade.project_id()  # the real project, computed by this release's own code

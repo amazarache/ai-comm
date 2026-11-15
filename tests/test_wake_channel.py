@@ -4,7 +4,9 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
+from types import SimpleNamespace
 from unittest import mock
 
 from tests import test_wake_install as installer
@@ -76,20 +78,36 @@ class InstallerChannelTests(installer.Base):
     def test_default_forms_have_identical_plans_and_items(self):
         for kind in ("exit", "queue"):
             expected = self.plan(kind=kind)
-            for channel in (str(self.project / ".ai-comm"), ".ai-comm", "./.ai-comm/"):
+            for channel in (str(self.project / ".ai-comm"), ".ai-comm", "./.ai-comm/",
+                            "/" + str(self.project / ".ai-comm")):
                 with self.subTest(kind=kind, channel=channel):
                     self.assertEqual(self.plan(kind=kind, extra=["--channel", channel]), expected)
                     self.assertNotIn("--channel", expected["steps"][0])
         plan = self.install_channel(".ai-comm")
         expected = self.integration_channel(plan)
-        for channel in (str(self.project / ".ai-comm"), ".ai-comm", "./.ai-comm/"):
+        for channel in (str(self.project / ".ai-comm"), ".ai-comm", "./.ai-comm/",
+                        "/" + str(self.project / ".ai-comm")):
             self.assertEqual(self.integration_channel(plan, channel), expected)
         self.assertNotIn("--channel", plan["launch"])
+
+    def test_leading_slashes_on_project_preserve_default_identity(self):
+        expected = self.plan()
+        for prefix in ("/", "//"):
+            args = self.args("plan")
+            args[args.index("--project") + 1] = prefix + str(self.project)
+            self.assertEqual(self.run_wake(args), (0, expected))
+
+    def test_bare_channel_root_is_accepted_but_its_subdirectory_is_not(self):
+        bare = self.project / ".ai-comm-bare"
+        installer.git(self.project, "clone", "--bare", "-q", str(self.project / ".ai-comm"), str(bare))
+        self.assertEqual(self.plan(extra=["--channel", bare.name])["project"]["channel_path"], str(bare))
+        code, result = self.run_wake(self.args("plan", extra=["--channel", str(bare / "objects")]))
+        self.assertEqual((code, result["code"]), (78, "channel_path_invalid"))
 
     def test_alternate_only_install_remove_and_frozen_exit_phases(self):
         live = self.project / ".ai-comm-v3"
         (self.project / ".ai-comm").rename(live)
-        self.assertEqual(self.run_wake(self.args("plan"))[1]["code"], "project_invalid")
+        self.assertEqual(self.run_wake(self.args("plan"))[1]["code"], "channel_path_invalid")
         plan = self.install_channel(live.name)
         for argv in (plan["launch"], plan["steps"][0]):
             self.assertEqual(argv[argv.index("--channel") + 1], str(live))
@@ -184,15 +202,124 @@ class InstallerChannelTests(installer.Base):
         alias.symlink_to(live, target_is_directory=True)
         file = self.project / "file"
         file.write_text("not a directory")
+        # Both parent repositories have history: accidental Git discovery must not pass.
+        for repo in (self.project, self.pin):
+            installer.git(repo, "init", "-q")
+            installer.git(repo, "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+                          "commit", "-q", "--allow-empty", "-m", "parent")
+        (live / "sub").mkdir()
         cases = [str(alias), str(alias / ".." / live.name), str(self.base),
-                 str(self.project), str(self.pin), str(file), str(file / ".." / live.name)]
+                 str(self.project), str(self.pin), str(file), str(file / ".." / live.name),
+                 "/" + str(self.project), "/" + str(self.pin), str(self.pin / "adapters"),
+                 str(self.project / ".tools"), str(self.project / ".ai-comm-local"),
+                 str(live / "sub"), "", ".", "..", "missing", "x" * 300, "a\x00b"]
         before = self.everything()
         for selection in cases:
             with self.subTest(channel=selection):
-                self.assertEqual(self.run_wake(self.args("plan", extra=["--channel", selection]))[0], 78)
-                with self.assertRaises(exit_tests.common.WakeError):
-                    exit_tests.exit_wake.Layout(str(self.project), "0" * 16, "left", selection)
+                code, result = self.run_wake(self.args("plan", extra=["--channel", selection]))
+                self.assertEqual((code, result["code"]), (78, "channel_path_invalid"))
+                with self.assertRaises(exit_tests.common.WakeError) as caught:
+                    layout = exit_tests.exit_wake.Layout(str(self.project), "0" * 16, "left", selection)
+                    exit_tests.exit_wake.project_identity(layout)
+                self.assertEqual(caught.exception.code, "channel_path_invalid")
         self.assertEqual(self.everything(), before)
+
+    def test_unsafe_channel_ownership_and_modes_are_refused_by_bundled_check(self):
+        live = self.channel()
+        # Keep ancestors non-group-writable so each injected defect is reached;
+        # a fake group membership must not make an earlier ancestor fail instead.
+        os.chmod(self.project, 0o755)
+        os.chmod(live, 0o755)
+        real_lstat = os.lstat
+        for module in (installer.wake.common, exit_tests.common):
+            self.assertEqual(module.channel_path(str(self.project), str(live)), str(live))
+            for attributes in ({"st_uid": os.getuid() + 100000},
+                               {"st_mode": stat.S_IFDIR | 0o777},
+                               {"st_mode": stat.S_IFDIR | 0o770, "st_gid": os.getgid() + 100000},
+                               {"st_mode": stat.S_IFDIR | 0o770, "st_gid": os.getgid()}):
+                with self.subTest(module=module.__name__, attributes=attributes):
+                    def unsafe(path):
+                        info = real_lstat(path)
+                        if os.fspath(path) != str(live):
+                            return info
+                        values = {name: getattr(info, name) for name in ("st_mode", "st_uid", "st_gid")}
+                        return SimpleNamespace(**{**values, **attributes})
+                    with mock.patch.object(module.os, "lstat", side_effect=unsafe), \
+                            mock.patch.object(module.grp, "getgrgid", return_value=SimpleNamespace(
+                                gr_mem=["another-fixture-user"])):
+                        with self.assertRaises(module.WakeError) as caught:
+                            module.channel_path(str(self.project), str(live))
+                    self.assertEqual(caught.exception.code, "channel_path_invalid")
+
+    def test_unreadable_channel_ancestry_has_fixed_refusal(self):
+        live = self.channel()
+        real_lstat = os.lstat
+
+        def denied(path):
+            if os.fspath(path) == str(live):
+                raise PermissionError("fixture denial")
+            return real_lstat(path)
+
+        before = self.everything()
+        with mock.patch.object(os, "lstat", side_effect=denied):
+            code, result = self.run_wake(self.args("plan", extra=["--channel", live.name]))
+            self.assertEqual((code, result["code"]), (78, "channel_path_invalid"))
+            with self.assertRaises(exit_tests.common.WakeError) as caught:
+                exit_tests.exit_wake.Layout(str(self.project), "0" * 16, "left", live.name)
+            self.assertEqual(caught.exception.code, "channel_path_invalid")
+        self.assertEqual(self.everything(), before)
+
+    def test_channel_selection_marker_requires_exact_integer_one(self):
+        live = self.channel()
+        for value in ("0", "2", "True", "'1'"):
+            with self.subTest(value=value):
+                self.make_pin(override={"exit_wake.py": ("CHANNEL_SELECTION = " + value + "\n").encode()})
+                code, result = self.run_wake(self.args("plan", extra=["--channel", live.name]))
+                self.assertEqual((code, result.get("code")), (78, "channel_selection_unsupported"))
+
+    def test_exit_roundtrip_preserves_other_channel_pin_and_instance(self):
+        live = self.channel()
+        other = self.install_channel(".ai-comm")
+        other_dir = self.project / ".ai-comm-local" / "wake" / other["instance"]
+        other_dir.mkdir(parents=True, mode=0o700)
+        os.chmod(other_dir.parent, 0o700)
+        exit_tests.exit_wake.write_cursor(str(other_dir), 7)
+        roots = (str(self.project / ".ai-comm"), str(self.pin), str(other_dir))
+        before = installer.tree(*roots)
+        plan = self.install_channel(live.name)
+        directory = self.project / ".ai-comm-local" / "wake" / plan["instance"]
+        directory.mkdir(mode=0o700)
+        exit_tests.exit_wake.write_cursor(str(directory), 3)
+        for name in installer.wake.LOCK_NAMES:
+            os.close(installer.wake.common.acquire_lock(str(directory), name=name))
+        locks = {name: os.lstat(directory / name).st_ino for name in installer.wake.LOCK_NAMES
+                 if (directory / name).exists()}
+        code, result = self.run_wake(self.args("remove", extra=["--channel", live.name, "--confirm"]))
+        self.assertEqual(code, 0, result)
+        self.assertEqual(installer.tree(*roots), before)
+        for name, inode in locks.items():
+            self.assertEqual(os.lstat(directory / name).st_ino, inode)
+
+    def test_same_root_exit_remove_uses_selected_copy_binding_and_shared_cursor(self):
+        copy = self.channel(copy=True)
+        old = self.install_channel(".ai-comm")
+        directory = self.project / ".ai-comm-local" / "wake" / old["instance"]
+        directory.mkdir(parents=True, mode=0o700)
+        os.chmod(directory.parent, 0o700)
+        exit_tests.exit_wake.write_cursor(str(directory), 5)
+
+        def registry(cli, channel):
+            self.assertEqual(str(channel), str(copy))
+            return {"participants": [{"handle": "left", "session": installer.OTHER, "generation": 1}]}
+
+        before = installer.tree(str(self.project / ".ai-comm"), str(copy))
+        with mock.patch.object(self.host, "registry", registry):
+            code, result = self.run_wake(self.args("remove", session=installer.OTHER,
+                                                 extra=["--channel", copy.name, "--confirm"]))
+        self.assertEqual(code, 0, result)
+        self.assertIn("cursor.json", result["removed"])
+        self.assertFalse((directory / "cursor.json").exists())
+        self.assertEqual(installer.tree(str(self.project / ".ai-comm"), str(copy)), before)
 
     def test_old_exit_bundle_cannot_receive_a_new_channel_argument(self):
         live = self.channel()
@@ -235,6 +362,16 @@ class ExitChannelTests(exit_tests.Base):
         self.assertEqual({c[c.index("--channel") + 1] for c in cli.calls}, {str(self.live)})
         # The default has no receipt: a phase accidentally using it would fail.
         self.assertFalse(Path(self.project, ".ai-comm", "ai-comm-runtime").exists())
+
+    def test_double_slash_project_and_channel_use_canonical_identity(self):
+        cli = exit_tests.FakeCli("left", exit_tests.SESSION_A)
+        args = self.argv(project="/" + self.project, extra=["--channel", "/" + str(self.live)])
+        self.assertEqual(self.run_main(args, cli)[0], 0)
+        for phase in ("probe", "pause", "rebind", "check", "resume"):
+            out = io.StringIO()
+            code = exit_tests.exit_wake.main([phase, *args], runner=cli, out=out, sleep=lambda s: None)
+            self.assertEqual(code, 0, out.getvalue())
+        self.assertEqual({c[c.index("--channel") + 1] for c in cli.calls}, {str(self.live)})
 
     def test_wrong_key_and_binding_keep_existing_refusal_contracts(self):
         cli = exit_tests.FakeCli("left", exit_tests.SESSION_A)

@@ -9,7 +9,8 @@ Both adapters import only this module from the package. It defines:
 - private on-disk state primitives (directories, bounded JSON, atomic writes, a lock);
 - fixed failure classes and their exit codes.
 
-Nothing here reads inbox content, acknowledges, sends, or starts a process. Changes to
+Nothing here reads inbox content, acknowledges, sends, or implements process execution.
+Repository metadata comes from the caller's read-only Git query. Changes to
 this contract need a renewed independent review. Standard library only.
 """
 import errno
@@ -97,6 +98,22 @@ def validate_generation(value):
     return value
 
 
+def normalize_leading_slashes(path):
+    """Use one POSIX root spelling, including inputs with exactly two slashes."""
+    path = os.fspath(path)
+    return os.sep + path.lstrip(os.sep) if os.path.isabs(path) else path
+
+
+def require_channel_repository(path, query):
+    """Refuse Git's enclosing-repository discovery; accept a bare root or worktree root."""
+    bare = query("--is-bare-repository").removesuffix("\n")
+    if bare not in ("true", "false"):
+        raise WakeError("channel_path_invalid")
+    root = query("--absolute-git-dir" if bare == "true" else "--show-toplevel").removesuffix("\n")
+    if normalize_leading_slashes(root) != path:
+        raise WakeError("channel_path_invalid")
+
+
 def channel_path(project, selection=None):
     """Validate an in-project channel without following links or writing anything.
 
@@ -105,7 +122,7 @@ def channel_path(project, selection=None):
     cannot disappear. The ancestor ownership rule matches upgrade_controller;
     this copy must remain self-contained in the frozen adapter bundle.
     """
-    project = os.fspath(project)
+    project = normalize_leading_slashes(project)
     if not os.path.isabs(project) or os.path.normpath(project) != project:
         raise WakeError("channel_path_invalid")
     if selection is None:
@@ -132,9 +149,10 @@ def channel_path(project, selection=None):
                         raise WakeError("channel_path_invalid")
     except (OSError, ValueError, KeyError) as exc:
         raise WakeError("channel_path_invalid") from exc
-    path = os.path.abspath(raw)
+    path = normalize_leading_slashes(os.path.abspath(raw))
+    pin = os.path.join(project, ".tools", "ai-comm")
     if (path == project or os.path.commonpath((project, path)) != project
-            or path == os.path.join(project, ".tools", "ai-comm")):
+            or os.path.commonpath((pin, path)) == pin):
         raise WakeError("channel_path_invalid")
     return path
 

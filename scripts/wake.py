@@ -283,10 +283,15 @@ def advisory_kind_check(kind, directory):
 def selected_project(args):
     """Resolve the selection once for identity and every generated command."""
     uc = _uc()
+    channel = common.channel_path(args.project, args.channel)
     try:
-        channel = common.channel_path(args.project, args.channel)
+        common.require_channel_repository(channel, lambda option: uc.git(
+            channel, "rev-parse", option, timeout=30))
+    except uc.Stop as exc:
+        raise WakeError("channel_path_invalid") from exc
+    try:
         project = uc.Project(args.project, channel)
-    except (uc.Stop, WakeError) as exc:
+    except uc.Stop as exc:
         raise WakeError("project_invalid") from exc
     args.channel = str(project.channel)
     return project
@@ -1058,6 +1063,7 @@ def parse_args(argv):
                 raise WakeError("arguments_invalid")
         elif any(v is not None for v in queue_only):
             raise WakeError("arguments_invalid")
+    args.project = common.normalize_leading_slashes(args.project)
     if not os.path.isabs(args.project) or os.path.normpath(args.project) != args.project:
         raise WakeError("project_path_invalid")
     common.validate_handle(args.handle)

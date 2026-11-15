@@ -27,8 +27,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 22296,
-      "sha256": "bfcb76270c4b9a9d21e856bc3f344f727dda838fc0863a6b13210cde44123402"
+      "bytes": 22792,
+      "sha256": "fadbad9e8355c30434e0f0347ab295ede8282579d2757c82808489ec7e86cedc"
     },
     {
       "path": "LICENSE",
@@ -52,13 +52,13 @@
     },
     {
       "path": "adapters/common.py",
-      "bytes": 15541,
-      "sha256": "52b1fee7a1c7cccdef6b124fa80f4cbf69f04e2ed5f79fe57ba9233860a6c2a2"
+      "bytes": 16403,
+      "sha256": "a99e31303cbdb8257d511c15a2a8994a99e5a87fb9ad9f7f1f60ac97d5f54775"
     },
     {
       "path": "adapters/exit_wake.py",
-      "bytes": 38789,
-      "sha256": "cacf2fd93521401959a75b2ebad4ce1124d5bc71553c46851704d4780936f223"
+      "bytes": 39525,
+      "sha256": "a9afa808204336cc5c5ce99bdcf8a5b2fe04a89eaf46f749c3bd5a96620cb26d"
     },
     {
       "path": "adapters/queue-wake@.service",
@@ -112,8 +112,8 @@
     },
     {
       "path": "docs/WAKE.md",
-      "bytes": 17526,
-      "sha256": "fc25604648bf8ad48314acc021305f153c4469dd76ca48ffcfd730064ef8afda"
+      "bytes": 18859,
+      "sha256": "907cb1b9c636ee10134cff352012826ab97ddde9d182aae48dbae4e0e24a6c5f"
     },
     {
       "path": "entry/ai-comm/SKILL.md",
@@ -157,8 +157,8 @@
     },
     {
       "path": "scripts/declare_project.py",
-      "bytes": 6795,
-      "sha256": "84fe327f28ebeb1a282431fdba6aa672ece7a2aea17fe1421237f0d7105adb3a"
+      "bytes": 6890,
+      "sha256": "daff271e8def597e5fb54c8acb12d2fcd903a3ebe5e7eb48ced3f121a99126e1"
     },
     {
       "path": "scripts/extract_release_notes.py",
@@ -207,8 +207,8 @@
     },
     {
       "path": "scripts/wake.py",
-      "bytes": 52073,
-      "sha256": "66e147871b74e18de385d9aee449db3afd18751fece0dc762033f53fc2dfbe7f"
+      "bytes": 52344,
+      "sha256": "aed5e9047e8eb47f5f88b9e593a062c5b954ad28548890198a07918e215505c6"
     },
     {
       "path": "skills/ai-comm/SKILL.md",
@@ -227,8 +227,8 @@
     },
     {
       "path": "tests/test_declare_project.py",
-      "bytes": 11649,
-      "sha256": "9a1c7eaa812f04d42866525a2d894d7bf474c6ac59aa90d6d53f0db08269ce81"
+      "bytes": 12421,
+      "sha256": "54dcf6c21199606b760d53785f5caecbbc9459a7aad411020266201a16819816"
     },
     {
       "path": "tests/test_exit_wake.py",
@@ -312,8 +312,8 @@
     },
     {
       "path": "tests/test_wake_channel.py",
-      "bytes": 13890,
-      "sha256": "24bd08462c260ea6343a16c678110959b9404b5b14baa34d2a9dbe41e7299494"
+      "bytes": 22071,
+      "sha256": "98a37ace5e5cbcf00034f67c5b2f82dd260467f5455b510291ed4eb9a64d37f3"
     },
     {
       "path": "tests/test_wake_install.py",
