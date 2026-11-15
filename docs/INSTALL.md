@@ -141,6 +141,8 @@ All commands print JSON and stop with a code on any problem.
 | `install.sh --user launcher --remove` | remove it, only if unchanged |
 | `install.sh --user offer status`, `offer claim`, `offer answer` | the cache's own update offer (below) |
 | `install.sh --user uninstall --confirm` | remove the cache, its links and launcher; anything unexpected or changed is kept and reported |
+| `install.sh --user setup plan --project DIR --task TEXT --a-label LABEL [options]` | guided project setup: print one plan envelope and its SHA-256; writes nothing (below) |
+| `install.sh --user setup status --project DIR` | what of a guided setup exists in the project; writes nothing |
 | `install.sh --user wake plan\|install\|remove\|integration …` | the optional wake adapters of a project with a verified pin; `plan` changes nothing, and nothing is activated (see [wake adapters](WAKE.md)) |
 
 `check` reports `verdict`: `update_available`, `up_to_date`, or `unknown`. It says `up_to_date` only when the release
@@ -155,6 +157,20 @@ and a missing format or an unknown top-level key with `release_index_invalid`; n
 older release is never reported as the newest because a newer entry was dropped. The failure is recorded (`metadata`:
 `failed`). A successful refresh stores, with the index, the validation result, the SHA-256 of the fetched
 `RELEASES.json` and the full list of its versions.
+
+**Guided setup plan (1.11.0).** `setup plan` reads the project and the cache and writes nothing, not even a lock or
+`.ai-comm-local`. A project without a pin gets the *fresh* profile: the release is the highest version of the last
+consented `check --fetch-permitted` (it must have validated the whole index, be fresh, and have a trusted binding for
+that version; otherwise `release_check_required` or `release_unbound`, never an older release instead), at least the
+minimum this setup supports. A project whose pin the cache verifies gets the *reuse* profile: the pin stays as it is
+and nothing is fetched. An unknown or modified pin, an existing channel or note, upgrade state or a wake installation
+(fresh profile) are refused. The channel and note are project-relative paths of plain components (`A-Z a-z 0-9 . _ -`),
+outside `.git`, `.tools` and `.ai-comm-local`, not inside each other, with an existing parent; the channel's parent
+must be on the project's filesystem. Defaults: channel `.ai-comm`, note `AI-COMM-ACTIVATION.md`, handles `agent-a`
+and `agent-b` (both reviewers), notifier A, duties "implements" and "reviews", B's host label `assistant`. Each value
+is shown as "suggested" or "your choice" with its change rule; any correction is a new plan with a new digest. A
+session reference is the host's identifier or a labelled proposal that the plan then fixes. The output also lists
+`ai-comm` skill entries found in registered skill directories and the project's own `.<dir>/skills` directories.
 
 While an operation is unfinished (for example after an interruption), every command that changes something stops with
 `operation_pending` until `recover` has run. Recovery finishes an operation only from the exact state it left behind;

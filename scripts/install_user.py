@@ -1508,6 +1508,14 @@ def _finish_root(cache, results):
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] == "setup":
+        # Guided project setup (design rev 7): this same release's scripts/setup_project.py.
+        name = "ai_comm_setup_project"
+        if name not in sys.modules:
+            spec = importlib.util.spec_from_file_location(name, Path(__file__).resolve().parent / "setup_project.py")
+            sys.modules[name] = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(sys.modules[name])
+        return sys.modules[name].main(argv[1:])
     if argv and argv[0] == "wake":
         # Optional wake adapters (design 024): handled by this same release's scripts/wake.py.
         spec = importlib.util.spec_from_file_location(

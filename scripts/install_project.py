@@ -28,7 +28,6 @@ import sys
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 INSTALL_SCHEMA = "ai-comm-install/1"
-GITIGNORE_LINES = (".tools/", ".ai-comm-local/")
 
 
 def _shared():
@@ -44,6 +43,7 @@ def _shared():
 
 
 ri = _shared()
+GITIGNORE_LINES = ri.INSTALLER_GITIGNORE_LINES
 uc, Stop, need, GUARD = ri.uc, ri.Stop, ri.need, ri.GUARD
 _load, git, run_checked, trusted_source = ri._load, ri.git, ri.run_checked, ri.trusted_source
 select_record, real_suite, real_fetch, open_dir_nofollow = ri.select_record, ri.real_suite, ri.real_fetch, ri.open_dir_nofollow

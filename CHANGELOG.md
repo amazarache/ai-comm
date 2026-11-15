@@ -21,6 +21,12 @@
   command except `check` and `status`, and declaration `init` and `install`
   refuse unless `install` carries that setup's `--setup-txn`
   (`setup_in_progress`).
+- New `install.sh --user setup plan` and `setup status` (guided project
+  setup, design rev 7): a read-only plan envelope with its SHA-256 for the
+  fresh profile (no pin; newest validated, bound and fresh release) or the
+  reuse profile (verified pin, unchanged), with bounded paths and inputs,
+  value origins and change rules, session references, ignore-file states
+  and skill-entry discovery.
 - Test the declaration installer's channel query: Git execution failures and
   timeouts are refused with `channel_path_invalid` and leave the declaration
   unchanged; the queries of declaration installation and of the wake installer

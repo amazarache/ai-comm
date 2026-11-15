@@ -27,8 +27,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 25968,
-      "sha256": "970047fed1d2778ef78f92d21ed9d781671aa464b348d02ff9c2c9c050fac99b"
+      "bytes": 26366,
+      "sha256": "3ef7497aeaffade80a2cc047fe9488f5263e9e3dc0ec4f72e01aff12d281d1a1"
     },
     {
       "path": "LICENSE",
@@ -92,8 +92,8 @@
     },
     {
       "path": "docs/INSTALL.md",
-      "bytes": 15260,
-      "sha256": "fd7d6ef73d15f415445c62ccd11247807999bd121b3f147ebf858d116dac0736"
+      "bytes": 17060,
+      "sha256": "88b597827cacf96acc8dd38ada106da0aba762d19f041ed1c5b1400a5147b496"
     },
     {
       "path": "docs/PERFORMANCE.md",
@@ -167,13 +167,13 @@
     },
     {
       "path": "scripts/install_project.py",
-      "bytes": 19484,
-      "sha256": "2d7a6951e3fd6e6254f4412a981712c8080589c0cd14c58acf4205649ae3830e"
+      "bytes": 19482,
+      "sha256": "3c2d81fa80bc83f2419cb98e8c1000815f7e9246799d32d20c1b7473b8cba7a3"
     },
     {
       "path": "scripts/install_user.py",
-      "bytes": 73039,
-      "sha256": "83a69e98987aea9b0a1a570be2ce10ce60d15df938465a21377f507ac0b0dad7"
+      "bytes": 73534,
+      "sha256": "5ffe685c21c1f68dabc24c6343aeb1ebd258baa82410e9bae1fce623a9adb322"
     },
     {
       "path": "scripts/leak_scan.py",
@@ -187,13 +187,18 @@
     },
     {
       "path": "scripts/release_install.py",
-      "bytes": 16800,
-      "sha256": "f40759579333640fc5aef5dfb8666bd8e428d75eb1f1a50ea0aea0da7fd2db79"
+      "bytes": 16997,
+      "sha256": "3709a712e7a096af38ca96fa7e0e9a379688c1443189ce7027f2fdb2946ce1d5"
     },
     {
       "path": "scripts/render_bootstrap.py",
       "bytes": 3779,
       "sha256": "903edac5f5f2e9b8ccd1ee8e5ec3df3c12de46e4b839a8afa21f0ebb38b9c176"
+    },
+    {
+      "path": "scripts/setup_project.py",
+      "bytes": 20658,
+      "sha256": "5c9e5ea637023d39a16573dbdd55235e1562ae480b8915a91358b62efcad9c64"
     },
     {
       "path": "scripts/test_old_protocol.py",
@@ -279,6 +284,11 @@
       "path": "tests/test_release_documents.py",
       "bytes": 1909,
       "sha256": "49ab9d3d3660741c643cc32a00c03b7b868b6274f9221099132b1c6b4aed7c7d"
+    },
+    {
+      "path": "tests/test_setup_project.py",
+      "bytes": 15336,
+      "sha256": "b478e7d6d4ba57280fed9f0849433832c5899992f9f167f07fb43d53ea709ba4"
     },
     {
       "path": "tests/test_skill.py",

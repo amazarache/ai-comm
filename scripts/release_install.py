@@ -90,6 +90,11 @@ setup_journal_dir, unfinished_setup, require_no_foreign_setup = (
     uc.setup_journal_dir, uc.unfinished_setup, uc.require_no_foreign_setup)
 
 
+# The lines the project installer adds to a project's .gitignore; guided setup adds
+# whichever are missing too, plus its channel line.
+INSTALLER_GITIGNORE_LINES = (".tools/", ".ai-comm-local/")
+
+
 def gitignore_after(existing, lines):
     """The ignore file after adding each missing line, exactly as the project installer
     writes it: `existing` is the current bytes or None (absent). Returns (bytes, added)."""
