@@ -1,6 +1,6 @@
 # Changes
 
-## 1.11.0 (in development)
+## 1.11.0
 
 - `install.sh --user check --fetch-permitted` validates the complete fetched
   release index before selecting anything: one malformed entry stops with
@@ -40,6 +40,15 @@
   the notifier session, checks only while a session is active, revocation
   through any session. The pinned skill and ACTIVATE.md describe setup notes
   and the same rules. `setup --help` exits 0.
+- No protocol change: `PROTOCOL.md` is byte-identical, so existing protocol-3
+  channels keep working.
+- **Validation status:** unit tests with fixture origins and caches, including a
+  crash after every setup stage and inside `init`; a real-boundary test that
+  reuses the genuine v1.10.0 tree as the pin and runs its own CLI (join,
+  PING/PONG/ACK, `state`, `validate`) and this release's wake planning. Guided
+  setup has not yet been run end to end by real sessions on a clean account
+  (T12), and the cross-filesystem refusal is covered by injected device
+  identities only.
 - Test the declaration installer's channel query: Git execution failures and
   timeouts are refused with `channel_path_invalid` and leave the declaration
   unchanged; the queries of declaration installation and of the wake installer

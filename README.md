@@ -323,6 +323,7 @@ changing the platform label alone cannot reactivate an old reference.
 | `1.8.0` | `3.0` (unchanged) | Existing protocol-3 channels; adds the one-line install bootstrap `install-ai-comm.sh`. |
 | `1.9.0` | `3.0` (unchanged) | Existing protocol-3 channels; adds optional, inactive-by-default wake adapters and `install.sh --user wake`. |
 | `1.10.0` | `3.0` (unchanged) | Existing protocol-3 channels; adds explicit in-project channel selection for wake setup, exit-wake and declaration installation. |
+| `1.11.0` | `3.0` (unchanged) | Existing protocol-3 channels; adds guided project setup (`install.sh --user setup`), strict validation of the fetched release index, and setup guards in the installer, controller and declarations. |
 
 Package and protocol versions are related but distinct. A protocol MAJOR (for
 example 3.0 to 4.0) always bumps the package MAJOR. A protocol MINOR (3.0 to

@@ -27,8 +27,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 27253,
-      "sha256": "68f0804438c65ad508675c5d4c903fd5aaf65a1edfa9f837e1687bba58a79720"
+      "bytes": 27816,
+      "sha256": "50610752f2f87eca5edbad0317fa0eae1c2466412e99fcc4433c27a96922e79a"
     },
     {
       "path": "LICENSE",
@@ -42,8 +42,8 @@
     },
     {
       "path": "README.md",
-      "bytes": 24583,
-      "sha256": "d6db6cc556e1e4c18933b673d5f93046e5184bf0b2a4d4a5022f434337914acc"
+      "bytes": 24815,
+      "sha256": "448cc1e22873bfa3c17617f745ca576b3b84a4f51ef7fab8d86e665e8791413a"
     },
     {
       "path": "SECURITY.md",
@@ -78,7 +78,7 @@
     {
       "path": "ai_comm.py",
       "bytes": 160319,
-      "sha256": "2a3b5e232f97b0f656c70c21364d1a66df74e77f1cbc1a0d323f7b16afcc7027"
+      "sha256": "3cbb394e2aa94d03c0567cd1d5c510c4b470f2ac4fd0af36f3b4f4382f4f150e"
     },
     {
       "path": "docs/ERRORS.md",
@@ -93,7 +93,7 @@
     {
       "path": "docs/INSTALL.md",
       "bytes": 18828,
-      "sha256": "aeaed12008edc4404b8dc25a942e3c868c6d6ef44d428fb2308ce41d4d2c00dc"
+      "sha256": "f615bda19cc7ee3936a222b659d48a13481d7880eb8dd46399aebd0bd771d865"
     },
     {
       "path": "docs/PERFORMANCE.md",
