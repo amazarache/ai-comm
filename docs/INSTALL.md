@@ -142,6 +142,8 @@ All commands print JSON and stop with a code on any problem.
 | `install.sh --user offer status`, `offer claim`, `offer answer` | the cache's own update offer (below) |
 | `install.sh --user uninstall --confirm` | remove the cache, its links and launcher; anything unexpected or changed is kept and reported |
 | `install.sh --user setup plan --project DIR --task TEXT --a-label LABEL [options]` | guided project setup: print one plan envelope and its SHA-256; writes nothing (below) |
+| `install.sh --user setup apply --plan FILE --sha256 D --session REF` | apply exactly that approved plan, or resume it (below) |
+| `install.sh --user setup abandon --project DIR` | end an unfinished setup; removes only setup's own staging |
 | `install.sh --user setup status --project DIR` | what of a guided setup exists in the project; writes nothing |
 | `install.sh --user wake plan\|install\|remove\|integration …` | the optional wake adapters of a project with a verified pin; `plan` changes nothing, and nothing is activated (see [wake adapters](WAKE.md)) |
 
@@ -171,6 +173,21 @@ and `agent-b` (both reviewers), notifier A, duties "implements" and "reviews", B
 is shown as "suggested" or "your choice" with its change rule; any correction is a new plan with a new digest. A
 session reference is the host's identifier or a labelled proposal that the plan then fixes. The output also lists
 `ai-comm` skill entries found in registered skill directories and the project's own `.<dir>/skills` directories.
+
+**Guided setup apply (1.11.0).** `setup apply` takes the plan file (its exact canonical bytes) and digest the owner
+approved, and the approving session's reference. It checks the executing release and every baseline before writing
+anything, takes `.ai-comm-local/setup/lock`, checks again, and journals each step as intent and outcome: the pin
+(fresh: the project installer with the frozen release identity, the `.gitignore` guard and this transaction's id;
+reuse: verified as it is), the channel line in `.gitignore` (only from the planned G1 to G2), the channel (the pin's own
+`init` in `.ai-comm-local/setup/txn/`, checked against the plan, then moved with a no-replace rename that fails if
+anything, even an empty directory, has appeared at the path), A's `join`, the note (exclusive create; its JSON block is
+the plan's data, and it holds no session references) and, fresh only, the declaration (declared, no integrations, the
+note as guidance, through `declare_project install` with this setup's transaction id). Resume is the same command:
+finished steps are recognised from the journal and verified, never repeated; anything the journal does not explain
+stops the flow and is not adopted. `setup abandon` marks the journal abandoned, removes only `.ai-comm-local/setup/txn`,
+and names what stays (pin, channel, note, declaration, `.gitignore` lines). Nothing else should write to the project
+while setup applies; drift a check observes stops it, a write between a check and the following replacement is not
+detected.
 
 While an operation is unfinished (for example after an interruption), every command that changes something stops with
 `operation_pending` until `recover` has run. Recovery finishes an operation only from the exact state it left behind;

@@ -27,6 +27,13 @@
   reuse profile (verified pin, unchanged), with bounded paths and inputs,
   value origins and change rules, session references, ignore-file states
   and skill-entry discovery.
+- New `setup apply` and `setup abandon`: one journalled transaction per
+  approved plan (pin, `.gitignore` G1 to G2, channel by the pin's own `init`
+  and a no-replace move, A's join, the note by exclusive create, and for a
+  fresh pin a declared upgrade declaration with no integrations); resume
+  with the same plan completes or stops and never duplicates; `abandon`
+  removes only setup's staging. Neither binds B, commits, pushes or
+  installs a wake adapter.
 - Test the declaration installer's channel query: Git execution failures and
   timeouts are refused with `channel_path_invalid` and leave the declaration
   unchanged; the queries of declaration installation and of the wake installer

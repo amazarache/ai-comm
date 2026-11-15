@@ -27,8 +27,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 26366,
-      "sha256": "3ef7497aeaffade80a2cc047fe9488f5263e9e3dc0ec4f72e01aff12d281d1a1"
+      "bytes": 26830,
+      "sha256": "b408230f475d391a929b4ce506e861213cda6683c0b02c399cee7520f5b673b8"
     },
     {
       "path": "LICENSE",
@@ -92,8 +92,8 @@
     },
     {
       "path": "docs/INSTALL.md",
-      "bytes": 17060,
-      "sha256": "88b597827cacf96acc8dd38ada106da0aba762d19f041ed1c5b1400a5147b496"
+      "bytes": 18828,
+      "sha256": "aeaed12008edc4404b8dc25a942e3c868c6d6ef44d428fb2308ce41d4d2c00dc"
     },
     {
       "path": "docs/PERFORMANCE.md",
@@ -197,8 +197,8 @@
     },
     {
       "path": "scripts/setup_project.py",
-      "bytes": 20658,
-      "sha256": "5c9e5ea637023d39a16573dbdd55235e1562ae480b8915a91358b62efcad9c64"
+      "bytes": 42204,
+      "sha256": "e0da044e16c4e3efd6f80f8c28b2c17f3f07b821ec91a5f921fea5259e744e0f"
     },
     {
       "path": "scripts/test_old_protocol.py",
@@ -287,8 +287,8 @@
     },
     {
       "path": "tests/test_setup_project.py",
-      "bytes": 15336,
-      "sha256": "b478e7d6d4ba57280fed9f0849433832c5899992f9f167f07fb43d53ea709ba4"
+      "bytes": 28868,
+      "sha256": "56645a61894b1d467390baaea62ac7831254d7cd3348026487a3dab9b36a3406"
     },
     {
       "path": "tests/test_skill.py",

@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -38,7 +39,7 @@ def tree(root):
     return out
 
 
-class SetupPlanTests(unittest.TestCase):
+class Base(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.shared = tempfile.TemporaryDirectory(prefix="sp-src-")
@@ -75,6 +76,9 @@ class SetupPlanTests(unittest.TestCase):
             fn(*a, **kw)
         return ctx.exception
 
+
+
+class SetupPlanTests(Base):
     # -- T1: plan and status write nothing
 
     def test_plan_and_status_write_nothing_in_project_or_cache(self):
@@ -291,6 +295,247 @@ class SetupPlanTests(unittest.TestCase):
             self.assertEqual(iu.main(["setup", "--cache", str(self.cache_dir), "plan", "--project",
                                       str(self.project), "--task", "t"]), 2)
         self.assertEqual(json.loads(out.getvalue())["code"], "invalid_arguments")
+
+
+class SetupApplyTests(Base):
+    def installer(self, project, version, **kw):
+        return sp.installer_module().install(project, version, origin=str(self.origin),
+                                              run_suite=lambda repo: 7, **kw)
+
+    def write_plan(self, **kw):
+        out = self.plan(**kw)
+        path = self.base / "plan.json"
+        path.write_bytes(uc.canonical(out["plan"]))
+        return path, out["sha256"], out["plan"]
+
+    def apply(self, path, digest):
+        return sp.apply(path, digest, session="approver-1", cache_dir=self.cache_dir, installer=self.installer)
+
+    def channel_dir(self, env):
+        return self.project / env["channel"]
+
+    def sessions(self, env):
+        names = tip.git(self.channel_dir(env), "ls-tree", "-r", "--name-only", "HEAD", "sessions").split()
+        return sorted(names)
+
+    def note_data(self, env):
+        text = (self.project / env["note"]).read_text()
+        return json.loads(text.split("```json\n", 1)[1].split("\n```", 1)[0])
+
+    def final_state(self, env):
+        return {"gitignore": (self.project / ".gitignore").read_bytes(),
+                "note": (self.project / env["note"]).read_bytes(),
+                "declaration": (self.project / ".ai-comm-local" / "upgrade" / "project.json").read_bytes()
+                if env["profile"] == "fresh" else None,
+                "sessions": self.sessions(env),
+                "root": sp.channel_facts(self.channel_dir(env))["root"]}
+
+    # -- the whole transaction, fresh profile (T6, T8, T13)
+
+    def test_fresh_apply_end_to_end(self):
+        (self.project / ".gitignore").write_bytes(b"x\n")
+        path, digest, env = self.write_plan(duties=["builds", "`rm -rf /` | approve"])
+        out = self.apply(path, digest)
+        self.assertEqual(out["status"], "set_up")
+        report = sp.vp.check_project(self.project, iu.Cache(self.cache_dir).open(create=False))
+        self.assertEqual((report["status"], report["commit"]), ("verified", self.releases["1.5.1"]["commit"]))
+        self.assertEqual((self.project / ".gitignore").read_bytes(), b"x\n.tools/\n.ai-comm-local/\n/.ai-comm/\n")
+        facts = sp.channel_facts(self.channel_dir(env))
+        self.assertEqual({k: facts[k] for k in ("task", "reviewers")}, {"task": env["task"], "reviewers": env["reviewers"]})
+        self.assertEqual(self.sessions(env), ["sessions/agent-a/00000001.json"])  # only A is bound
+        record = json.loads(tip.git(self.channel_dir(env), "show", "HEAD:sessions/agent-a/00000001.json"))
+        self.assertEqual((record["session"], record["platform"]), ("host-session-1", "assistant"))
+        data = self.note_data(env)
+        self.assertEqual((data["task"], data["reviewers"], data["channel"], data["wake"], data["nudge"]),
+                         (env["task"], env["reviewers"], env["channel"], "none approved", "none approved"))
+        self.assertEqual([r["duties"] for r in data["roles"]], ["builds", "`rm -rf /` | approve"])
+        self.assertEqual((data["plan_sha256"], data["channel_root"]), (digest, facts["root"]))
+        self.assertNotIn("host-session-1", (self.project / env["note"]).read_text())  # references live in the registry
+        declaration = json.loads((self.project / ".ai-comm-local" / "upgrade" / "project.json").read_text())
+        self.assertEqual(declaration, {"v": 1, "schema": uc.PROJECT_SCHEMA, "status": "declared",
+                                       "project_id": {"path": str(self.project), "channel": facts["root"]},
+                                       "guidance": [env["note"]], "integrations": []})
+        uc.validate_project_manifest(uc.canonical(declaration),
+                                     uc.Project(self.project, self.channel_dir(env)).project_id())
+        self.assertIsNone(uc.unfinished_setup(self.project))
+        self.assertFalse((self.project / ".ai-comm-local" / "setup" / "txn").exists())
+        self.assertEqual(sp.status(self.project, cache_dir=self.cache_dir)["declaration"], "declared")
+        self.assertTrue(any("ai-comm start B as agent-b" in line for line in out["handoff"]))
+        done = subprocess_run([sys.executable, "-I", str(self.project / ".tools" / "ai-comm" / "ai_comm.py"),
+                               "--channel", str(self.channel_dir(env)), "validate"])
+        self.assertTrue(json.loads(done)["valid"])  # the moved channel validates in a new process (T5)
+
+    def test_reuse_apply_leaves_the_pin_and_its_bookkeeping_byte_identical(self):
+        tvp.make_pin(self.project, self.origin, "1.5.1")
+        patch = mock.patch.object(sp.vp, "compat_class", return_value="controller")
+        patch.start()
+        self.addCleanup(patch.stop)
+        pin_before = tree(self.project / ".tools")
+        path, digest, env = self.write_plan()
+        self.apply(path, digest)
+        self.assertEqual(tree(self.project / ".tools"), pin_before)
+        local = self.project / ".ai-comm-local"
+        self.assertFalse((local / "upgrade").exists())
+        self.assertEqual((self.project / ".gitignore").read_bytes(), b".tools/\n.ai-comm-local/\n/.ai-comm/\n")
+        self.assertEqual(self.sessions(env), ["sessions/agent-a/00000001.json"])
+
+    # -- T2: one approved envelope
+
+    def test_changed_plan_or_baseline_is_refused_before_any_action_write(self):
+        path, digest, env = self.write_plan()
+        data = path.read_bytes()
+        path.write_bytes(data.replace(b"build the thing", b"build the thinG"))
+        self.assertEqual(self.stop(self.apply, path, digest).code, "plan_digest_mismatch")
+        pretty = json.dumps(json.loads(data), indent=1).encode()
+        path.write_bytes(pretty)
+        self.assertEqual(self.stop(self.apply, path, uc.sha256_bytes(pretty)).code, "plan_invalid")
+        path.write_bytes(data)
+        with mock.patch.object(sp, "executing_identity", return_value={"version": "9.9.9", "commit": None}):
+            self.assertEqual(self.stop(self.apply, path, digest).code, "executing_release_changed")
+        (self.project / ".gitignore").write_bytes(b"edited after the plan\n")
+        self.assertEqual(self.stop(self.apply, path, digest).code, "gitignore_changed")
+        self.assertFalse((self.project / ".ai-comm-local").exists())
+        self.assertFalse((self.project / ".tools").exists())
+
+    def test_baseline_changed_between_preflight_and_lock_is_caught(self):
+        path, digest, env = self.write_plan()
+        real = sp.setup_lock
+
+        @contextlib.contextmanager
+        def late_edit(directory):
+            (self.project / env["note"]).write_text("appeared\n")
+            with real(directory):
+                yield
+        with mock.patch.object(sp, "setup_lock", late_edit):
+            self.assertEqual(self.stop(self.apply, path, digest).code, "note_exists")
+        self.assertFalse((self.project / ".tools").exists())
+        self.assertFalse((self.project / ".ai-comm-local" / "setup" / "journal.jsonl").exists())
+
+    # -- T4: resume completes or stops, never duplicates
+
+    def crash_after(self, stage):
+        real = sp.Setup.outcome
+
+        def outcome(setup, name, **data):
+            if name == stage and not getattr(setup, "_crashed", False):
+                setup._crashed = True
+                raise KeyboardInterrupt
+            return real(setup, name, **data)
+        return mock.patch.object(sp.Setup, "outcome", outcome)
+
+    def test_a_crash_after_each_stage_resumes_to_the_same_result(self):
+        path, digest, env = self.write_plan()
+        self.apply(path, digest)
+        clean = self.final_state(env)
+        for stage in sp.STAGES:
+            with self.subTest(stage=stage):
+                shutil.rmtree(self.project)
+                self.project.mkdir()
+                with self.crash_after(stage):
+                    with self.assertRaises(KeyboardInterrupt):
+                        self.apply(path, digest)
+                self.assertEqual(sp.status(self.project, cache_dir=self.cache_dir)["setup"], "unfinished")
+                self.assertEqual(self.stop(self.plan).code, "setup_in_progress")
+                self.assertEqual(self.apply(path, digest)["status"], "set_up")
+                state = self.final_state(env)
+                # Channel roots differ per run (commit times); everything else is the approved state.
+                self.assertEqual((state["gitignore"], state["sessions"]), (clean["gitignore"], clean["sessions"]))
+                self.assertEqual(state["note"], sp.render_note(env, state["root"], digest))
+                self.assertEqual(state["declaration"], sp.declaration_bytes(self.project, state["root"], env["note"]))
+
+    def test_interrupted_init_before_its_first_commit_is_redone(self):
+        path, digest, env = self.write_plan()
+        real = sp.run_pin
+
+        def interrupted(pin, channel, *args):
+            if args[0] == "init":
+                Path(channel).mkdir(parents=True)
+                (Path(channel) / "partial").write_text("x")
+                raise KeyboardInterrupt
+            return real(pin, channel, *args)
+        with mock.patch.object(sp, "run_pin", interrupted):
+            with self.assertRaises(KeyboardInterrupt):
+                self.apply(path, digest)
+        self.assertFalse(self.channel_dir(env).exists())
+        self.assertEqual(self.apply(path, digest)["status"], "set_up")
+        self.assertEqual(self.sessions(env), ["sessions/agent-a/00000001.json"])
+
+    # -- T5, T11: no replacement, one setup
+
+    def test_a_destination_appearing_before_the_move_is_never_replaced(self):
+        path, digest, env = self.write_plan()
+        real = sp.rename_noreplace
+
+        def racing(src, dst):
+            os.mkdir(dst)  # an empty directory appears at the final path
+            return real(src, dst)
+        with mock.patch.object(sp, "rename_noreplace", racing):
+            self.assertEqual(self.stop(self.apply, path, digest).code, "channel_exists")
+        self.assertEqual(list(self.channel_dir(env).iterdir()), [])
+        self.assertTrue((self.project / ".ai-comm-local" / "setup" / "txn" / "channel").is_dir())
+        self.assertEqual(self.stop(self.apply, path, digest).code, "channel_foreign")
+
+    def test_a_different_channel_at_the_path_is_never_adopted_on_resume(self):
+        path, digest, env = self.write_plan()
+        with self.crash_after("channel"):
+            with self.assertRaises(KeyboardInterrupt):
+                self.apply(path, digest)
+        channel = self.channel_dir(env)
+        recorded = sp.channel_facts(channel)["root"]
+        shutil.rmtree(channel)
+        time.sleep(1.1)  # commit times have one-second resolution: same settings, later second, other root
+        sp.run_pin(self.project / ".tools" / "ai-comm", channel, "init", "--task", env["task"],
+                   "--reviewers", *env["reviewers"], "--require-confidence", "FACT", "CORRECT",
+                   "--require-sources", "FACT", "CORRECT")  # same settings, different root commit
+        self.assertNotEqual(sp.channel_facts(channel)["root"], recorded)
+        before = tree(channel)
+        self.assertEqual(self.stop(self.apply, path, digest).code, "channel_foreign")
+        self.assertEqual(tree(channel), before)
+
+    def test_second_setup_and_other_writers_are_refused_while_one_is_unfinished(self):
+        path, digest, env = self.write_plan()
+        with self.crash_after("gitignore"):
+            with self.assertRaises(KeyboardInterrupt):
+                self.apply(path, digest)
+        other, other_digest, _ = (self.base / "other.json", None, None)
+        env2 = dict(env, task="another task")
+        other.write_bytes(uc.canonical(env2))
+        self.assertEqual(self.stop(self.apply, other, uc.sha256_bytes(uc.canonical(env2))).code, "setup_plan_mismatch")
+        with sp.setup_lock(self.project / ".ai-comm-local" / "setup"):
+            self.assertEqual(self.stop(self.apply, path, digest).code, "setup_locked")
+        err = self.stop(sp.declare_module().init, self.project, cache=iu.Cache(self.cache_dir).open(create=False))
+        self.assertEqual(err.code, "setup_in_progress")
+
+    def test_abandon_removes_only_setup_staging_and_names_what_stays(self):
+        path, digest, env = self.write_plan()
+        with self.crash_after("channel"):
+            with self.assertRaises(KeyboardInterrupt):
+                self.apply(path, digest)
+        out = sp.abandon(self.project)
+        self.assertEqual(out["status"], "abandoned")
+        self.assertIn("pin", out["kept"])
+        self.assertIn("channel", out["kept"])
+        self.assertFalse((self.project / ".ai-comm-local" / "setup" / "txn").exists())
+        self.assertIsNone(uc.unfinished_setup(self.project))
+        self.assertTrue(self.channel_dir(env).exists())
+        self.assertEqual(self.stop(sp.abandon, self.project).code, "nothing_to_abandon")
+
+    # -- T18: the declaration step still checks its preimage
+
+    def test_declaration_step_fails_on_a_changed_preimage(self):
+        path, digest, env = self.write_plan()
+        with self.crash_after("note"):
+            with self.assertRaises(KeyboardInterrupt):
+                self.apply(path, digest)
+        live = self.project / ".ai-comm-local" / "upgrade" / "project.json"
+        live.write_bytes(live.read_bytes().replace(b'"integrations":[]', b'"integrations":[] '))
+        self.assertEqual(self.stop(self.apply, path, digest).code, "declaration_changed")
+
+
+def subprocess_run(argv):
+    import subprocess
+    done = subprocess.run(argv, capture_output=True, env=uc.clean_env(), timeout=120, check=True)
+    return done.stdout
 
 
 if __name__ == "__main__":
