@@ -289,7 +289,8 @@ absent in standalone use, where the installer behaves as before:
   right after the fetch, with Git plumbing only and before any fetched script or test
   runs, the annotated tag and the index record must name exactly this release; again
   before publication. A difference stops with `release_identity_changed` (`what` names
-  the field) and publishes nothing.
+  the field) and publishes nothing. With these arguments the result also lists, as
+  `newer_indexed`, any newer versions in the fetched index; they are reported only.
 - `--gitignore-before G0 --gitignore-after G1` (both or neither; each a SHA-256, G0
   may be `absent`): the ignore file must be G0, and adding the installer's lines to it
   must give G1, at the start and again before publication; `finish` rewrites it only

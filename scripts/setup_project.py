@@ -106,13 +106,20 @@ def device_of(path):
     return os.stat(path).st_dev
 
 
-def check_paths(project, channel, note):
+def check_path_rules(channel, note):
+    """The static path rules (plan and apply): plain components, no overlap, nothing reserved."""
     channel = check_relative(channel, "channel")
     note = check_relative(note, "note")
     need(not overlaps(channel, note), "path_overlap", field="note")
     for path, field in ((channel, "channel"), (note, "note")):
         for reserved in RESERVED:
             need(not overlaps(path, reserved), "path_reserved", field=field, reserved=reserved)
+    return channel, note
+
+
+def check_paths(project, channel, note):
+    channel, note = check_path_rules(channel, note)
+    for path, field in ((channel, "channel"), (note, "note")):
         parent = project.joinpath(*PurePosixPath(path).parts[:-1])
         cursor = project
         for part in PurePosixPath(path).parts[:-1]:
@@ -328,6 +335,20 @@ def plan(project_dir, *, task, channel=None, note=None, handles=None, reviewers=
             "display": display(envelope), "discovery": skill_candidates(project, cache)}
 
 
+def write_plan_file(result, out):
+    """Save the envelope's exact canonical bytes for `apply`, outside the project (the plan
+    itself writes nothing in the project). A new file only: an existing one is never replaced."""
+    target = Path(out).absolute()
+    project = Path(result["plan"]["project"])
+    need(not (target == project or project in target.parents), "plan_file_in_project")
+    fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "wb") as stream:
+        stream.write(uc.canonical(result["plan"]))
+        stream.flush()
+        os.fsync(stream.fileno())
+    return str(target)
+
+
 def display(envelope):
     """Plain lines for the owner: every value with its origin and change rule."""
     o, roles = envelope["origins"], envelope["roles"]
@@ -376,6 +397,29 @@ def installer_module():
 
 def declare_module():
     return _load("ai_comm_declare_project", RELEASE / "scripts" / "declare_project.py")
+
+
+def validate_envelope(env):
+    """Re-check in apply every input rule the plan enforced, on the approved bytes themselves."""
+    try:
+        roles = env["roles"]
+        need(isinstance(roles, list) and len(roles) == 2 and [r["role"] for r in roles] == ["A", "B"], "plan_invalid")
+        need(env["profile"] in ("fresh", "reuse"), "plan_invalid")
+        channel, note = check_path_rules(env["channel"], env["note"])
+        need((channel, note) == (env["channel"], env["note"]), "path_invalid")
+        check_text(env["task"], "task", MAX_TASK, True)
+        notifiers = [r["handle"] for r in roles if r["notifier"] is True]
+        need(len(notifiers) == 1 and env["release_checks"]["notifier"] == notifiers[0], "notifier_invalid")
+        check_roles((roles[0]["handle"], roles[1]["handle"]), env["reviewers"], notifiers[0],
+                    (roles[0]["host_label"], roles[1]["host_label"]), (roles[0]["duties"], roles[1]["duties"]))
+        check_text(env["a_reference"]["value"], "session reference", MAX_REFERENCE)
+        if env["b_fallback"] is not None:
+            check_text(env["b_fallback"]["value"], "session reference", MAX_REFERENCE)
+        need(env["evidence"] == EVIDENCE_POLICY, "plan_invalid")
+        need(uc.VERSION_RE.fullmatch(env["target"]["version"]), "plan_invalid")
+        need(version_key(env["target"]["version"]) >= version_key(MIN_SUPPORTED), "release_unsupported")
+    except (KeyError, TypeError) as exc:
+        raise Stop("plan_invalid") from exc
 
 
 def read_plan(plan_file, digest):
@@ -703,6 +747,7 @@ def default_installer(project, version, **kw):
 def apply(plan_file, digest, *, session, cache_dir=None, installer=None):
     """Apply one approved envelope, or resume it with the same file and digest."""
     env = read_plan(plan_file, digest)
+    validate_envelope(env)
     check_text(session, "approving session reference", MAX_REFERENCE)
     cache = vp.cache_for_release(cache_dir)
     setup = Setup(env, digest, cache, installer or default_installer)
@@ -741,6 +786,9 @@ def abandon(project_dir):
         uc.Journal(directory).append("state", {"state": "abandoned"})
         if os.path.lexists(directory / "txn"):
             shutil.rmtree(directory / "txn")
+        # Keep the record, out of the way: a later plan starts a new transaction.
+        os.rename(directory / "journal.jsonl", directory / f"abandoned-{current}.jsonl")
+        uc.fsync_dir(directory)
     remaining = [name for name, path in (("pin", project / ".tools" / "ai-comm"),
                                          ("channel", project.joinpath(*PurePosixPath(env["channel"]).parts)),
                                          ("note", project.joinpath(*PurePosixPath(env["note"]).parts)),
@@ -826,6 +874,7 @@ def main(argv=None):
     p.add_argument("--b-reference")
     p.add_argument("--version")
     p.add_argument("--no-release-checks", action="store_true")
+    p.add_argument("--out", help="write the plan's exact canonical bytes to this new file, outside the project")
     p = sub.add_parser("apply")
     p.add_argument("--plan", required=True)
     p.add_argument("--sha256", required=True)
@@ -848,6 +897,8 @@ def main(argv=None):
                           a_label=args.a_label, a_session=args.a_session, a_session_origin=args.a_session_origin,
                           b_label=args.b_label, b_fallback=args.b_fallback, b_reference=args.b_reference,
                           version=args.version, release_checks=not args.no_release_checks, cache_dir=args.cache)
+            if args.out:
+                result["plan_file"] = write_plan_file(result, args.out)
         elif args.command == "apply":
             result = apply(args.plan, args.sha256, session=args.session, cache_dir=args.cache)
         elif args.command == "abandon":

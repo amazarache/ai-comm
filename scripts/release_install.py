@@ -112,6 +112,16 @@ def file_digest(data):
     return "absent" if data is None else uc.sha256_bytes(data)
 
 
+def newer_indexed(repo, version):
+    """Versions in the fetched index newer than `version` (reported only; never selected)."""
+    raw = git(repo, "show", "refs/remotes/origin/release-index:RELEASES.json").encode()
+    index = uc.parse_json(raw, "release_index_invalid")
+    key = tuple(int(p) for p in version.split("."))
+    found = {r.get("package_version") for r in index.get("releases", []) if isinstance(r, dict)}
+    return sorted((v for v in found if isinstance(v, str) and uc.VERSION_RE.fullmatch(v)
+                   and tuple(int(p) for p in v.split(".")) > key), key=lambda v: tuple(int(p) for p in v.split(".")))
+
+
 def select_record(repo, version):
     raw = git(repo, "show", "refs/remotes/origin/release-index:RELEASES.json").encode()
     index = uc.parse_json(raw, "release_index_invalid")

@@ -66,10 +66,10 @@ session (as A); B is started by the owner in the other session.
    `sh "$REL/install.sh" --user setup plan --project "<PROJECT_ROOT>" --task "<TASK>" --a-label <HOST_LABEL> --a-session <SESSION_REFERENCE>`
    with the owner's values for `--channel`, `--note`, `--handles`, `--reviewers`,
    `--notifier`, `--duties`, `--b-label`, `--version` and `--no-release-checks`
-   (defaults otherwise). Pass this session's own host identifier as
-   `--a-session`; without one, omit it and the plan proposes a labelled value.
-   Keep the printed `plan` as a file outside the project, with exactly its canonical
-   bytes, and its `sha256`.
+   (defaults otherwise), and `--out <FILE>`, a new file outside the project. Pass this
+   session's own host identifier as `--a-session`; without one, omit it and the plan
+   proposes a labelled value. `--out` saves the plan's exact bytes for `apply`; keep that
+   file and the printed `sha256`.
 3. Show the owner every `display` line (value, "suggested" or "your choice", change
    rule) and any duplicate skill entries reported in `discovery`. A correction in
    ordinary words means a new plan and a new digest. Values the request already gave

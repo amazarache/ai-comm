@@ -281,7 +281,8 @@ def install(project_dir, version, *, fetch_permitted, use_helper, fetch=None, or
         journal.append("outcome", {"index": 1, "ok": True})
         tools = project / ".tools"
         added = finish(project, staging, journal, record, gitignore_guard)
-        return {"status": "installed", "version": version, "commit": record["commit"],
+        extra = {"newer_indexed": ri.newer_indexed(tools / "ai-comm", version)} if expect is not None else {}
+        return {**extra, "status": "installed", "version": version, "commit": record["commit"],
                 "pin": str(tools / "ai-comm"), "tests_ran": verified["tests_ran"],
                 "release_awareness": verified["release_awareness"], "gitignore_added": added,
                 "project_manifest": "unintegrated",

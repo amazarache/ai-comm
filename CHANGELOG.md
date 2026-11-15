@@ -40,6 +40,10 @@
   the notifier session, checks only while a session is active, revocation
   through any session. The pinned skill and ACTIVATE.md describe setup notes
   and the same rules. `setup --help` exits 0.
+- `setup plan --out FILE` saves the plan's exact bytes for `apply`; `apply`
+  re-checks every input rule on them; `abandon` archives the journal so a new
+  plan can apply; the installer reports newer indexed releases under an
+  expected identity (`newer_indexed`).
 - No protocol change: `PROTOCOL.md` is byte-identical, so existing protocol-3
   channels keep working.
 - **Validation status:** unit tests with fixture origins and caches, including a

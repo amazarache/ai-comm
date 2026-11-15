@@ -27,8 +27,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 27816,
-      "sha256": "50610752f2f87eca5edbad0317fa0eae1c2466412e99fcc4433c27a96922e79a"
+      "bytes": 28081,
+      "sha256": "10300c5f1d1b60954b73088ef2570f995fcda411626e03985f22374b911ed5cd"
     },
     {
       "path": "LICENSE",
@@ -92,8 +92,8 @@
     },
     {
       "path": "docs/INSTALL.md",
-      "bytes": 18828,
-      "sha256": "f615bda19cc7ee3936a222b659d48a13481d7880eb8dd46399aebd0bd771d865"
+      "bytes": 19095,
+      "sha256": "9df446ccd40d854c05ba63ad3a0060def748e4fb6ed9956b0212afca1513c491"
     },
     {
       "path": "docs/PERFORMANCE.md",
@@ -107,8 +107,8 @@
     },
     {
       "path": "docs/RELEASES.md",
-      "bytes": 26479,
-      "sha256": "77fe6167f1a1e6a3163cf2826e77a5fc9a5eef3ef9f32e09c8a1e27f3e2fe31e"
+      "bytes": 26610,
+      "sha256": "b852bf6e59162040a6cde62d51aa8402f45e11974cafde0de399cbc1f25649ba"
     },
     {
       "path": "docs/WAKE.md",
@@ -117,8 +117,8 @@
     },
     {
       "path": "entry/ai-comm/SKILL.md",
-      "bytes": 10452,
-      "sha256": "00612dff1ab7565e5937492af01f30c2a15104b08a781df413cdda798186ccc0"
+      "bytes": 10488,
+      "sha256": "58e7094149dd17e87dc49b5de17e97cec855b41d995127c9322b60689b16560f"
     },
     {
       "path": "examples/ask.json",
@@ -167,8 +167,8 @@
     },
     {
       "path": "scripts/install_project.py",
-      "bytes": 19482,
-      "sha256": "3c2d81fa80bc83f2419cb98e8c1000815f7e9246799d32d20c1b7473b8cba7a3"
+      "bytes": 19601,
+      "sha256": "a05aea7d44d8755122ab139c74d8308baa0e139845dcaf277b69ce5ec3676f1d"
     },
     {
       "path": "scripts/install_user.py",
@@ -187,8 +187,8 @@
     },
     {
       "path": "scripts/release_install.py",
-      "bytes": 16997,
-      "sha256": "3709a712e7a096af38ca96fa7e0e9a379688c1443189ce7027f2fdb2946ce1d5"
+      "bytes": 17627,
+      "sha256": "6fdcc834284901df4eaef190898dc3eb2c45f31261d606e398c1c1b4703ff4a6"
     },
     {
       "path": "scripts/render_bootstrap.py",
@@ -197,8 +197,8 @@
     },
     {
       "path": "scripts/setup_project.py",
-      "bytes": 42268,
-      "sha256": "b9f8cdf1c1d0a27da7610f3007533f33497c7ee4552104acd55bcc60c30fb922"
+      "bytes": 45128,
+      "sha256": "e7238561e1b8d40c514b2905bef6f086ae9c709627e4d1be2d546b0f859b62bf"
     },
     {
       "path": "scripts/test_old_protocol.py",
@@ -247,8 +247,8 @@
     },
     {
       "path": "tests/test_install_project.py",
-      "bytes": 26533,
-      "sha256": "159599c29587cb6c7614700c28b336307123215f591058023aa1dd39d7cf7c49"
+      "bytes": 27842,
+      "sha256": "157c5969f186a2c620acf8dc214232d5e0cf5d60af66eebf71c6825406ad6139"
     },
     {
       "path": "tests/test_install_user.py",
@@ -287,8 +287,8 @@
     },
     {
       "path": "tests/test_setup_project.py",
-      "bytes": 29068,
-      "sha256": "441379490899d0eea8cbe81914e0fb536dc1447e6d986c1286cfce4dfc8fe18e"
+      "bytes": 36336,
+      "sha256": "8ced501f26830259b5359d381c1a8b00c3903e74f1ef545b76d0996faf99c1a5"
     },
     {
       "path": "tests/test_setup_real_boundary.py",

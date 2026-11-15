@@ -353,6 +353,31 @@ class InstallTests(unittest.TestCase):
                 self.assertEqual(ran, [], "no staged script or suite may run")
                 self.assertFalse((self.project / ".tools" / "ai-comm").exists())
 
+    def test_identity_changed_after_the_suite_stops_before_publication(self):
+        real = ip.select_record
+        calls = []
+
+        def drifting(repo, version):
+            record = dict(real(repo, version))
+            calls.append(1)
+            if len(calls) > 1:  # the re-check before publication sees another commit
+                record["commit"] = "5" * 40
+            return record
+        with mock.patch.object(ip, "select_record", side_effect=drifting):
+            err = self.stop(self.install, expect=self.expected())
+        self.assertEqual((err.code, err.details.get("what")), ("release_identity_changed", "index_record"))
+        self.assertEqual(len(calls), 2)
+        self.assertFalse((self.project / ".tools" / "ai-comm").exists())
+
+    def test_a_newer_unrelated_release_is_reported_and_never_selected(self):
+        out = self.install("1.5.0", expect=self.expected("1.5.0"))
+        self.assertEqual((out["version"], out["newer_indexed"]), ("1.5.0", ["1.5.1"]))
+        self.assertEqual(git(self.project / ".tools" / "ai-comm", "rev-parse", "HEAD").strip(),
+                         self.releases["1.5.0"]["commit"])
+        shutil.rmtree(self.project)
+        self.project.mkdir()
+        self.assertNotIn("newer_indexed", self.install("1.5.0"))  # standalone output unchanged
+
     def test_gitignore_guard_absent_and_present_reaches_exactly_g1(self):
         for label, before in (("absent", None), ("no final newline", b"node_modules/"),
                               ("final newline", b"node_modules/\n"), ("one entry present", b".tools\n")):

@@ -522,6 +522,127 @@ class SetupApplyTests(Base):
         self.assertTrue(self.channel_dir(env).exists())
         self.assertEqual(self.stop(sp.abandon, self.project).code, "nothing_to_abandon")
 
+    # -- review findings on the candidate (abandon, apply re-validation, CLI handoff)
+
+    def test_abandon_then_a_new_plan_applies(self):
+        path, digest, env = self.write_plan()
+        with self.crash_after("gitignore"):
+            with self.assertRaises(KeyboardInterrupt):
+                self.apply(path, digest)
+        sp.abandon(self.project)
+        self.assertTrue(list((self.project / ".ai-comm-local" / "setup").glob("abandoned-*.jsonl")))
+        patch = mock.patch.object(sp.vp, "compat_class", return_value="controller")  # fixture is 1.5.x
+        patch.start()
+        self.addCleanup(patch.stop)
+        path.unlink()
+        path2, digest2, env2 = self.write_plan()
+        self.assertEqual(env2["profile"], "reuse")
+        self.assertEqual(self.apply(path2, digest2)["status"], "set_up")
+
+    def test_apply_rechecks_every_input_rule_on_the_approved_bytes(self):
+        path, digest, env = self.write_plan()
+        roles_two_notifiers = [dict(r, notifier=True) for r in env["roles"]]
+        cases = ({"note": "../x.md"}, {"channel": ".git/c"}, {"channel": "a/../b"}, {"note": ".ai-comm"},
+                 {"task": "a\u0000b"}, {"reviewers": ["agent-a"]}, {"roles": roles_two_notifiers},
+                 {"evidence": {"require_confidence": [], "require_sources": []}},
+                 {"target": dict(env["target"], version="0.1.0")}, {"roles": "x"})
+        for change in cases:
+            with self.subTest(change=list(change)):
+                tampered = dict(env, **change)
+                if "task" in change:
+                    tampered["task"] = "a\x00b"
+                data = uc.canonical(tampered)
+                path.write_bytes(data)
+                err = self.stop(self.apply, path, uc.sha256_bytes(data))
+                self.assertIn(err.code, ("path_invalid", "path_overlap", "path_reserved", "text_invalid",
+                                         "reviewers_invalid", "notifier_invalid", "plan_invalid",
+                                         "release_unsupported"))
+                self.assertFalse((self.project / ".ai-comm-local").exists())
+                self.assertFalse((self.project.parent / "x.md").exists())
+
+    def test_cli_plan_out_then_apply_as_the_entry_skill_describes(self):
+        tvp.make_pin(self.project, self.origin, "1.5.1")
+        patch = mock.patch.object(sp.vp, "compat_class", return_value="controller")
+        patch.start()
+        self.addCleanup(patch.stop)
+        plan_file = self.base / "approved-plan.json"
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = iu.main(["setup", "--cache", str(self.cache_dir), "plan", "--project", str(self.project),
+                            "--task", "cli handoff", "--a-label", "assistant", "--a-session", "cli-a",
+                            "--out", str(plan_file)])
+        planned = json.loads(out.getvalue())
+        self.assertEqual((code, planned["plan_file"]), (0, str(plan_file)))
+        self.assertEqual(uc.sha256_bytes(plan_file.read_bytes()), planned["sha256"])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = iu.main(["setup", "--cache", str(self.cache_dir), "apply", "--plan", str(plan_file),
+                            "--sha256", planned["sha256"], "--session", "cli-a"])
+        applied = json.loads(out.getvalue())
+        self.assertEqual((code, applied["status"]), (0, "set_up"), applied)
+        inside = self.project / "plan-copy.json"
+        self.assertEqual(self.stop(sp.write_plan_file, planned, inside).code, "plan_file_in_project")
+        with self.assertRaises(FileExistsError):
+            sp.write_plan_file(planned, plan_file)  # an existing file is never replaced
+
+    # -- T4 inside the installer and the declaration call; T11, T12a, T13, T17
+
+    def test_interruptions_inside_the_installer_and_the_declaration_call_resume(self):
+        ip = sp.installer_module()
+        cases = (("before publish", mock.patch.object(ip, "publish", side_effect=KeyboardInterrupt)),
+                 ("after publish", mock.patch.object(ip, "finish", side_effect=KeyboardInterrupt)),
+                 ("inside declaration", mock.patch.object(sp.declare_module().uc, "write_private_atomic",
+                                                          side_effect=KeyboardInterrupt)))
+        path, digest, env = self.write_plan()
+        for label, patch in cases:
+            with self.subTest(label):
+                shutil.rmtree(self.project)
+                self.project.mkdir()
+                if label == "inside declaration":
+                    with self.crash_after("note"):
+                        with self.assertRaises(KeyboardInterrupt):
+                            self.apply(path, digest)
+                with patch:
+                    with self.assertRaises(KeyboardInterrupt):
+                        self.apply(path, digest)
+                self.assertEqual(self.apply(path, digest)["status"], "set_up")
+                self.assertEqual(self.sessions(env), ["sessions/agent-a/00000001.json"])
+                state = self.final_state(env)
+                self.assertEqual(state["declaration"], sp.declaration_bytes(self.project, state["root"], env["note"]))
+
+    def test_apply_changes_no_cache_commit_or_skill_link(self):
+        tip.git(self.project, "init", "-q")
+        tip.git(self.project, "commit", "-q", "--allow-empty", "-m", "owner's history")
+        head = tip.git(self.project, "rev-parse", "HEAD")
+        (self.project / ".agents" / "skills").mkdir(parents=True)
+        cache_before = tree(self.cache_dir)
+        path, digest, env = self.write_plan()
+        self.apply(path, digest)
+        self.assertEqual(tree(self.cache_dir), cache_before)
+        self.assertEqual(tip.git(self.project, "rev-parse", "HEAD"), head)
+        self.assertEqual(tip.git(self.project, "diff", "--cached", "--name-only"), "")
+        self.assertEqual(list((self.project / ".agents" / "skills").iterdir()), [])
+
+    def test_a_changed_cache_current_does_not_affect_an_approved_plan(self):
+        path, digest, env = self.write_plan()
+        src = {"kind": "git", "origin": str(self.origin), "version": "1.5.3", "manifest_sha256": "0" * 64}
+        iu.install("1.5.1", fetch_permitted=True, use_helper=False, root=self.cache_dir, source=src,
+                   run_suite=lambda repo: 7)
+        iu.activate("1.5.1", root=self.cache_dir)
+        self.assertEqual(self.apply(path, digest)["status"], "set_up")
+
+    def test_fresh_setup_with_a_non_default_channel_and_release_check_policy(self):
+        (self.project / "work").mkdir()
+        path, digest, env = self.write_plan(channel="work/chan", notifier="agent-b")
+        out = self.apply(path, digest)
+        data = self.note_data(env)
+        self.assertEqual(data["release_checks"], {"allowed": True, "origin": env["release_checks"]["origin"],
+                                                  "notifier": "agent-b"})
+        self.assertTrue(any("check" in line and "new releases" in line for line in out["handoff"]))
+        loaded = uc.load_project_manifest(uc.Project(self.project, self.project / "work" / "chan"))
+        self.assertEqual(loaded["integrations"], [])
+        self.assertIn(b"/work/chan/\n", (self.project / ".gitignore").read_bytes())
+
     # -- T18: the declaration step still checks its preimage
 
     def test_declaration_step_fails_on_a_changed_preimage(self):

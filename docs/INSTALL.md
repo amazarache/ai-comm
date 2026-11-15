@@ -173,6 +173,7 @@ and `agent-b` (both reviewers), notifier A, duties "implements" and "reviews", B
 is shown as "suggested" or "your choice" with its change rule; any correction is a new plan with a new digest. A
 session reference is the host's identifier or a labelled proposal that the plan then fixes. The output also lists
 `ai-comm` skill entries found in registered skill directories and the project's own `.<dir>/skills` directories.
+`--out FILE` saves the envelope's exact canonical bytes, the input `apply` needs, to a new file outside the project.
 
 **Guided setup apply (1.11.0).** `setup apply` takes the plan file (its exact canonical bytes) and digest the owner
 approved, and the approving session's reference. It checks the executing release and every baseline before writing
@@ -184,8 +185,9 @@ anything, even an empty directory, has appeared at the path), A's `join`, the no
 the plan's data, and it holds no session references) and, fresh only, the declaration (declared, no integrations, the
 note as guidance, through `declare_project install` with this setup's transaction id). Resume is the same command:
 finished steps are recognised from the journal and verified, never repeated; anything the journal does not explain
-stops the flow and is not adopted. `setup abandon` marks the journal abandoned, removes only `.ai-comm-local/setup/txn`,
-and names what stays (pin, channel, note, declaration, `.gitignore` lines). Nothing else should write to the project
+stops the flow and is not adopted. `apply` re-checks every input rule of the plan on the approved bytes. `setup
+abandon` marks the journal abandoned, keeps it as `abandoned-<txn>.jsonl`, removes only `.ai-comm-local/setup/txn`, and
+names what stays (pin, channel, note, declaration, `.gitignore` lines); a new plan then sees the project as it is. Nothing else should write to the project
 while setup applies; drift a check observes stops it, a write between a check and the following replacement is not
 detected.
 
