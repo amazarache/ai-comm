@@ -71,7 +71,11 @@ file or linked worktree can refer to repository metadata elsewhere. The exact
 declaration and the CLI's channel checks still apply. A Git execution failure or
 timeout in exit-wake remains transient `git_unavailable` (75); a nonzero Git
 result, oversized output or mismatched repository root is permanent
-`channel_path_invalid` (78).
+`channel_path_invalid` (78). The installer classifies differently: in wake
+`plan`, `install`, `remove` and `integration`, and in declaration installation, a
+Git execution failure or a timeout (30 seconds) of the channel repository query
+is also `channel_path_invalid`, permanent (exit 78 for wake commands, exit 2 for
+declaration installation).
 
 For non-default exit-wake setup, the project's verified pin and the selected
 frozen bundle must contain an exit adapter with channel-selection support (added
@@ -90,7 +94,7 @@ be independent exit installations. **Remove, pause and resume through either
 path act on that shared instance.** Binding checks use only the selected copy's
 registry, even if that copy has an older session/generation than the other copy.
 A stopped instance does not record a channel path or durable binding; removing
-through either copy can delete its shared cursor, `pause`, `pause-ack` and
+through either copy can delete its shared cursor, `run.json`, `pause`, `pause-ack` and
 `peer-alarm.json`; a subsequent run through either copy adopts the shared cursor.
 Use a channel with a different root commit
 for an independent instance. Live phase checks still require the full run
