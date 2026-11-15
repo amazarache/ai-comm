@@ -22,8 +22,8 @@
     },
     {
       "path": "ACTIVATE.md",
-      "bytes": 31520,
-      "sha256": "3a409c7c542fa061e03a9e407c96cb8c63d5137862702d6707d888c47a006496"
+      "bytes": 31818,
+      "sha256": "85ec7568f7e7c19eac9d6e779363f29e91ce7fd5ea065472f9b01efc8a219768"
     },
     {
       "path": "CHANGELOG.md",
@@ -42,8 +42,8 @@
     },
     {
       "path": "README.md",
-      "bytes": 24298,
-      "sha256": "8f664029f25b74f389fc627d2e353ff3fe062e68a716ddb9e1ee32f42fcfbf0e"
+      "bytes": 24435,
+      "sha256": "e3507c741829b541d012082a5a9cf4ab77a10e66d75eaf4290ee1e4113b05c97"
     },
     {
       "path": "SECURITY.md",

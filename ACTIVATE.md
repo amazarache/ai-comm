@@ -24,6 +24,12 @@ command, a mention or a picker), or say it in plain words, for example
 "ai-comm start A <subject>". Plain words work once the host has discovered the
 skill or the session has read the pinned `SKILL.md`.
 
+Invocation hint (observed on one machine, 2026-11-15; check your host's own
+documentation): one terminal host invokes skills as a slash command,
+`/ai-comm start A <subject>`; another uses a `$` mention,
+`$ai-comm start B`. A project's activation note may record which form each of
+its hosts uses.
+
 Run A and B in their respective sessions. A starts its approved listener, if
 any, before waiting for B's join, then performs PING / PONG / ACK and opens the
 subject. B answers a durable PING whether it starts before or after A. The

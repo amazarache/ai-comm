@@ -78,6 +78,8 @@ After both sessions have read this pinned package skill and the project role
 table, the owner starts each session directly: invoke the `ai-comm` skill with
 `start A <subject>` in one session and `start B` in the other, using the host's
 own way of invoking a skill, or in plain words ("ai-comm start A <subject>").
+Hosts differ: observed forms are a slash command (`/ai-comm start A <subject>`)
+and a `$` mention (`$ai-comm start B`); see ACTIVATE.md.
 
 A performs the handshake after B joins, then opens the subject for review. These
 requests never initialize a channel or take over an identity without the
