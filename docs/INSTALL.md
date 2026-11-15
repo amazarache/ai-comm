@@ -105,11 +105,11 @@ with tarfile.open(sys.argv[1]) as archive:
 ```
 
 Then install into the per-user cache. `--fetch-permitted` is your consent to fetch exactly tag `vX` and the release
-index from the package's own release origin; `--use-git-credential-helper` lets that fetch use your configured Git
-login for the private repository:
+index from the package's own release origin. The repository is public, so no login is needed; add
+`--use-git-credential-helper` only if your Git setup requires your configured login for that origin:
 
 ```sh
-sh pkg/install.sh --user install --version X --fetch-permitted --use-git-credential-helper
+sh pkg/install.sh --user install --version X --fetch-permitted
 ```
 
 The installer checks that the archive you verified, the fetched annotated tag and the release index name the same

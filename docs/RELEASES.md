@@ -22,7 +22,7 @@ the package from its installed `ai_comm.py`, `RELEASE-MANIFEST.json` and
 `PROTOCOL.md`. Verify an archive against the release's SHA256SUMS instead.
 Git 2.44 and newer disables lazy fetching during these reads; on older Git
 versions partial clones receive no release advice rather than triggering a
-network fetch. This is consistency evidence, not publisher authentication. The private repository has
+network fetch. This is consistency evidence, not publisher authentication. The repository has
 no provenance attestation; output says `authenticity: not verified (no
 attestation)`.
 

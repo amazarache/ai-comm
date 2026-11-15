@@ -416,7 +416,7 @@ means no.
 
 *On yes.* Re-pin the checkout to the tag, verify the annotated tag and the
 manifest digest (and a signature or attestation, if the release ever provides
-one; this private repository provides none), run the manifest check and the
+one; this repository provides none), run the manifest check and the
 tests, update the project's activation note, then send a FACT on topic `upgrade`
 with the release record so every participant sees the notice in `state` and asks
 its own owner, then restart the watcher against the new pinned package. Re-check

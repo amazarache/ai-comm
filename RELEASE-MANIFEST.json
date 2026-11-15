@@ -22,8 +22,8 @@
     },
     {
       "path": "ACTIVATE.md",
-      "bytes": 31528,
-      "sha256": "1a66d09fdea78194653625447c2ec7fc1e235da0d6a738b6b5fe1aa4aea19224"
+      "bytes": 31520,
+      "sha256": "3a409c7c542fa061e03a9e407c96cb8c63d5137862702d6707d888c47a006496"
     },
     {
       "path": "CHANGELOG.md",
@@ -42,8 +42,8 @@
     },
     {
       "path": "README.md",
-      "bytes": 24299,
-      "sha256": "dab11390014595935ccaac6c3b63b5d9ca31f4fe1826064925eecae0dd3edf34"
+      "bytes": 24298,
+      "sha256": "8f664029f25b74f389fc627d2e353ff3fe062e68a716ddb9e1ee32f42fcfbf0e"
     },
     {
       "path": "SECURITY.md",
@@ -92,8 +92,8 @@
     },
     {
       "path": "docs/INSTALL.md",
-      "bytes": 14490,
-      "sha256": "d1ad41b541e0e9a3d7044e8b3e155fe971669bb6df27f80b37e92c4e359d46ca"
+      "bytes": 14512,
+      "sha256": "a0db3edbdf65eea3afbd89068da0ffdd959d11bea3b8a449e059d2812ccd7811"
     },
     {
       "path": "docs/PERFORMANCE.md",
@@ -107,8 +107,8 @@
     },
     {
       "path": "docs/RELEASES.md",
-      "bytes": 24560,
-      "sha256": "7fb3f54b088cb3de7637579da282fe83d4e3a9a4ecae909651625b9d44631a62"
+      "bytes": 24552,
+      "sha256": "742785800f390c51fc4df88ec7583ec787c99d63b5a7b47635721c35a31d6341"
     },
     {
       "path": "docs/WAKE.md",
