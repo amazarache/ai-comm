@@ -135,6 +135,27 @@ class InstallerChannelTests(installer.Base):
                 self.assertEqual((code, result.get("code")), (78, "channel_path_invalid"))
         self.assertEqual(self.everything(), before)
 
+    def test_repository_queries_use_the_controllers_clean_git_environment(self):
+        real, calls = subprocess.run, []
+        channel = str(self.project / ".ai-comm")
+
+        def run(argv, *args, **kwargs):
+            if (isinstance(argv, list) and argv[:2] == ["git", "-C"] and len(argv) > 3
+                    and argv[3] == "rev-parse" and os.fspath(argv[2]) == channel):
+                calls.append(kwargs.get("env"))
+            return real(argv, *args, **kwargs)
+
+        marker = {"GIT_CONFIG_PARAMETERS": "'ai-comm.testmarker'='1'"}
+        with mock.patch.dict(os.environ, marker), \
+                mock.patch.object(installer.wake.subprocess, "run", side_effect=run):
+            expected = installer.wake._uc().clean_env()
+            code, result = self.run_wake(self.args("plan"))
+        self.assertEqual(code, 0, result)
+        self.assertTrue(calls, "the channel query was not reached")
+        for env in calls:
+            self.assertEqual(env, expected)
+            self.assertNotIn("GIT_CONFIG_PARAMETERS", env)
+
     def test_alternate_only_install_remove_and_frozen_exit_phases(self):
         live = self.project / ".ai-comm-v3"
         (self.project / ".ai-comm").rename(live)

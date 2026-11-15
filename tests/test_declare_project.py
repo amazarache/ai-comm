@@ -176,6 +176,47 @@ class DeclareTests(unittest.TestCase):
         path, digest = self.declaration(channel)
         self.assertEqual(self.install(path, digest, "absent")["status"], "declared")
 
+    def channel_query_calls(self, channel, error=None):
+        """Wrap subprocess.run: record (or fail) only the channel repository queries of install."""
+        import subprocess
+        real, calls = subprocess.run, []
+
+        def run(argv, *args, **kwargs):
+            if (isinstance(argv, list) and argv[:2] == ["git", "-C"] and len(argv) > 3
+                    and argv[3] == "rev-parse" and os.fspath(argv[2]) == str(channel)):
+                calls.append(kwargs.get("env"))
+                if error is not None:
+                    raise error
+            return real(argv, *args, **kwargs)
+        return mock.patch.object(dp.subprocess, "run", side_effect=run), calls
+
+    def test_channel_query_execution_failures_have_fixed_code(self):
+        import subprocess
+        path, digest = self.declaration(self.channel())
+        for error in (FileNotFoundError("fixture git unavailable"), PermissionError("fixture"),
+                      subprocess.TimeoutExpired(["git"], 30)):
+            with self.subTest(error=type(error).__name__):
+                patch, calls = self.channel_query_calls(self.project / ".ai-comm", error)
+                with patch:
+                    err = self.stop(self.install, path, digest)
+                self.assertEqual(err.code, "channel_path_invalid")
+                self.assertTrue(calls, "the channel query was not reached")
+                self.assertIsNone(self.live())
+                self.assertFalse(self.sentinel.exists())
+
+    def test_channel_queries_use_the_controllers_clean_git_environment(self):
+        channel = self.channel()
+        path, digest = self.declaration(channel)
+        marker = {"GIT_CONFIG_PARAMETERS": "'ai-comm.testmarker'='1'"}
+        patch, calls = self.channel_query_calls(self.project / ".ai-comm")
+        with mock.patch.dict(os.environ, marker), patch:
+            expected = uc.clean_env()
+            self.assertEqual(self.install(path, digest)["status"], "declared")
+        self.assertTrue(calls, "the channel query was not reached")
+        for env in calls:
+            self.assertEqual(env, expected)
+            self.assertNotIn("GIT_CONFIG_PARAMETERS", env)
+
     def test_selected_channel_installs_exact_bytes_and_rejects_other_root(self):
         other = self.channel()
         selected = self.channel(".ai-comm-v3")

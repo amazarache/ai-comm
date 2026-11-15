@@ -227,8 +227,8 @@
     },
     {
       "path": "tests/test_declare_project.py",
-      "bytes": 13001,
-      "sha256": "ff9fd6ee2d9c7a5466f6e15fae3b5892733225f0b3ebafbcf1543b6d9dccf4eb"
+      "bytes": 15162,
+      "sha256": "04572945412ec8f07db2de3b957c34d2e77563b9386e130418d5317ab76c3aa6"
     },
     {
       "path": "tests/test_exit_wake.py",
@@ -312,8 +312,8 @@
     },
     {
       "path": "tests/test_wake_channel.py",
-      "bytes": 26622,
-      "sha256": "f9035938015006cd02fdb12ff81cc049096accb29bb265d3a3b53f4df195764f"
+      "bytes": 27665,
+      "sha256": "e3e1584cc4f44fefe2653090441a26ceae3e1d983f82abeb5453c9ba3e38e3ef"
     },
     {
       "path": "tests/test_wake_install.py",
