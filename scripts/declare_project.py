@@ -89,6 +89,7 @@ def _read_candidate(path):
 
 def init(project_dir, *, cache):
     project = _project(project_dir)
+    uc.require_no_foreign_setup(project)
     _require_verified(project, cache)
     upgrade = uc.Project(project)
     with upgrade.lock():
@@ -102,10 +103,16 @@ def init(project_dir, *, cache):
     return {"status": "initialized", "declaration": str(path), "sha256": uc.sha256_bytes(data)}
 
 
-def install(project_dir, *, candidate, sha256, previous, cache, channel=None):
+def install(project_dir, *, candidate, sha256, previous, cache, channel=None, setup_txn=None):
+    """Install exact reviewed declaration bytes. `setup_txn` is passed only by guided
+    setup's own declaration step: while that setup is unfinished, other calls refuse
+    with `setup_in_progress`. The lock order for that call is setup lock, then upgrade
+    lock; none of the checks below is skipped for it (design rev 7, section 6 step 7)."""
     need(uc.HEX.fullmatch(sha256 or ""), "invalid_sha256")
     need(previous == "absent" or uc.HEX.fullmatch(previous or ""), "invalid_previous")
+    need(setup_txn is None or uc.HEX.fullmatch(setup_txn), "invalid_setup_txn")
     project = _project(common.normalize_leading_slashes(project_dir))
+    uc.require_no_foreign_setup(project, setup_txn)
     _require_verified(project, cache)
     data = _read_candidate(candidate)
     need(uc.sha256_bytes(data) == sha256, "candidate_digest_mismatch")
@@ -127,6 +134,7 @@ def install(project_dir, *, candidate, sha256, previous, cache, channel=None):
     live = upgrade.project_id()  # the real project, computed by this release's own code
     uc.validate_project_manifest(data, {"path": live["path"], "channel": live["channel"]})
     with upgrade.lock():
+        uc.require_no_foreign_setup(project, setup_txn)
         _no_transaction_in_flight(upgrade)
         current = _live_digest(upgrade)
         need(current == previous, "declaration_changed", current=current)
@@ -144,6 +152,7 @@ def main(argv=None):
     p = sub.add_parser("install")
     p.add_argument("--project", required=True)
     p.add_argument("--channel", help="channel path, absolute or relative to the project")
+    p.add_argument("--setup-txn", help="guided setup's own declaration step only")
     p.add_argument("--file", required=True)
     p.add_argument("--sha256", required=True)
     p.add_argument("--previous", required=True, help="sha256 of the live declaration, or `absent`")
@@ -160,7 +169,7 @@ def main(argv=None):
             result = init(args.project, cache=cache)
         else:
             result = install(args.project, candidate=args.file, sha256=args.sha256, previous=args.previous,
-                             cache=cache, channel=args.channel)
+                             cache=cache, channel=args.channel, setup_txn=args.setup_txn)
         print(json.dumps(result, sort_keys=True))
         return 0
     except Stop as exc:

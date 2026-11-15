@@ -27,8 +27,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 25731,
-      "sha256": "3834bd5d32a435913ed92bbfc85bd21454e2fada8e94c30b881b1ff2be48afa8"
+      "bytes": 25968,
+      "sha256": "970047fed1d2778ef78f92d21ed9d781671aa464b348d02ff9c2c9c050fac99b"
     },
     {
       "path": "LICENSE",
@@ -107,8 +107,8 @@
     },
     {
       "path": "docs/RELEASES.md",
-      "bytes": 25914,
-      "sha256": "6519d119c3e49e82522ec7aacd16faf195dd087c94a7b4dffb9002ba502cc484"
+      "bytes": 26479,
+      "sha256": "77fe6167f1a1e6a3163cf2826e77a5fc9a5eef3ef9f32e09c8a1e27f3e2fe31e"
     },
     {
       "path": "docs/WAKE.md",
@@ -157,8 +157,8 @@
     },
     {
       "path": "scripts/declare_project.py",
-      "bytes": 7353,
-      "sha256": "03075cb8506a56b01c75f258ecac4703eb29340cc08e9c51a33b574ae03ba5a3"
+      "bytes": 8055,
+      "sha256": "be274d99f0fa537f09a14bb56c517f7e269b1cc99f415a34ed4ffea638b76fb1"
     },
     {
       "path": "scripts/extract_release_notes.py",
@@ -187,8 +187,8 @@
     },
     {
       "path": "scripts/release_install.py",
-      "bytes": 17992,
-      "sha256": "fc48b87514b5d9f2c34670270091cfee8c5909f644a1fe47e89a87139b3887cb"
+      "bytes": 16800,
+      "sha256": "f40759579333640fc5aef5dfb8666bd8e428d75eb1f1a50ea0aea0da7fd2db79"
     },
     {
       "path": "scripts/render_bootstrap.py",
@@ -227,8 +227,8 @@
     },
     {
       "path": "tests/test_declare_project.py",
-      "bytes": 15162,
-      "sha256": "04572945412ec8f07db2de3b957c34d2e77563b9386e130418d5317ab76c3aa6"
+      "bytes": 17126,
+      "sha256": "ad9f9138e68abd3e02b6761c418c616ac0a09cb0988a47edf2d36dd479509dcd"
     },
     {
       "path": "tests/test_exit_wake.py",
@@ -287,8 +287,8 @@
     },
     {
       "path": "tests/test_upgrade_controller.py",
-      "bytes": 60640,
-      "sha256": "4e6236193ebda26c9d692d3a82d4c0b9f86a715a5f377dc1609f24292319301f"
+      "bytes": 62080,
+      "sha256": "77d7d84fb0725d5132e6e92a97bfe05b3f5a759b7670787e6ef1d09978e00f6f"
     },
     {
       "path": "tests/test_upgrade_plan.py",
@@ -322,8 +322,8 @@
     },
     {
       "path": "upgrade_controller.py",
-      "bytes": 75329,
-      "sha256": "ff30c0e30cce2120a3d0532b86d984a341c028800a6ad3f2cb250e9d8d9346f2"
+      "bytes": 77236,
+      "sha256": "910309494ab4296f7db1628fa7bd0dd495b843af1214ea3ee59acae88c73a84a"
     }
   ],
   "format": "ai-comm-review-manifest/1",

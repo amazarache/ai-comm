@@ -344,6 +344,44 @@ def package_identity(pin):
             "cli_sha256": sha256_bytes(cli)}
 
 
+SETUP_SCHEMA = "ai-comm-setup/1"
+SETUP_TERMINAL = ("completed", "abandoned")
+
+
+def setup_journal_dir(project):
+    return Path(project) / ".ai-comm-local" / "setup"
+
+
+def unfinished_setup(project):
+    """The transaction id of an unfinished guided setup in this project, or None.
+
+    Read-only. A setup journal that cannot be read or recognised counts as unfinished
+    (`"unrecognized"`), so cooperating tools of this release refuse rather than guess.
+    Older releases do not know this guard (design rev 7, 6b)."""
+    directory = setup_journal_dir(project)
+    if not os.path.lexists(directory / "journal.jsonl"):
+        return None
+    try:
+        records, _torn = Journal(directory).read()
+    except (Stop, OSError, ValueError):
+        return "unrecognized"
+    if not records or records[0]["kind"] != "start":
+        return "unrecognized"
+    start = records[0]["data"]
+    txn = start.get("txn")
+    if start.get("schema") != SETUP_SCHEMA or not isinstance(txn, str) or not HEX.fullmatch(txn):
+        return "unrecognized"
+    states = [r["data"].get("state") for r in records if r["kind"] == "state"]
+    return None if any(state in SETUP_TERMINAL for state in states) else txn
+
+
+def require_no_foreign_setup(project, setup_txn=None):
+    """Refuse while another (or an unrecognised) guided setup is unfinished; a call that
+    carries that setup's own transaction id is part of it and proceeds."""
+    current = unfinished_setup(project)
+    need(current is None or (setup_txn is not None and current == setup_txn), "setup_in_progress")
+
+
 def tag_identity(pin, version):
     need(VERSION_RE.fullmatch(version), "invalid_target")
     tag = "v" + version
@@ -1587,6 +1625,12 @@ COMMANDS = {"check": cmd_check, "record-answer": record_answer, "fetch": cmd_fet
             "finalize": cmd_finalize, "status": cmd_status}
 
 
+# Commands that change nothing; every other command refuses while a guided setup of
+# this project is unfinished (design rev 7, 6b). Setup's own declaration step uses
+# declare_project, not this controller.
+READ_ONLY_COMMANDS = ("check", "status")
+
+
 def main(argv=None):
     try:
         args = build_parser().parse_args(argv)
@@ -1595,6 +1639,8 @@ def main(argv=None):
         return 2
     try:
         project = Project(args.project, args.channel)
+        if args.command not in READ_ONLY_COMMANDS:
+            require_no_foreign_setup(project.dir)
         result = COMMANDS[args.command](project, args)
         print(json.dumps(result, sort_keys=True))
         return 0

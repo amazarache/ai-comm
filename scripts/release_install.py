@@ -83,42 +83,11 @@ def unintegrated_declaration(project):
                          "project_id": {"path": str(project), "channel": None}, "integrations": []})
 
 
-SETUP_SCHEMA = "ai-comm-setup/1"
-SETUP_TERMINAL = ("completed", "abandoned")
-
-
-def setup_journal_dir(project):
-    return Path(project) / ".ai-comm-local" / "setup"
-
-
-def unfinished_setup(project):
-    """The transaction id of an unfinished guided setup in this project, or None.
-
-    Read-only. A setup journal that cannot be read or recognised counts as unfinished
-    (`"unrecognized"`), so cooperating tools of this release refuse rather than guess.
-    Older releases do not know this guard (design rev 7, 6b)."""
-    directory = setup_journal_dir(project)
-    if not os.path.lexists(directory / "journal.jsonl"):
-        return None
-    try:
-        records, _torn = uc.Journal(directory).read()
-    except (Stop, OSError, ValueError):
-        return "unrecognized"
-    if not records or records[0]["kind"] != "start":
-        return "unrecognized"
-    start = records[0]["data"]
-    txn = start.get("txn")
-    if start.get("schema") != SETUP_SCHEMA or not isinstance(txn, str) or not uc.HEX.fullmatch(txn):
-        return "unrecognized"
-    states = [r["data"].get("state") for r in records if r["kind"] == "state"]
-    return None if any(state in SETUP_TERMINAL for state in states) else txn
-
-
-def require_no_foreign_setup(project, setup_txn=None):
-    """Refuse while another (or an unrecognised) guided setup is unfinished; a call that
-    carries that setup's own transaction id is part of it and proceeds."""
-    current = unfinished_setup(project)
-    need(current is None or (setup_txn is not None and current == setup_txn), "setup_in_progress")
+# The guided-setup journal guard lives in the controller, which every cooperating tool
+# of a release loads; these names keep the installer's call sites short.
+SETUP_SCHEMA, SETUP_TERMINAL = uc.SETUP_SCHEMA, uc.SETUP_TERMINAL
+setup_journal_dir, unfinished_setup, require_no_foreign_setup = (
+    uc.setup_journal_dir, uc.unfinished_setup, uc.require_no_foreign_setup)
 
 
 def gitignore_after(existing, lines):

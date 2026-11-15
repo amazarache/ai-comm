@@ -303,6 +303,14 @@ absent in standalone use, where the installer behaves as before:
   journal it cannot recognise counts as unfinished. Older releases do not know this
   guard.
 
+The same guard applies to the guided upgrade controller of this release: while a
+guided setup of the project is unfinished, every controller command except `check`
+and `status` stops with `setup_in_progress`. Declaration `init` stops the same way,
+and declaration `install` too unless it carries `--setup-txn` with that setup's
+transaction id; that call is setup's own declaration step, takes the upgrade lock
+after setup's lock, and keeps every other check (verified pin, exact candidate
+digest, channel identity, expected previous digest, no upgrade in flight).
+
 ## Per-user cache, pin verifier and entry skill (1.6.0)
 
 `install.sh --user <command>` runs `scripts/install_user.py`; [INSTALL.md](INSTALL.md)

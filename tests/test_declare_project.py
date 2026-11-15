@@ -217,6 +217,43 @@ class DeclareTests(unittest.TestCase):
             self.assertEqual(env, expected)
             self.assertNotIn("GIT_CONFIG_PARAMETERS", env)
 
+    def start_setup(self, txn):
+        local = self.project / ".ai-comm-local"
+        if not local.exists():
+            os.mkdir(local, 0o700)
+        directory = uc.private_dir(local / "setup")
+        uc.Journal(directory).append("start", {"schema": uc.SETUP_SCHEMA, "txn": txn})
+
+    def test_unfinished_setup_allows_only_its_own_declaration_call(self):
+        """T18: setup's step 7 call is not blocked by setup's own journal, still fails on
+        a wrong preimage, and nobody else may declare meanwhile."""
+        channel = self.channel()
+        unintegrated = dp.init(self.project, cache=self.cache)["sha256"]
+        before = self.live()
+        txn = "f" * 64
+        self.start_setup(txn)
+        path, digest = self.declaration(channel, integrations=[])
+        for kw in ({}, {"setup_txn": "0" * 64}):
+            with self.subTest(**kw):
+                err = self.stop(dp.install, self.project, candidate=path, sha256=digest,
+                                previous=unintegrated, cache=self.cache, **kw)
+                self.assertEqual(err.code, "setup_in_progress")
+                self.assertEqual(self.live(), before)
+        err = self.stop(dp.install, self.project, candidate=path, sha256=digest, previous="a" * 64,
+                        cache=self.cache, setup_txn=txn)
+        self.assertEqual(err.code, "declaration_changed")
+        self.assertEqual(self.live(), before)
+        result = dp.install(self.project, candidate=path, sha256=digest, previous=unintegrated,
+                            cache=self.cache, setup_txn=txn)
+        self.assertEqual(result["status"], "declared")
+        self.assertEqual(self.live(), path.read_bytes())
+        self.assertFalse(self.sentinel.exists())
+
+    def test_unfinished_setup_refuses_declaration_init(self):
+        self.start_setup("9" * 64)
+        self.assertEqual(self.stop(dp.init, self.project, cache=self.cache).code, "setup_in_progress")
+        self.assertIsNone(self.live())
+
     def test_selected_channel_installs_exact_bytes_and_rejects_other_root(self):
         other = self.channel()
         selected = self.channel(".ai-comm-v3")

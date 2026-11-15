@@ -17,6 +17,10 @@
   `gitignore_guard_mismatch`, also applied by `--recover`), and a setup
   transaction id; while a guided setup is unfinished, other installs stop with
   `setup_in_progress`. Without the new arguments it behaves as before.
+- While a guided setup is unfinished, the upgrade controller refuses every
+  command except `check` and `status`, and declaration `init` and `install`
+  refuse unless `install` carries that setup's `--setup-txn`
+  (`setup_in_progress`).
 - Test the declaration installer's channel query: Git execution failures and
   timeouts are refused with `channel_path_invalid` and leave the declaration
   unchanged; the queries of declaration installation and of the wake installer

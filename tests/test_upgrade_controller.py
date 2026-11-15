@@ -236,6 +236,27 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(out["prompt"]["target"], "1.1.0")
         self.assertEqual(out["prompt"]["source"], "https://example.invalid/ai-comm.git")
 
+    def test_unfinished_guided_setup_blocks_every_changing_command(self):
+        """Design rev 7, 6b: the controller of this release refuses while a guided setup
+        of the project is unfinished; check and status still answer."""
+        self.fx.write_manifest([])
+        local = self.fx.project / ".ai-comm-local"
+        directory = uc.private_dir(local / "setup")
+        uc.Journal(directory).append("start", {"schema": uc.SETUP_SCHEMA, "txn": "e" * 64})
+        for args in (("record-answer", "--answer", "not_now", "--target", "1.1.0"),
+                     ("fetch", "--target", "1.1.0", "--consent", "x"),
+                     ("prepare", "--target", "1.1.0", "--consent", "x", "--as", "agent-a", "--session", "s-agent-a"),
+                     ("apply", "--as", "agent-a", "--session", "s-agent-a"),
+                     ("recover", "--as", "agent-a", "--session", "s-agent-a")):
+            with self.subTest(command=args[0]):
+                code, out = self.run_uc(*args)
+                self.assertEqual((code, out["code"]), (2, "setup_in_progress"))
+        self.assertEqual(self.run_uc("check")[0], 0)
+        self.assertNotEqual(self.run_uc("status")[1].get("code"), "setup_in_progress")
+        uc.Journal(directory).append("state", {"state": "abandoned"})
+        code, out = self.run_uc("record-answer", "--answer", "not_now", "--target", "1.1.0")
+        self.assertNotEqual(out.get("code"), "setup_in_progress")
+
     def test_check_on_current_pin_reports_no_offer(self):
         self.fx.write_manifest([])
         git(self.fx.pin, "checkout", "-q", "--detach", self.fx.to_commit)
