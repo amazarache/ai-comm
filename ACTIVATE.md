@@ -95,6 +95,21 @@ apply it. Pending release questions and answers are recorded as FACTs to prevent
 duplicate prompts, but those records never authorize another session to fetch
 or re-pin.
 
+## Guided setup (package 1.11.0)
+
+A project without ai-comm, or with a verified pin but no channel and no note, can be
+set up in one approved step from the per-user cache: `install.sh --user setup plan`
+prints a plan that writes nothing, the owner approves that exact plan in one
+sentence, and `setup apply` installs the pin if needed (fetched fresh from the
+release origin and tested), adds ignore entries, creates the channel with the pin's
+own `init`, binds only the requesting session as A, writes the activation note once
+and, for a fresh pin, declares the project for guided upgrades with no integrations.
+It prints the sentence the owner gives B. The entry skill (section 2a) describes the
+conversation; [INSTALL.md](docs/INSTALL.md) describes the commands. The decisions
+below are what the plan asks for; with guided setup they are settled in the plan
+instead of by hand. Setup never binds B, commits, pushes, installs a wake adapter or
+approves an upgrade.
+
 ## Setup decisions
 
 Settle these before the first message. A session should confirm each one with the

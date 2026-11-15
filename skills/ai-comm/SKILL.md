@@ -205,6 +205,26 @@ revocable scheduled Gate 1 check. Scheduled checks never install or re-pin.
 Checks run only while a session is already active or through a separately
 approved notifier; nothing wakes an idle model.
 
+## Notes written by guided setup (package 1.11.0)
+
+A project set up with `install.sh --user setup` has a note whose JSON block records
+the owner-approved plan as data: release, channel, reviewers, evidence policy, the
+role table with working duties and the notifier, `release_checks` (`allowed`,
+`origin`, `notifier`), and "none approved" for wake and nudge. Duties are words, not
+permissions: push, publication, installation, re-pin, takeover and wake stay
+separately approved owner actions. Session references are not in the note; the
+channel registry records them.
+
+Release checks follow the policy and a direct grant together: fetch release refs
+with `scripts/check_for_release.py --fetch-permitted` only when the note allows it,
+this session is the current binding of the notifier handle, and the owner gave this
+session the grant directly (the setup approval, B's start sentence or a takeover
+request that contains the release-check clause). Check at start or resume and about
+daily while active, re-reading the note and registry before each fetch; nothing is
+checked while no session runs. When the owner revokes it in any session, that
+session sets `allowed` to false in the note and records a FACT. The grant never
+replaces the separate upgrade consent of the sections above.
+
 ## Coordination rules
 
 Use the pinned ai-comm package for channel work. Do not modify or fork it,

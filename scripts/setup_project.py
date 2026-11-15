@@ -836,7 +836,9 @@ def main(argv=None):
     p.add_argument("--project", required=True)
     try:
         args = parser.parse_args(argv)
-    except SystemExit:
+    except SystemExit as exc:
+        if exc.code == 0:  # --help
+            return 0
         print(json.dumps({"status": "stopped", "code": "invalid_arguments"}))
         return 2
     try:

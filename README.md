@@ -20,7 +20,9 @@ curl -fsSL --proto =https --proto-redir =https --tlsv1.2 \
 ```
 
 [docs/INSTALL.md](docs/INSTALL.md) has the verify-first variant (recommended), the bootstrap digests, what this
-trusts, and the manual steps. A project's own pinned copy is installed separately with `install.sh --project`.
+trusts, and the manual steps. A project's own pinned copy is installed separately with `install.sh --project`, or,
+from 1.11.0, together with its channel, note and first session by guided setup (`install.sh --user setup`, one
+approved plan; see ACTIVATE.md).
 
 ## How any agent uses ai-comm
 

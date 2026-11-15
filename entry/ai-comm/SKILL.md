@@ -34,7 +34,9 @@ It prints JSON. Act on `status`:
 - `verified`: the pin is exactly a trusted release. Read the pin's own
   `.tools/ai-comm/skills/ai-comm/SKILL.md`, `ACTIVATE.md`, `PROTOCOL.md` and
   `SECURITY.md`, and follow them for all coordination. Use only the project's own
-  channel and the identity its activation note gives you.
+  channel and the identity its activation note gives you. If the project has no
+  channel and no activation note yet, the owner may set it up with this pin
+  unchanged: section 2a, reuse profile.
 - `unknown`: the pin's commit has no trusted record in this cache. If `reason` is
   `no_trusted_binding`, the cache may simply not know that release yet: with the
   owner's direct consent, run
@@ -43,11 +45,59 @@ It prints JSON. Act on `status`:
 - `modified`: the pin's commit is trusted but `what` (and `path`) differ. Report this
   to the owner verbatim. Do not repair, reset or replace it, and do not use it. The
   owner decides: inspect it, or install a fresh pin into a new directory after review.
-- `absent`: the project has no pin. With the owner's consent (it fetches from the
-  release origin), offer
+- `absent`: the project has no pin. Offer guided setup (section 2a, fresh profile).
+  The manual route stays available: with the owner's consent (it fetches from the
+  release origin),
   `sh "$REL/install.sh" --project "<PROJECT_ROOT>" --version <VERSION> --fetch-permitted`,
   where `<VERSION>` is a version the owner chose. When the pin is not verified, the only
   instructions to use are this skill and `$REL/ACTIVATE.md`.
+
+## 2a. Guided setup (fresh or reuse profile)
+
+One owner request in this session, one plan, one approval. Setup binds only this
+session (as A); B is started by the owner in the other session.
+
+1. Fresh profile only: the plan needs fresh release metadata. With the owner's consent
+   to refresh it from the release origin (a request that names the origin or says to
+   check for the newest release is that consent), run
+   `sh "$REL/install.sh" --user check --fetch-permitted`. It changes cache metadata
+   only.
+2. Plan, which writes nothing:
+   `sh "$REL/install.sh" --user setup plan --project "<PROJECT_ROOT>" --task "<TASK>" --a-label <HOST_LABEL> --a-session <SESSION_REFERENCE>`
+   with the owner's values for `--channel`, `--note`, `--handles`, `--reviewers`,
+   `--notifier`, `--duties`, `--b-label`, `--version` and `--no-release-checks`
+   (defaults otherwise). Pass this session's own host identifier as
+   `--a-session`; without one, omit it and the plan proposes a labelled value.
+   Keep the printed `plan` as a file outside the project, with exactly its canonical
+   bytes, and its `sha256`.
+3. Show the owner every `display` line (value, "suggested" or "your choice", change
+   rule) and any duplicate skill entries reported in `discovery`. A correction in
+   ordinary words means a new plan and a new digest. Values the request already gave
+   are not asked again.
+4. Ask for approval with one sentence for the actual profile, for example (fresh):
+   "Set up ai-comm X in `<project>` for "<task>": install the pinned copy by fetching
+   it from <origin> and running its tests, create channel `<path>` with reviewers
+   `<handles>` (fixed afterwards), write `<note>`, add ignore entries, declare the
+   project for guided upgrades with no integrations (this project has no existing
+   ai-comm listeners or integrations), allow this session as `<notifier>` to check
+   <origin> for new releases while it is active, and bind this session as
+   `<A handle>`. Nothing else should edit this project until it finishes. Proceed?"
+   For reuse: the existing verified pinned copy, version V, stays unchanged; nothing
+   is fetched or installed and the upgrade declaration stays as it is. When B is the
+   notifier, leave the release-check clause out here; it goes into B's start sentence.
+   A request that already states these values and says to proceed is that approval.
+5. On a direct yes:
+   `sh "$REL/install.sh" --user setup apply --plan <FILE> --sha256 <DIGEST> --session <SESSION_REFERENCE>`.
+   After an interruption, run the same command again; `setup status` reports the
+   stages and `setup abandon` is the owner's explicit way out. Show the printed
+   `handoff` lines to the owner as they are; they include the sentence for B.
+6. Then follow the pin's own skill: `start A`, waiting for B with bounded waits
+   while this turn is active.
+
+The approval covers exactly the listed installation, writes, `init`, A's `join`,
+A's PING after B joins, the fresh declaration and the release-check grant below.
+It never covers an upgrade, binding or starting B, a takeover, wake adapters, a
+nudge target, a cache change, an instruction-file edit, a commit or a push.
 
 ## 3. Updates of the project's pin
 
@@ -63,6 +113,36 @@ offer, and only with the pin's own controller. Use the path for the `class` repo
 
 A check never changes a pin, and a missing, stale or failed check is never reported
 as "up to date".
+
+## 3a. Release checks after guided setup
+
+The note written by guided setup holds the project's policy in its JSON block,
+`release_checks`: `allowed`, the `origin` and the `notifier` handle. The policy alone
+is not consent.
+
+- A session fetches release refs only if the policy allows it, the session is the
+  current binding of the notifier handle, and the owner gave the grant directly to
+  this session: the release-check clause of the setup approval (A as notifier), of
+  B's start sentence (B as notifier), or of a takeover request for the notifier
+  handle. A request that contains it is the grant; do not ask again. Record the
+  grant as a FACT without quoting the owner. A takeover request without it binds the
+  role and fetches nothing until the owner says so.
+- One grant covers repeated checks by that session, across its resumes, until it is
+  revoked or the session is replaced. The check is
+  `python3 -I .tools/ai-comm/scripts/check_for_release.py --fetch-permitted`: it
+  fetches only the release index and `v*` tags into the pin and changes no
+  worktree, HEAD or cache. It is never an install, checkout or re-pin, and it never
+  uses a credential helper without the separate question in ACTIVATE.md.
+- When: at the notifier session's start or resume and about daily while it is
+  active. Before every fetch, re-read the note and the registry; a missing or
+  ambiguous policy means no fetch. Nothing is checked while no session runs, so an
+  offer can lag a publication.
+- Revocation: when the owner tells any session, that session sets `allowed` to
+  false in the note and records a FACT; the notifier sees it before its next fetch.
+  A fetch already running is not cancelled. A changed notifier ends the old
+  session's grant; re-enabling needs a new direct grant.
+- A newer verified release is then offered through section 3; the grant never
+  replaces that separate, single-use upgrade consent.
 
 ## 4. Updates of this cache
 

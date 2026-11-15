@@ -195,6 +195,16 @@ class SkillTests(unittest.TestCase):
         self.assertIn("read `.tools/ai-comm/skills/ai-comm/SKILL.md` and follow it", readme)
         self.assertIn("ai-comm itself does not wake idle sessions; separately approved host listeners or nudge helpers must remain available", readme)
 
+    def test_setup_notes_and_release_check_grant_are_described(self):
+        text = SKILL.read_text(encoding="utf-8")
+        for phrase in ("Notes written by guided setup", "`release_checks`", "gave this\nsession the grant directly",
+                       "nothing is\nchecked while no session runs", "sets `allowed` to false in the note",
+                       "Duties are words, not\npermissions"):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, text)
+        activate = (ROOT / "ACTIVATE.md").read_text(encoding="utf-8")
+        self.assertIn("## Guided setup (package 1.11.0)", activate)
+
     def test_skill_channel_commands_run_against_a_scratch_channel(self):
         init = self.run_cli("init", "--task", "Test the installed skill commands",
                             "--reviewers", "alpha", "beta")

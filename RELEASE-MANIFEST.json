@@ -22,13 +22,13 @@
     },
     {
       "path": "ACTIVATE.md",
-      "bytes": 31818,
-      "sha256": "85ec7568f7e7c19eac9d6e779363f29e91ce7fd5ea065472f9b01efc8a219768"
+      "bytes": 32785,
+      "sha256": "ebab3b11a9009436b4478e4a8eea587636fa6c897671e9c62c583c451832c067"
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 26830,
-      "sha256": "b408230f475d391a929b4ce506e861213cda6683c0b02c399cee7520f5b673b8"
+      "bytes": 27253,
+      "sha256": "68f0804438c65ad508675c5d4c903fd5aaf65a1edfa9f837e1687bba58a79720"
     },
     {
       "path": "LICENSE",
@@ -42,8 +42,8 @@
     },
     {
       "path": "README.md",
-      "bytes": 24435,
-      "sha256": "e3507c741829b541d012082a5a9cf4ab77a10e66d75eaf4290ee1e4113b05c97"
+      "bytes": 24583,
+      "sha256": "d6db6cc556e1e4c18933b673d5f93046e5184bf0b2a4d4a5022f434337914acc"
     },
     {
       "path": "SECURITY.md",
@@ -117,8 +117,8 @@
     },
     {
       "path": "entry/ai-comm/SKILL.md",
-      "bytes": 5144,
-      "sha256": "dab720005006e9b0a873d5d9786416915faf1fb32190613f65410435c7cddb90"
+      "bytes": 10452,
+      "sha256": "00612dff1ab7565e5937492af01f30c2a15104b08a781df413cdda798186ccc0"
     },
     {
       "path": "examples/ask.json",
@@ -197,8 +197,8 @@
     },
     {
       "path": "scripts/setup_project.py",
-      "bytes": 42204,
-      "sha256": "e0da044e16c4e3efd6f80f8c28b2c17f3f07b821ec91a5f921fea5259e744e0f"
+      "bytes": 42268,
+      "sha256": "b9f8cdf1c1d0a27da7610f3007533f33497c7ee4552104acd55bcc60c30fb922"
     },
     {
       "path": "scripts/test_old_protocol.py",
@@ -217,8 +217,8 @@
     },
     {
       "path": "skills/ai-comm/SKILL.md",
-      "bytes": 22438,
-      "sha256": "2ed5dccd92c73aec927deadd419386aa92fddd1fd6d82b964cbc0ccac24c5971"
+      "bytes": 23724,
+      "sha256": "6bcb948ca3d2e8bf07b45b45bf1d8a6233cde450ced833119ae5250c1a8efe05"
     },
     {
       "path": "tests/test_bootstrap.py",
@@ -297,8 +297,8 @@
     },
     {
       "path": "tests/test_skill.py",
-      "bytes": 19242,
-      "sha256": "2d9759f9536962784d3a85ff8aaa244879bc84a8f4ba8940503b95870488bc1a"
+      "bytes": 19876,
+      "sha256": "41d1750b98405955b19a0a56dbf645588fe63c395d76afd3d25ed9736a337d95"
     },
     {
       "path": "tests/test_upgrade_controller.py",
@@ -317,8 +317,8 @@
     },
     {
       "path": "tests/test_user_objects.py",
-      "bytes": 35173,
-      "sha256": "cb0c7e3fc12d05ea47f4aebd997bddfd8a5f01c2675f6d7df6418a330e867d4b"
+      "bytes": 35938,
+      "sha256": "ed0c04f2be6b25e23ddf8feb8ccfc2258b21ebe2f27fdf7711a7871b721207bd"
     },
     {
       "path": "tests/test_verify_pin.py",

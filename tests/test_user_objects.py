@@ -641,5 +641,15 @@ class EntrySkillTests(unittest.TestCase):
                 self.assertIn(f"`{status}`", self.text)
 
 
+    def test_guided_setup_and_release_check_rules_are_stated(self):
+        """T17 (text): the entry skill owns the release-check rules, also over an older pin."""
+        for phrase in ("--user setup plan", "--user setup apply", "setup abandon", "writes nothing",
+                       "`release_checks`", "The policy alone\nis not consent", "gave the grant directly",
+                       "Nothing is checked while no session runs", "sets `allowed` to\n  false in the note",
+                       "A changed notifier ends the old\n  session's grant", "never\n  replaces that separate",
+                       "It never covers an upgrade, binding or starting B"):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, self.text)
+
 if __name__ == "__main__":
     unittest.main()

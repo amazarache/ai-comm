@@ -34,6 +34,12 @@
   with the same plan completes or stops and never duplicates; `abandon`
   removes only setup's staging. Neither binds B, commits, pushes or
   installs a wake adapter.
+- The entry skill leads a project without a pin (fresh) or with a verified pin
+  but no channel and note (reuse) through guided setup, and states the
+  release-check rules after setup: the note's policy plus a direct grant to
+  the notifier session, checks only while a session is active, revocation
+  through any session. The pinned skill and ACTIVATE.md describe setup notes
+  and the same rules. `setup --help` exits 0.
 - Test the declaration installer's channel query: Git execution failures and
   timeouts are refused with `channel_path_invalid` and leave the declaration
   unchanged; the queries of declaration installation and of the wake installer
