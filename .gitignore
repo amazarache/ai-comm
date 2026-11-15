@@ -3,3 +3,7 @@ __pycache__/
 .venv/
 *.egg-info/
 /.release-check.lock
+.tools/
+.ai-comm-local/
+/.ai-comm/
+/AI-COMM-ACTIVATION.md
