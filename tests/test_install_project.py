@@ -324,6 +324,137 @@ class InstallTests(unittest.TestCase):
         self.assertEqual((err.code, err.details.get("what")), ("index_tag_mismatch", "manifest"))
         self.assertFalse((self.project / ".tools" / "ai-comm").exists())
 
+    # -- guided setup guards (design rev 7 sections 4, 6a, 6b; T3, T10, T11)
+
+    def expected(self, version="1.5.1", **change):
+        value = {"tag_object": git(self.source, "rev-parse", f"refs/tags/v{version}").strip(),
+                 "commit": self.releases[version]["commit"],
+                 "manifest_sha256": self.releases[version]["manifest_sha256"]}
+        value.update(change)
+        return value
+
+    def guard(self, before_bytes):
+        after, _ = ip.ri.gitignore_after(before_bytes, ip.GITIGNORE_LINES)
+        return {"before": ip.ri.file_digest(before_bytes), "after": ip.ri.file_digest(after)}, after
+
+    def test_expected_identity_matching_installs_as_without_it(self):
+        out = self.install(expect=self.expected())
+        self.assertEqual((out["status"], out["commit"]), ("installed", self.releases["1.5.1"]["commit"]))
+
+    def test_changed_release_identity_stops_before_any_fetched_code_runs(self):
+        for key, value in (("tag_object", "1" * 40), ("commit", "2" * 40), ("manifest_sha256", "3" * 64)):
+            with self.subTest(changed=key):
+                ran = []
+                real = ip.ri.run_checked
+                with mock.patch.object(ip.ri, "run_checked", side_effect=lambda *a, **k: ran.append(a) or real(*a, **k)):
+                    err = self.stop(self.install, expect=self.expected(**{key: value}),
+                                    suite=lambda repo: ran.append("suite") or 7)
+                self.assertEqual((err.code, err.details.get("what")), ("release_identity_changed", key))
+                self.assertEqual(ran, [], "no staged script or suite may run")
+                self.assertFalse((self.project / ".tools" / "ai-comm").exists())
+
+    def test_gitignore_guard_absent_and_present_reaches_exactly_g1(self):
+        for label, before in (("absent", None), ("no final newline", b"node_modules/"),
+                              ("final newline", b"node_modules/\n"), ("one entry present", b".tools\n")):
+            with self.subTest(label):
+                shutil.rmtree(self.project)
+                self.project.mkdir()
+                if before is not None:
+                    (self.project / ".gitignore").write_bytes(before)
+                guard, after = self.guard(before)
+                self.install(gitignore_guard=guard)
+                self.assertEqual((self.project / ".gitignore").read_bytes(), after)
+
+    def test_gitignore_guard_stops_on_a_changed_file_before_anything_is_written(self):
+        (self.project / ".gitignore").write_bytes(b"a\n")
+        guard, _ = self.guard(b"original\n")
+        self.assertEqual(self.stop(self.install, gitignore_guard=guard).code, "gitignore_changed")
+        self.assertFalse((self.project / ".ai-comm-local").exists())
+        self.assertEqual((self.project / ".gitignore").read_bytes(), b"a\n")
+
+    def test_gitignore_edit_during_tests_stops_before_publication(self):
+        (self.project / ".gitignore").write_bytes(b"a\n")
+        guard, _ = self.guard(b"a\n")
+
+        def editing_suite(repo):
+            (self.project / ".gitignore").write_bytes(b"a\nuser edit\n")
+            return 7
+        self.assertEqual(self.stop(self.install, gitignore_guard=guard, suite=editing_suite).code,
+                         "gitignore_changed")
+        self.assertFalse((self.project / ".tools" / "ai-comm").exists())
+        self.assertEqual((self.project / ".gitignore").read_bytes(), b"a\nuser edit\n")
+
+    def test_gitignore_guard_with_a_wrong_g1_stops_before_publication(self):
+        guard = {"before": "absent", "after": "4" * 64}
+        self.assertEqual(self.stop(self.install, gitignore_guard=guard).code, "gitignore_guard_mismatch")
+        self.assertFalse((self.project / ".tools" / "ai-comm").exists())
+
+    def test_gitignore_already_g1_is_left_alone(self):
+        body = b"x\n.tools/\n.ai-comm-local/\n"
+        (self.project / ".gitignore").write_bytes(body)
+        guard = {"before": ip.ri.file_digest(body), "after": ip.ri.file_digest(body)}
+        self.assertEqual(self.install(gitignore_guard=guard)["gitignore_added"], [])
+        self.assertEqual((self.project / ".gitignore").read_bytes(), body)
+
+    def test_recovery_honours_the_recorded_gitignore_guard(self):
+        (self.project / ".gitignore").write_bytes(b"a\n")
+        guard, after = self.guard(b"a\n")
+        with mock.patch.object(ip, "finish", side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                self.install(gitignore_guard=guard)
+        (self.project / ".gitignore").write_bytes(b"a\nedited after publish\n")
+        self.assertEqual(self.stop(ip.recover, self.project).code, "gitignore_changed")
+        self.assertEqual((self.project / ".gitignore").read_bytes(), b"a\nedited after publish\n")
+        (self.project / ".gitignore").write_bytes(b"a\n")
+        self.assertEqual(ip.recover(self.project)["results"][0]["action"], "completed_after_publish")
+        self.assertEqual((self.project / ".gitignore").read_bytes(), after)
+
+    def setup_journal(self, txn, *states, schema=None):
+        local = self.project / ".ai-comm-local"
+        if not local.exists():
+            os.mkdir(local, 0o700)
+        directory = ip.uc.private_dir(local / "setup")
+        journal = ip.uc.Journal(directory)
+        journal.append("start", {"schema": schema or ip.ri.SETUP_SCHEMA, "txn": txn})
+        for state in states:
+            journal.append("state", {"state": state})
+
+    def test_an_unfinished_setup_refuses_other_installs_but_not_its_own(self):
+        txn = "a" * 64
+        self.setup_journal(txn)
+        self.assertEqual(self.stop(self.install).code, "setup_in_progress")
+        self.assertEqual(self.stop(self.install, setup_txn="b" * 64).code, "setup_in_progress")
+        self.assertFalse((self.project / ".tools" / "ai-comm").exists())
+        self.assertEqual(self.install(setup_txn=txn)["status"], "installed")
+
+    def test_finished_and_unrecognized_setup_journals(self):
+        self.setup_journal("c" * 64, "completed")
+        self.assertIsNone(ip.ri.unfinished_setup(self.project))
+        shutil.rmtree(self.project / ".ai-comm-local" / "setup")
+        self.setup_journal("d" * 64, schema="something-else/9")
+        self.assertEqual(ip.ri.unfinished_setup(self.project), "unrecognized")
+        self.assertEqual(self.stop(self.install, setup_txn="d" * 64).code, "setup_in_progress")
+        shutil.rmtree(self.project / ".ai-comm-local" / "setup")
+        ip.uc.private_dir(self.project / ".ai-comm-local" / "setup")
+        (self.project / ".ai-comm-local" / "setup" / "journal.jsonl").write_bytes(b"not a journal\n")
+        self.assertEqual(ip.ri.unfinished_setup(self.project), "unrecognized")
+
+    def test_setup_arguments_are_validated_and_cli_flags_go_together(self):
+        for kw, code in (({"expect": {"commit": "x"}}, "invalid_expected_identity"),
+                         ({"gitignore_guard": {"before": "absent", "after": "absent"}}, "invalid_gitignore_guard"),
+                         ({"setup_txn": "nothex"}, "invalid_setup_txn")):
+            with self.subTest(kw=kw):
+                self.assertEqual(self.stop(self.install, **kw).code, code)
+        base = ["--project", str(self.project), "--version", "1.5.1", "--fetch-permitted"]
+        for extra, code in ((["--expect-commit", "1" * 40], "invalid_expected_identity"),
+                            (["--gitignore-before", "absent"], "invalid_gitignore_guard")):
+            with self.subTest(extra=extra):
+                out = io.StringIO()
+                with mock.patch("sys.stdout", out):
+                    self.assertEqual(ip.main(base + extra), 2)
+                self.assertEqual(json.loads(out.getvalue())["code"], code)
+        self.assertFalse((self.project / ".ai-comm-local").exists())
+
     def test_i1_foreign_torn_journal_untouched(self):
         local = self.project / ".ai-comm-local"
         os.mkdir(local, 0o700)

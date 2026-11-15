@@ -83,6 +83,61 @@ def unintegrated_declaration(project):
                          "project_id": {"path": str(project), "channel": None}, "integrations": []})
 
 
+SETUP_SCHEMA = "ai-comm-setup/1"
+SETUP_TERMINAL = ("completed", "abandoned")
+
+
+def setup_journal_dir(project):
+    return Path(project) / ".ai-comm-local" / "setup"
+
+
+def unfinished_setup(project):
+    """The transaction id of an unfinished guided setup in this project, or None.
+
+    Read-only. A setup journal that cannot be read or recognised counts as unfinished
+    (`"unrecognized"`), so cooperating tools of this release refuse rather than guess.
+    Older releases do not know this guard (design rev 7, 6b)."""
+    directory = setup_journal_dir(project)
+    if not os.path.lexists(directory / "journal.jsonl"):
+        return None
+    try:
+        records, _torn = uc.Journal(directory).read()
+    except (Stop, OSError, ValueError):
+        return "unrecognized"
+    if not records or records[0]["kind"] != "start":
+        return "unrecognized"
+    start = records[0]["data"]
+    txn = start.get("txn")
+    if start.get("schema") != SETUP_SCHEMA or not isinstance(txn, str) or not uc.HEX.fullmatch(txn):
+        return "unrecognized"
+    states = [r["data"].get("state") for r in records if r["kind"] == "state"]
+    return None if any(state in SETUP_TERMINAL for state in states) else txn
+
+
+def require_no_foreign_setup(project, setup_txn=None):
+    """Refuse while another (or an unrecognised) guided setup is unfinished; a call that
+    carries that setup's own transaction id is part of it and proceeds."""
+    current = unfinished_setup(project)
+    need(current is None or (setup_txn is not None and current == setup_txn), "setup_in_progress")
+
+
+def gitignore_after(existing, lines):
+    """The ignore file after adding each missing line, exactly as the project installer
+    writes it: `existing` is the current bytes or None (absent). Returns (bytes, added)."""
+    existing = existing or b""
+    present = existing.decode("utf-8").splitlines()
+    missing = [line for line in lines if line not in present and line.rstrip("/") not in present]
+    if not missing:
+        return existing, []
+    prefix = existing if (not existing or existing.endswith(b"\n")) else existing + b"\n"
+    return prefix + "".join(line + "\n" for line in missing).encode(), missing
+
+
+def file_digest(data):
+    """Baseline form used by setup and the installer guard: "absent" or the SHA-256."""
+    return "absent" if data is None else uc.sha256_bytes(data)
+
+
 def select_record(repo, version):
     raw = git(repo, "show", "refs/remotes/origin/release-index:RELEASES.json").encode()
     index = uc.parse_json(raw, "release_index_invalid")

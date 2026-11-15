@@ -282,6 +282,27 @@ staging directories holding a valid install journal for this project; it removes
 unpublished staging, completes an install whose verified pin was already published, and
 otherwise only reports.
 
+**Guards for guided setup (1.11.0).** Optional arguments, used by guided setup and
+absent in standalone use, where the installer behaves as before:
+
+- `--expect-tag-object T --expect-commit C --expect-manifest M` (all three or none):
+  right after the fetch, with Git plumbing only and before any fetched script or test
+  runs, the annotated tag and the index record must name exactly this release; again
+  before publication. A difference stops with `release_identity_changed` (`what` names
+  the field) and publishes nothing.
+- `--gitignore-before G0 --gitignore-after G1` (both or neither; each a SHA-256, G0
+  may be `absent`): the ignore file must be G0, and adding the installer's lines to it
+  must give G1, at the start and again before publication; `finish` rewrites it only
+  from G0 to exactly G1, and leaves a file that is already G1 alone. Anything else
+  stops with `gitignore_changed` (or `gitignore_guard_mismatch` for an inconsistent
+  pair) without writing it. The guard is recorded in the install journal, so
+  `--recover` applies it too.
+- `--setup-txn TXN`: while a guided setup's journal in
+  `.ai-comm-local/setup/` is unfinished, the installer refuses with
+  `setup_in_progress` unless the call carries that setup's own transaction id. A setup
+  journal it cannot recognise counts as unfinished. Older releases do not know this
+  guard.
+
 ## Per-user cache, pin verifier and entry skill (1.6.0)
 
 `install.sh --user <command>` runs `scripts/install_user.py`; [INSTALL.md](INSTALL.md)

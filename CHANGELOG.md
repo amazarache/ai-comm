@@ -10,6 +10,13 @@
   entries and could collapse duplicates. The refresh now stores the
   validation result, the index's SHA-256 and its full version list. An index
   that fails validation during `install` is not stored.
+- The project installer takes optional guided-setup guards: an expected
+  release identity checked before any fetched code runs and again before
+  publication (`release_identity_changed`), an ignore-file guard that allows
+  only the planned before and after states (`gitignore_changed`,
+  `gitignore_guard_mismatch`, also applied by `--recover`), and a setup
+  transaction id; while a guided setup is unfinished, other installs stop with
+  `setup_in_progress`. Without the new arguments it behaves as before.
 - Test the declaration installer's channel query: Git execution failures and
   timeouts are refused with `channel_path_invalid` and leave the declaration
   unchanged; the queries of declaration installation and of the wake installer

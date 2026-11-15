@@ -27,8 +27,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 25222,
-      "sha256": "334334e373ba1accc715e1f9b57eca122140720ba3b6b1e6c3c58da9035a5ea4"
+      "bytes": 25731,
+      "sha256": "3834bd5d32a435913ed92bbfc85bd21454e2fada8e94c30b881b1ff2be48afa8"
     },
     {
       "path": "LICENSE",
@@ -107,8 +107,8 @@
     },
     {
       "path": "docs/RELEASES.md",
-      "bytes": 24552,
-      "sha256": "742785800f390c51fc4df88ec7583ec787c99d63b5a7b47635721c35a31d6341"
+      "bytes": 25914,
+      "sha256": "6519d119c3e49e82522ec7aacd16faf195dd087c94a7b4dffb9002ba502cc484"
     },
     {
       "path": "docs/WAKE.md",
@@ -167,8 +167,8 @@
     },
     {
       "path": "scripts/install_project.py",
-      "bytes": 15011,
-      "sha256": "f953eb0fc4b867c42372a6b0d9ecc71082c45f4afad85ff1fe353e7f0f121677"
+      "bytes": 19484,
+      "sha256": "2d7a6951e3fd6e6254f4412a981712c8080589c0cd14c58acf4205649ae3830e"
     },
     {
       "path": "scripts/install_user.py",
@@ -187,8 +187,8 @@
     },
     {
       "path": "scripts/release_install.py",
-      "bytes": 15636,
-      "sha256": "e0c1e41a105c48b7cbb3ef0fa44456c484d50e5135b45a671b63782d2af52487"
+      "bytes": 17992,
+      "sha256": "fc48b87514b5d9f2c34670270091cfee8c5909f644a1fe47e89a87139b3887cb"
     },
     {
       "path": "scripts/render_bootstrap.py",
@@ -242,8 +242,8 @@
     },
     {
       "path": "tests/test_install_project.py",
-      "bytes": 18761,
-      "sha256": "af7a1813f32ef136acaf0b8755d1caeb45d9b2b975dd5fe8dbf478f3547c6f26"
+      "bytes": 26533,
+      "sha256": "159599c29587cb6c7614700c28b336307123215f591058023aa1dd39d7cf7c49"
     },
     {
       "path": "tests/test_install_user.py",
