@@ -312,8 +312,8 @@
     },
     {
       "path": "tests/test_upgrade_fetch.py",
-      "bytes": 24609,
-      "sha256": "04a96e2f3ef9d6bfc0d4780b9d34ddcdd6d44df22b7b36079d2e1d7b971f964d"
+      "bytes": 26245,
+      "sha256": "7e62cef71df2cb9c0011a101fa926f47ee1ad6edfccfc218c33c430d57beaf3e"
     },
     {
       "path": "tests/test_upgrade_fetch_real_boundary.py",

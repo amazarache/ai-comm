@@ -354,6 +354,18 @@ class CacheSideFetchTests(Fixture):
         self.assertNotEqual(uf.vp.check_project(self.project, iu.Cache(self.cache_dir).open(create=False))["status"],
                             "verified")
 
+    def test_a_clean_but_unverified_pin_is_refused(self):
+        """The pin's release has no trusted binding in this cache: `unknown`, though clean."""
+        consent = self.consent()
+        cache = iu.Cache(self.cache_dir).open(create=False)
+        bindings = cache.bindings()
+        del bindings["bindings"]["1.5.0"]
+        cache.write_bindings(bindings)
+        before = self.refs()
+        err = self.stop(self.fetch, consent)
+        self.assertEqual((err.code, err.details.get("status")), ("pin_not_verified", "unknown"))
+        self.assertEqual(self.refs(), before)
+
     def test_consent_rules_match_the_controllers_fetch(self):
         before = self.refs()
         with self.subTest("other target"):
@@ -400,6 +412,20 @@ class CacheSideFetchTests(Fixture):
                 tip.git(work, "tag", "-f", "-a", f"v{TARGET}", "-m", "moved", "v1.5.0^{commit}")
                 tip.git(work, "push", "-q", "-f", "origin", f"refs/tags/v{TARGET}")
                 self.assertEqual(self.stop(self.fetch, consent).code, "release_identity_changed")
+                self.assertEqual(self.refs(), before)
+            shutil.rmtree(self.bare)
+            shutil.copytree(saved, self.bare)
+            with self.subTest("well-formed tag on another commit"):
+                # A valid annotated tag whose message names its commit's own manifest: tag_identity
+                # accepts it, so only the comparison with the cache binding can refuse it.
+                tip.git(work, "fetch", "-q", "-f", "--tags", "origin")
+                old = tip.git(work, "rev-parse", "v1.5.0^{commit}").strip()
+                manifest = tip.sha(tip.git(work, "show", f"{old}:RELEASE-MANIFEST.json").encode())
+                tip.git(work, "tag", "-f", "-a", f"v{TARGET}", "-m",
+                        f"ai-comm {TARGET} (protocol 3.0); manifest sha256 {manifest}", old)
+                tip.git(work, "push", "-q", "-f", "origin", f"refs/tags/v{TARGET}")
+                err = self.stop(self.fetch, consent)
+                self.assertEqual((err.code, err.details.get("what")), ("release_identity_changed", "tag_object"))
                 self.assertEqual(self.refs(), before)
             shutil.rmtree(self.bare)
             shutil.copytree(saved, self.bare)
