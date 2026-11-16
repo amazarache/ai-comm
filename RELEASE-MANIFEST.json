@@ -287,8 +287,8 @@
     },
     {
       "path": "tests/test_setup_project.py",
-      "bytes": 57276,
-      "sha256": "9221fe5875ae4e2611e1046a486a4f89d039f4b3dcbfdb01a44fea0dded88cdf"
+      "bytes": 60121,
+      "sha256": "90b133b1d032875514538713078cd72356e5b47145976db78561a0ead49adf01"
     },
     {
       "path": "tests/test_setup_real_boundary.py",

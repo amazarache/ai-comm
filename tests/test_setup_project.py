@@ -685,6 +685,36 @@ class SetupApplyTests(Base):
         self.assertEqual(self.stop(self.apply, path, digest).code, "declaration_changed")
 
 
+NAMESPACE_READY = "ai-comm-namespace-ready"
+
+
+def run_in_tmpfs_namespace(mountpoint, script):
+    """Run `script` in a new user and mount namespace with a tmpfs at `mountpoint`. The shell
+    prints NAMESPACE_READY only once the namespace and the mount exist; nothing before it
+    is the probe's own doing."""
+    return subprocess.run(["unshare", "--user", "--map-root-user", "--mount", "sh", "-c",
+                           'mount -t tmpfs none "$1" || exit 77; echo "$4"; exec "$2" -c "$3"',
+                           "sh", str(mountpoint), sys.executable, script, NAMESPACE_READY],
+                          capture_output=True, text=True, timeout=120)
+
+
+def namespace_probe_result(done):
+    """Skip when the host cannot provide the namespace or the mount (no ready line); after
+    the ready line any non-zero exit or unparsable output fails the test."""
+    lines = done.stdout.splitlines()
+    if NAMESPACE_READY not in lines:
+        if done.returncode == 0:
+            raise AssertionError("namespace exited 0 without its ready line: " + done.stdout[:200])
+        raise unittest.SkipTest("no user and mount namespace with a tmpfs here: " + done.stderr.strip()[:200])
+    if done.returncode != 0:
+        raise AssertionError(f"probe failed after setup (exit {done.returncode}): {done.stderr[-2000:]}")
+    rest = lines[lines.index(NAMESPACE_READY) + 1:]
+    try:
+        return json.loads(rest[-1]) if rest else json.loads("")
+    except ValueError as exc:
+        raise AssertionError("probe output is not JSON: " + done.stdout[-500:]) from exc
+
+
 class SetupRecoveryTests(SetupApplyTests):
     """Resume after an interruption recognises every completed stage before acting, publishes
     the note atomically, re-checks real parents, and survives a torn final journal append
@@ -953,16 +983,38 @@ class SetupRecoveryTests(SetupApplyTests):
             "out['destination'] = os.path.lexists(project / 'sub' / 'chan')\n"
             "out['source'] = (staged / 'HEAD').is_file()\n"
             "print(json.dumps(out))\n")
-        sub = str(self.project / "sub")
-        probe = subprocess.run(["unshare", "--user", "--map-root-user", "--mount", "sh", "-c",
-                                'mount -t tmpfs none "$1" && exec "$2" -c "$3"', "sh", sub, sys.executable,
-                                script], capture_output=True, text=True, timeout=120)
-        if probe.returncode != 0 and "mount" in probe.stderr.lower():
-            self.skipTest("user namespaces cannot mount here: " + probe.stderr.strip()[:200])
-        self.assertEqual(probe.returncode, 0, probe.stderr)
-        self.assertEqual(json.loads(probe.stdout), {"devices_differ": True, "parents": "channel_other_filesystem",
-                                                    "move": "EXDEV", "destination": False, "source": True})
+        result = namespace_probe_result(run_in_tmpfs_namespace(self.project / "sub", script))
+        self.assertEqual(result, {"devices_differ": True, "parents": "channel_other_filesystem",
+                                  "move": "EXDEV", "destination": False, "source": True})
         self.assertEqual(list((self.project / "sub").iterdir()), [])  # the mount was private to the namespace
+
+    def test_namespace_setup_failures_skip_but_probe_failures_fail(self):
+        """REVIEW 46: only a missing capability (namespace, UID map, mount) may skip the real
+        filesystem test; anything after the probe has started must fail it."""
+        def done(code, out="", err=""):
+            return subprocess.CompletedProcess([], code, out, err)
+        for err in ("unshare: write failed /proc/self/uid_map: Operation not permitted",
+                    "unshare: unshare failed: Operation not permitted",
+                    "mount: /x: permission denied."):
+            with self.subTest(err=err), self.assertRaises(unittest.SkipTest):
+                namespace_probe_result(done(1, "", err))
+        for case in (done(1, NAMESPACE_READY + "\n", "Traceback: probe failed"),
+                     done(0, NAMESPACE_READY + "\nnot json\n"),
+                     done(0, "")):
+            with self.subTest(case=case), self.assertRaises(AssertionError):
+                namespace_probe_result(case)
+        self.assertEqual(namespace_probe_result(done(0, NAMESPACE_READY + '\n{"a": 1}\n')), {"a": 1})
+        # The real helper, with an `unshare` that fails as the CI runner's did.
+        bin_dir = self.base / "fake-bin"
+        bin_dir.mkdir()
+        fake = bin_dir / "unshare"
+        fake.write_text("#!/bin/sh\necho 'unshare: write failed /proc/self/uid_map: Operation not permitted' >&2\n"
+                        "exit 1\n")
+        fake.chmod(0o755)
+        with mock.patch.dict(os.environ, {"PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}"}):
+            with self.assertRaises(unittest.SkipTest) as ctx:
+                namespace_probe_result(run_in_tmpfs_namespace(self.project, "print(1)"))
+        self.assertIn("uid_map", str(ctx.exception))
 
     def test_a_torn_final_journal_append_is_set_aside_and_resume_completes(self):
         path, digest, env = self.write_plan()
