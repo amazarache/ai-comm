@@ -21,6 +21,7 @@ import os
 from pathlib import Path
 import secrets
 import shutil
+import stat
 import subprocess
 import sys
 
@@ -48,7 +49,8 @@ TERMINAL = {"completed", "rolled_back"}
 def origin_values(pin):
     """Every local `remote.origin.url` value of the pin, read without following includes."""
     done = subprocess.run(["git", "-C", str(pin), "config", "--local", "--no-includes", "--null", "--get-all",
-                           "remote.origin.url"], capture_output=True, env=uc.clean_env(), timeout=60, check=False)
+                           "remote.origin.url"], capture_output=True, env=ri._inert_git_env(), timeout=60,
+                          check=False)
     if done.returncode == 1 and not done.stdout:
         return []
     need(done.returncode == 0, "pin_has_origin")
@@ -56,14 +58,45 @@ def origin_values(pin):
 
 
 def ref_value(repo, name):
-    """The ref's own value (for a tag, the tag object), or None when absent."""
-    done = subprocess.run(["git", "-C", str(repo), "rev-parse", "--verify", "--quiet", name],
-                          capture_output=True, env=uc.clean_env(), timeout=60, check=False)
-    if done.returncode != 0:
+    """The ref's own value (for a tag, the tag object), or None when it does not exist.
+    A symbolic ref is refused, never followed; a failed read is an error, not "absent"."""
+    done = subprocess.run(["git", "-C", str(repo), "for-each-ref", "--format=%(objectname) %(symref)", name],
+                          capture_output=True, env=ri._inert_git_env(), timeout=60, check=False)
+    need(done.returncode == 0, "ref_invalid", ref=name)
+    lines = [line for line in done.stdout.decode("utf-8", "replace").splitlines() if line]
+    if not lines:
         return None
-    value = done.stdout.decode().strip()
+    need(len(lines) == 1, "ref_invalid", ref=name)
+    value, _, symref = lines[0].partition(" ")
+    need(not symref, "ref_invalid", ref=name, what="symbolic")
     need(uc.COMMIT.fullmatch(value), "ref_invalid", ref=name)
     return value
+
+
+def pin_object_dir(pin):
+    """The pin's own object directory: a real, user-owned directory inside its .git."""
+    git_dir = pin / ".git"
+    objects = git_dir / "objects"
+    for path in (git_dir, objects, objects / "pack"):
+        st = os.lstat(path)
+        need(stat.S_ISDIR(st.st_mode) and not stat.S_ISLNK(st.st_mode) and st.st_uid == os.getuid(),
+             "unsafe_path", path=str(path.relative_to(pin)))
+    return objects
+
+
+def copy_objects(repo, pin, oids):
+    """Every object reachable from `oids`, packed in the private repository and indexed
+    straight into the pin's object store. Both commands run with the private repository
+    as their Git directory: the pin's configuration is never read, and no transport runs."""
+    env = ri._inert_git_env()
+    packed = subprocess.run(["git", "--git-dir", str(repo / ".git"), "pack-objects", "--revs", "--stdout",
+                             "--quiet"], input=("\n".join(oids) + "\n").encode(), capture_output=True, env=env,
+                            timeout=300, check=False)
+    need(packed.returncode == 0, "fetch_failed", helper_error="object_copy_failed")
+    indexed = subprocess.run(["git", "--git-dir", str(repo / ".git"), "index-pack", "--stdin", "--fix-thin"],
+                             input=packed.stdout, capture_output=True,
+                             env={**env, "GIT_OBJECT_DIRECTORY": str(pin_object_dir(pin))}, timeout=300, check=False)
+    need(indexed.returncode == 0, "fetch_failed", helper_error="object_copy_failed")
 
 
 def require_no_unfinished_upgrade(project):
@@ -128,19 +161,16 @@ def upgrade_fetch(project_dir, target, consent_id, *, channel=None, cache_dir=No
                 need(tag[key] == binding[key], "release_identity_changed", what=key)
             new_index = ref_value(repo, index_ref)
             need(new_index is not None, "release_identity_changed", what="index")
-            # Objects into the pin by id only: no destination ref, no FETCH_HEAD.
-            done = subprocess.run(["git", "-C", str(project.pin), "-c", "protocol.file.allow=always", "fetch",
-                                   "--quiet", "--no-tags", "--no-write-fetch-head", "--no-recurse-submodules",
-                                   str(repo), binding["tag_object"], new_index],
-                                  capture_output=True, env=uc.clean_env(), timeout=300, check=False)
-            need(done.returncode == 0, "fetch_failed", helper_error="object_copy_failed")
-            # Both refs at once, each only from the value read before the fetch.
+            copy_objects(repo, project.pin, [binding["tag_object"], new_index])
+            # Both refs at once, each only from the value read before the fetch; never through
+            # a symbolic ref (refused above, and --no-deref here).
             script = "".join(["start\n",
                               f"update {tag_ref} {binding['tag_object']} {old_tag or ZERO}\n",
                               f"update {index_ref} {new_index} {old_index or ZERO}\n",
                               "prepare\n", "commit\n"])
-            done = subprocess.run(["git", "-C", str(project.pin), "update-ref", "--stdin"], input=script.encode(),
-                                  capture_output=True, env=uc.clean_env(), timeout=60, check=False)
+            done = subprocess.run(["git", "-C", str(project.pin), "update-ref", "--no-deref", "--stdin"],
+                                  input=script.encode(), capture_output=True, env=ri._inert_git_env(), timeout=60,
+                                  check=False)
             need(done.returncode == 0, "refs_changed")
         finally:
             shutil.rmtree(temp, ignore_errors=True)

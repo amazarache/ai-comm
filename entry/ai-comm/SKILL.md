@@ -114,6 +114,20 @@ offer, and only with the pin's own controller. Use the path for the `class` repo
 A check never changes a pin, and a missing, stale or failed check is never reported
 as "up to date".
 
+**Pins without a recorded origin.** If the pin's own `upgrade fetch` stops with
+`origin_missing`, the pin was published by a project installer or guided setup before
+1.11.1 and records no release origin. Do that one fetch with this cache release instead,
+under the same owner consent the controller recorded:
+
+```sh
+sh "$REL/install.sh" --user upgrade-fetch --project "<PROJECT_ROOT>" --target <VERSION> --consent <CONSENT_ID>
+```
+
+It changes only the pin's release tag and release-index refs, after checking them against
+this cache's trusted binding, and never consumes the consent. Then continue with the pin's
+own `upgrade prepare`. Never add a remote or edit the pin's configuration by hand; any
+other stop is reported to the owner as it is.
+
 ## 3a. Release checks after guided setup
 
 The note written by guided setup holds the project's policy in its JSON block,

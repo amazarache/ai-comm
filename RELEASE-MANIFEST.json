@@ -117,8 +117,8 @@
     },
     {
       "path": "entry/ai-comm/SKILL.md",
-      "bytes": 10488,
-      "sha256": "58e7094149dd17e87dc49b5de17e97cec855b41d995127c9322b60689b16560f"
+      "bytes": 11235,
+      "sha256": "29ff3ba4d9bc7fca9f954fd97507a8a0f76e92b275071237c093c62478a0d4d6"
     },
     {
       "path": "examples/ask.json",
@@ -207,8 +207,8 @@
     },
     {
       "path": "scripts/upgrade_fetch.py",
-      "bytes": 9275,
-      "sha256": "a07105580ccfd52a73c3952356a7e063a40d1d393ac462db82e8453cda64a930"
+      "bytes": 10848,
+      "sha256": "5e7fa457acfdd281f5b33f38138f08687055d6c38902b0df07950c88731939af"
     },
     {
       "path": "scripts/verify_pin.py",
@@ -312,8 +312,8 @@
     },
     {
       "path": "tests/test_upgrade_fetch.py",
-      "bytes": 26245,
-      "sha256": "7e62cef71df2cb9c0011a101fa926f47ee1ad6edfccfc218c33c430d57beaf3e"
+      "bytes": 28495,
+      "sha256": "8c735dfb69f3e7d013da0d842b8557b8f77842e12acf651859de1397d5683448"
     },
     {
       "path": "tests/test_upgrade_fetch_real_boundary.py",
@@ -332,8 +332,8 @@
     },
     {
       "path": "tests/test_user_objects.py",
-      "bytes": 35938,
-      "sha256": "ed0c04f2be6b25e23ddf8feb8ccfc2258b21ebe2f27fdf7711a7871b721207bd"
+      "bytes": 36404,
+      "sha256": "02cedf4a500b035bd8cabeb3c578235f6a54bf2658734fafa1529632aee713b4"
     },
     {
       "path": "tests/test_verify_pin.py",

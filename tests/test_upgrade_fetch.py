@@ -450,6 +450,41 @@ class CacheSideFetchTests(Fixture):
         self.assertEqual(self.stop(self.fetch, consent).code, "tag_exists_different")
         self.assertEqual(self.refs(), before)
 
+    def test_symbolic_refs_are_refused_and_never_followed(self):
+        """REVIEW 106 P1: a symbolic allowed name must not redirect the write to another ref."""
+        consent = self.consent()
+        head = tip.git(self.pin, "rev-parse", "HEAD").strip()
+        tip.git(self.pin, "update-ref", "refs/heads/outside-allowlist", head)
+        for name in ("refs/remotes/origin/release-index", f"refs/tags/v{TARGET}"):
+            with self.subTest(ref=name):
+                saved = uf.ref_value(self.pin, name) if name.endswith("release-index") else None
+                if saved:
+                    tip.git(self.pin, "update-ref", "-d", name)
+                tip.git(self.pin, "symbolic-ref", name, "refs/heads/outside-allowlist")
+                err = self.stop(self.fetch, consent)
+                self.assertEqual((err.code, err.details.get("what")), ("ref_invalid", "symbolic"))
+                self.assertEqual(tip.git(self.pin, "rev-parse", "refs/heads/outside-allowlist").strip(), head)
+                self.assertEqual(tip.git(self.pin, "symbolic-ref", name).strip(), "refs/heads/outside-allowlist")
+                tip.git(self.pin, "symbolic-ref", "--delete", name)
+                if saved:
+                    tip.git(self.pin, "update-ref", name, saved)
+
+    def test_pin_local_transport_configuration_is_never_used(self):
+        """REVIEW 106 P1: URL rewrites and core.sshCommand in the pin's own config must not run."""
+        consent = self.consent()
+        marker = self.base / "ssh-ran"
+        program = self.base / "fake-ssh"
+        program.write_text(f"#!/bin/sh\ntouch {marker}\nexit 1\n")
+        program.chmod(0o755)
+        local = str(self.project / ".ai-comm-local")
+        tip.git(self.pin, "config", "--local", "core.sshCommand", str(program))
+        tip.git(self.pin, "config", "--local", f"url.ssh://example.invalid{local}.insteadOf", local)
+        tip.git(self.pin, "config", "--local", "url.ssh://example.invalid/.insteadOf", "/")
+        out = self.fetch(consent)
+        self.assertEqual(out["status"], "fetched")
+        self.assertFalse(marker.exists(), "a pin-local transport command ran")
+        self.assertEqual(self.refs()[f"refs/tags/v{TARGET}"], uc.tag_identity(self.pin, TARGET)["tag_object"])
+
     def test_a_concurrent_ref_change_aborts_the_whole_pair(self):
         consent = self.consent()
         real = ri.isolated_fetch

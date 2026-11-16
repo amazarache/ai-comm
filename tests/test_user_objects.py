@@ -630,7 +630,7 @@ class EntrySkillTests(unittest.TestCase):
         for path in paths:
             with self.subTest(path=path):
                 self.assertTrue((ROOT / path).is_file())
-        for command in set(re.findall(r"--user ([a-z]+)", self.text)):
+        for command in set(re.findall(r"--user ([a-z]+(?:-[a-z]+)*)", self.text)):
             with self.subTest(command=command):
                 done = subprocess.run([sys.executable, "-I", str(ROOT / "scripts" / "install_user.py"), command,
                                        "--help"], capture_output=True, timeout=60, check=False)
@@ -640,6 +640,13 @@ class EntrySkillTests(unittest.TestCase):
             with self.subTest(term=status):
                 self.assertIn(f"`{status}`", self.text)
 
+
+    def test_old_pins_get_the_cache_side_fetch_route(self):
+        """1.11.1 (REVIEW 106 P2): an older pin cannot learn the fallback from its own skill."""
+        for phrase in ("`origin_missing`", "--user upgrade-fetch", "--consent <CONSENT_ID>",
+                       "never consumes the consent", "Never add a remote or edit the pin's configuration"):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, self.text)
 
     def test_guided_setup_and_release_check_rules_are_stated(self):
         """T17 (text): the entry skill owns the release-check rules, also over an older pin."""
