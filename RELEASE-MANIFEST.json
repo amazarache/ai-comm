@@ -207,8 +207,8 @@
     },
     {
       "path": "scripts/upgrade_fetch.py",
-      "bytes": 10848,
-      "sha256": "5e7fa457acfdd281f5b33f38138f08687055d6c38902b0df07950c88731939af"
+      "bytes": 11495,
+      "sha256": "806276577f345063a023e4cd736f7c76f252a9062ac4361e3324d8de19334115"
     },
     {
       "path": "scripts/verify_pin.py",
@@ -312,8 +312,8 @@
     },
     {
       "path": "tests/test_upgrade_fetch.py",
-      "bytes": 28495,
-      "sha256": "8c735dfb69f3e7d013da0d842b8557b8f77842e12acf651859de1397d5683448"
+      "bytes": 29391,
+      "sha256": "714a95d598d1287719c7ffc916f2cbea7d6356a7a164a427681539ad20607357"
     },
     {
       "path": "tests/test_upgrade_fetch_real_boundary.py",

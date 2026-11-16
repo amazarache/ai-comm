@@ -19,6 +19,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import shutil
 import stat
@@ -107,11 +108,18 @@ def require_no_unfinished_upgrade(project):
 
 
 def pin_state(project, cache, origin):
-    """The pin as the trusted verifier sees it, with the facts every later step rechecks."""
+    """The pin as the trusted verifier sees it. Nothing here runs `git status` or any
+    other command that reads the pin's work-tree configuration (fsmonitor, hooks,
+    filters): the verifier compares tracked files with the committed bytes itself and
+    reads objects inertly, and the remaining facts come from the verified bytes."""
     report = vp.check_project(project.dir, cache)
     need(report["status"] == "verified", "pin_not_verified", status=report["status"])
-    pin = uc.package_identity(project.pin)
-    need(not pin["dirty"] and pin["commit"] == report["commit"], "pin_not_verified", status="changed")
+    binding = cache.bindings()["bindings"].get(report["version"]) or {}
+    cli = (project.pin / "ai_comm.py").read_bytes()  # verified: equal to the committed bytes
+    found = re.findall(rb'^RELEASE_ORIGIN = "([^"\r\n]+)"$', cli, re.MULTILINE)
+    pin = {"commit": report["commit"], "version": report["version"],
+           "origin": found[0].decode("utf-8", "replace") if len(found) == 1 else None,
+           "protocol_sha256": binding.get("protocol_sha256")}
     need(pin["origin"] == origin, "origin_disagreement", what="pin")
     need(origin_values(project.pin) == [], "pin_has_origin")
     return pin
@@ -174,8 +182,9 @@ def upgrade_fetch(project_dir, target, consent_id, *, channel=None, cache_dir=No
             need(done.returncode == 0, "refs_changed")
         finally:
             shutil.rmtree(temp, ignore_errors=True)
-        need(origin_values(project.pin) == [] and not uc.package_identity(project.pin)["dirty"], "pin_not_verified",
-             status="changed")
+        after = vp.check_project(project.dir, cache)
+        need(after["status"] == "verified" and after["commit"] == pin["commit"] and origin_values(project.pin) == [],
+             "pin_not_verified", status="changed")
     return {"status": "fetched", "target": target, "tag_object": binding["tag_object"], "commit": binding["commit"],
             "refs": {tag_ref: binding["tag_object"], index_ref: new_index},
             "consent": "unconsumed",

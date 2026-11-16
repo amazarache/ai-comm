@@ -485,6 +485,20 @@ class CacheSideFetchTests(Fixture):
         self.assertFalse(marker.exists(), "a pin-local transport command ran")
         self.assertEqual(self.refs()[f"refs/tags/v{TARGET}"], uc.tag_identity(self.pin, TARGET)["tag_object"])
 
+    def test_pin_local_work_tree_commands_never_run(self):
+        """REVIEW 108 P1: a pin-local core.fsmonitor program must not run, neither before a
+        refusal nor during a successful fetch."""
+        consent = self.consent()  # the pin's own controller (pin code, owner-run) before the trap is set
+        marker = self.base / "fsmonitor-ran"
+        program = self.base / "fake-fsmonitor"
+        program.write_text(f"#!/bin/sh\ntouch {marker}\nexit 1\n")
+        program.chmod(0o755)
+        tip.git(self.pin, "config", "--local", "core.fsmonitor", str(program))
+        self.assertEqual(self.stop(self.fetch, "consent-0000000000000000").code, "consent_missing")
+        self.assertFalse(marker.exists(), "fsmonitor ran before the refusal")
+        self.assertEqual(self.fetch(consent)["status"], "fetched")
+        self.assertFalse(marker.exists(), "fsmonitor ran during the fetch")
+
     def test_a_concurrent_ref_change_aborts_the_whole_pair(self):
         consent = self.consent()
         real = ri.isolated_fetch
