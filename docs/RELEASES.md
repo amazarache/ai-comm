@@ -292,7 +292,8 @@ spent. It never consumes the consent.
 Any difference stops with `release_identity_changed`, `tag_exists_different` or
 `refs_changed`, and leaves both refs as they were. Fetched objects may remain unreferenced
 in the pin's object store. The pin's configuration and working tree never change. Repeating
-the command after a completed publication finds the same pair and succeeds. The pin's own
+the command after a completed publication finds the same pair and succeeds. Newer versions
+in the fetched index are reported as `newer_indexed`, never selected. The pin's own
 `upgrade prepare` follows.
 
 ## New-project installer (1.5.0)

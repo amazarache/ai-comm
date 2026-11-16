@@ -160,6 +160,8 @@ def upgrade_fetch(project_dir, target, consent_id, *, channel=None, cache_dir=No
             ri.isolated_fetch(repo, origin, helper, ri.release_refspecs(target))
             records, _evidence = iu.index_records(repo)  # strict: the whole index validates
             record = next((r for r in records if r["package_version"] == target), None)
+            newer = sorted((r["package_version"] for r in records
+                            if iu.version_key(r["package_version"]) > iu.version_key(target)), key=iu.version_key)
             need(record is not None and iu.binding_agrees(binding, record), "release_identity_changed", what="index")
             try:
                 tag = uc.tag_identity(repo, target)
@@ -188,6 +190,7 @@ def upgrade_fetch(project_dir, target, consent_id, *, channel=None, cache_dir=No
     return {"status": "fetched", "target": target, "tag_object": binding["tag_object"], "commit": binding["commit"],
             "refs": {tag_ref: binding["tag_object"], index_ref: new_index},
             "consent": "unconsumed",
+            "newer_indexed": newer,  # reported only: the target never changes implicitly
             "note": "Objects fetched before a stop may remain unreferenced in the pin's object store.",
             "next": "Run the pin's own `ai_comm.py upgrade prepare` with an upgrade consent."}
 

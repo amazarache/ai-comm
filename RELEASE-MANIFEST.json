@@ -107,8 +107,8 @@
     },
     {
       "path": "docs/RELEASES.md",
-      "bytes": 28970,
-      "sha256": "69175f5d40b61f75270504d98207cf8a69a9f2dcd592a4257a3da67fca3a1f78"
+      "bytes": 29055,
+      "sha256": "b66b08cee295b5f863a4913d4a33da29fae1d81f977189c8c10e3ac27d37a389"
     },
     {
       "path": "docs/WAKE.md",
@@ -207,8 +207,8 @@
     },
     {
       "path": "scripts/upgrade_fetch.py",
-      "bytes": 11495,
-      "sha256": "806276577f345063a023e4cd736f7c76f252a9062ac4361e3324d8de19334115"
+      "bytes": 11766,
+      "sha256": "3100ea30bf10e5319e6b17947201e3fe19ecb9a1c39c464ee5932ac37cf7ccfb"
     },
     {
       "path": "scripts/verify_pin.py",
@@ -312,8 +312,8 @@
     },
     {
       "path": "tests/test_upgrade_fetch.py",
-      "bytes": 29391,
-      "sha256": "714a95d598d1287719c7ffc916f2cbea7d6356a7a164a427681539ad20607357"
+      "bytes": 30004,
+      "sha256": "52a7aa25c3cbc66eecb3c993a4f6d637333320918c1f8974853b88c74a53303b"
     },
     {
       "path": "tests/test_upgrade_fetch_real_boundary.py",

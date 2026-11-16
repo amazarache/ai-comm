@@ -291,6 +291,14 @@ class CacheSideFetchTests(Fixture):
                                 "--as", "agent-a", "--session", "s-a"])
         self.assertEqual(code, 0, buf.getvalue())
 
+    def test_a_newer_indexed_release_is_reported_not_selected(self):
+        """Plan r2: no implicit target change; a newer version in the fetched index is reported."""
+        consent = self.consent(target="1.5.0", commit=self.releases["1.5.0"]["commit"])
+        tip.git(self.pin, "tag", "-d", "v1.5.0")  # the pin's own tag, so the fetched one is the only one
+        out = uf.upgrade_fetch(self.project, "1.5.0", consent, cache_dir=self.cache_dir)
+        self.assertEqual((out["target"], out["newer_indexed"]), ("1.5.0", ["1.5.1"]))
+        self.assertEqual(self.fetch(self.consent())["newer_indexed"], [])
+
     def test_a_retry_after_a_completed_publication_recognises_the_pair(self):
         consent = self.consent()
         first = self.fetch(consent)
