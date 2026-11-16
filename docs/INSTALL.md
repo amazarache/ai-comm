@@ -51,7 +51,7 @@ On macOS use `shasum -a 256 -c -` instead of `sha256sum -c -`. To read the boots
 
 | Release | File | SHA-256 |
 | --- | --- | --- |
-| `v1.11.0` | `install-ai-comm.sh` | `58140bf8c1f06885d001f348830b9d4cceb3d3fd20071832a39e3cb28db113cb` |
+| `v1.11.1` | `install-ai-comm.sh` | `f3e87d65dae90babd5cb13c90b344000f99ba1a7c728dd3f3efa29262010e59d` |
 
 The table is generated before each release is tagged (`scripts/render_bootstrap.py`), and the release workflow
 refuses to publish a bootstrap whose digest differs from it.
@@ -145,6 +145,7 @@ All commands print JSON and stop with a code on any problem.
 | `install.sh --user setup apply --plan FILE --sha256 D --session REF` | apply exactly that approved plan, or resume it (below) |
 | `install.sh --user setup abandon --project DIR` | end an unfinished setup; removes only setup's own staging |
 | `install.sh --user setup status --project DIR` | what of a guided setup exists in the project; writes nothing |
+| `install.sh --user upgrade-fetch --project DIR --target X --consent ID` | guided-upgrade fetch for a pin without a recorded origin (pins installed before 1.11.1); only the release tag and index refs change (see [RELEASES.md](RELEASES.md)) |
 | `install.sh --user wake plan\|install\|remove\|integration …` | the optional wake adapters of a project with a verified pin; `plan` changes nothing, and nothing is activated (see [wake adapters](WAKE.md)) |
 
 `check` reports `verdict`: `update_available`, `up_to_date`, or `unknown`. It says `up_to_date` only when the release

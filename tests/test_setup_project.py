@@ -646,15 +646,21 @@ class SetupApplyTests(Base):
 
     def test_the_guided_upgrade_prepares_over_a_setup_created_declaration(self):
         """T13: the controller's own `prepare` (this tree's code, which the fixture pin carries)
-        accepts what setup declared. `verify_target` (the clone, tag and manifest checks and the
-        target's inner full suite) is stubbed as a whole; consent, session, identity, declaration
-        and guidance checks all run."""
+        accepts what setup declared, after the controller's own `fetch` (which 1.11.0 setup pins
+        could not run: no recorded origin). `verify_target` (the clone, tag and manifest checks
+        and the target's inner full suite) is stubbed as a whole; consent, session, identity,
+        declaration and guidance checks all run."""
         import upgrade_controller as ucm
         path, digest, env = self.write_plan(version="1.5.0")
         self.apply(path, digest)
         pin = self.project / ".tools" / "ai-comm"
-        tip.git(pin, "fetch", "-q", "--no-tags", str(self.origin), "refs/tags/v1.5.1:refs/tags/v1.5.1")
         target = self.releases["1.5.1"]["commit"]
+        origin = ucm.package_identity(pin)["origin"]
+        # The fixture origin is local: a `git` wrapper rewrites the manifest-bound URL in fetches only.
+        import test_upgrade_fetch as tuf
+        redirect = tuf.git_redirect(self.base / "bin", origin, self.origin)
+        redirect.start()
+        self.addCleanup(redirect.stop)
 
         def run(*args):
             out = io.StringIO()
@@ -662,8 +668,10 @@ class SetupApplyTests(Base):
                 code = ucm.main(["--project", str(self.project), *args])
             return code, json.loads(out.getvalue())
         code, answer = run("record-answer", "--answer", "yes", "--target", "1.5.1", "--target-commit", target,
-                           "--source", ucm.package_identity(pin)["origin"], "--evidence", "owner yes in a test")
+                           "--source", origin, "--evidence", "owner yes in a test")
         self.assertEqual(code, 0, answer)
+        code, fetched = run("fetch", "--target", "1.5.1", "--consent", answer["consent"])  # the real fetch (1.11.1)
+        self.assertEqual((code, fetched["commit"]), (0, target), fetched)
         stub = {"commit": target, "tag_object": "stub", "tests_ran": 1, "checks": {}, "at": 0}
         with mock.patch.object(ucm, "verify_target", return_value=stub):
             code, out = run("prepare", "--target", "1.5.1", "--consent", answer["consent"], "--as", "agent-a",

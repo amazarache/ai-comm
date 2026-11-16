@@ -229,7 +229,12 @@ arguments. Commands, all JSON with non-zero exit on any stop:
 - `record-answer`: stores the owner's direct answer; `yes` and `fetch only`
   create a consent bound to project, channel, source, from-commit and target.
 - `fetch`: runs `scripts/check_for_release.py --fetch-permitted` only under a
-  matching consent.
+  matching consent. That check requires the pin's local `remote.origin.url` to equal
+  its manifest-bound `RELEASE_ORIGIN`. Pins published by the project installer from
+  1.11.1 on (and so by guided setup) record exactly that value, with no fetch refspec.
+  Older installer-made pins have none and stop with `origin_missing`; for them, the
+  per-user cache's `install.sh --user upgrade-fetch --project DIR --target X --consent ID`
+  does the same fetch (below).
 - `prepare`: refuses a protocol change, an unintegrated project or an
   unsupported integration; verifies the target in a private clone (tag, manifest,
   full suite); copies the target's controller to
@@ -255,6 +260,40 @@ any complete invalid line is `journal_corrupt` and is never repaired. Each side
 effect is preceded by an intent and followed by an outcome; an intent without
 an outcome is resolved only by a read-only probe. A project lock admits one
 applier.
+
+## Cache-side fetch for pins without an origin (1.11.1)
+
+`install.sh --user upgrade-fetch --project DIR --target X --consent ID [--channel PATH]`
+runs `scripts/upgrade_fetch.py` from a verified cache release and never runs pin code.
+
+**Refusals.** It refuses, before any network access:
+- an unverified, modified or dirty pin (`pin_not_verified`);
+- a pin with any `remote.origin.url` entry (`pin_has_origin`: that pin uses its own
+  `upgrade fetch`, where a wrong origin stays `origin_mismatch`);
+- a version without a trusted cache binding (`release_unbound`; refreshing bindings is
+  a separate consented `check --fetch-permitted`);
+- a protocol change (`protocol_migration_required`);
+- disagreement between the pin's manifest-bound origin, the cache's origin and the consent
+  source (`origin_disagreement`).
+
+**Lock and consent.** Under the project's upgrade lock (no cache lock is taken) it refuses
+an unfinished setup or upgrade. It validates the consent exactly as `upgrade fetch` does:
+project, channel, source, from-commit, target, target commit and tag object, expiry, not
+spent. It never consumes the consent.
+
+**Fetch and publication.**
+1. Fetch exactly the tag and the release index into a private temporary repository.
+2. Validate the whole index strictly, and the tag object, commit, manifest and protocol
+   against the binding.
+3. Copy the two objects into the pin by id.
+4. Publish `refs/tags/vX` and `refs/remotes/origin/release-index` in one `update-ref`
+   transaction, each from the value read before the fetch.
+
+Any difference stops with `release_identity_changed`, `tag_exists_different` or
+`refs_changed`, and leaves both refs as they were. Fetched objects may remain unreferenced
+in the pin's object store. The pin's configuration and working tree never change. Repeating
+the command after a completed publication finds the same pair and succeeds. The pin's own
+`upgrade prepare` follows.
 
 ## New-project installer (1.5.0)
 

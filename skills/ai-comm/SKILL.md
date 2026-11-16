@@ -368,7 +368,12 @@ commit, expires after 24 hours, is consumed at the first live change, and is
 spent after completion, rollback or failure.
 
 **Transaction.** `upgrade fetch`, then `upgrade prepare` (verifies the target in a
-private clone and freezes every identity), then `upgrade apply`. The pin is
+private clone and freezes every identity), then `upgrade apply`. If `upgrade fetch`
+stops with `origin_missing` (a pin published by a project installer or guided setup
+before 1.11.1 records no origin), do that one fetch with the cache's
+`install.sh --user upgrade-fetch --project <PROJECT_ROOT> --target <X> --consent <ID>`
+under the same consent, then continue with `upgrade prepare`. Never add a remote to
+the pin by hand. The pin is
 always the project's `.tools/ai-comm`. The applier passes `--as <HANDLE> --session
 <SESSION>` to every mutating command; the session is frozen at `prepare` and must still
 be that handle's current channel session. `prepare`

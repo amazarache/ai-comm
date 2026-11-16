@@ -1,5 +1,23 @@
 # Changes
 
+## 1.11.1
+
+- The guided upgrade could not fetch for pins made by the project installer
+  or by 1.11.0 guided setup: the pin's own release check requires a local
+  `remote.origin.url`, which the installer never recorded, so `upgrade fetch`
+  stopped with `origin_missing`. The installer now records the release's
+  manifest-bound origin in the staged repository before publication
+  (journalled; no fetch refspec; any other value stops with
+  `origin_conflict`; recovery never edits a published pin).
+- New `install.sh --user upgrade-fetch --project DIR --target X --consent ID`
+  for existing pins without an origin: trusted cache code fetches exactly the
+  release tag and the index under the same consent and project lock, validates
+  them against the cache binding in a private repository, and publishes the
+  two refs in one compare-and-swap transaction. It changes no configuration
+  or working tree and never consumes the consent; the pin's own `prepare`
+  follows. See docs/RELEASES.md.
+- No protocol change.
+
 ## 1.11.0
 
 - `install.sh --user check --fetch-permitted` validates the complete fetched

@@ -1516,6 +1516,15 @@ def main(argv=None):
             sys.modules[name] = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(sys.modules[name])
         return sys.modules[name].main(argv[1:])
+    if argv and argv[0] == "upgrade-fetch":
+        # Release fetch for an existing pin without a recorded origin (1.11.1): this same
+        # release's scripts/upgrade_fetch.py; it never runs pin code.
+        name = "ai_comm_upgrade_fetch"
+        if name not in sys.modules:
+            spec = importlib.util.spec_from_file_location(name, Path(__file__).resolve().parent / "upgrade_fetch.py")
+            sys.modules[name] = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(sys.modules[name])
+        return sys.modules[name].main(argv[1:])
     if argv and argv[0] == "wake":
         # Optional wake adapters (design 024): handled by this same release's scripts/wake.py.
         spec = importlib.util.spec_from_file_location(

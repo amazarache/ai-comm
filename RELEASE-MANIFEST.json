@@ -27,8 +27,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 28517,
-      "sha256": "3587cfec3434ac966886ef6341e0ed40c90e7f0417a63fb27f279e8a88bc27c3"
+      "bytes": 29534,
+      "sha256": "5d29ac722fcebf71e679ed9c6015af13cb3faaab1b78dd04ecbf0035fb2f5e1a"
     },
     {
       "path": "LICENSE",
@@ -42,8 +42,8 @@
     },
     {
       "path": "README.md",
-      "bytes": 24815,
-      "sha256": "448cc1e22873bfa3c17617f745ca576b3b84a4f51ef7fab8d86e665e8791413a"
+      "bytes": 25036,
+      "sha256": "a399b96d13bfe159ffdd2a2868066047fc87321cb187a275c9eac8a88739b1c1"
     },
     {
       "path": "SECURITY.md",
@@ -78,7 +78,7 @@
     {
       "path": "ai_comm.py",
       "bytes": 160319,
-      "sha256": "3cbb394e2aa94d03c0567cd1d5c510c4b470f2ac4fd0af36f3b4f4382f4f150e"
+      "sha256": "05dfae9ecb79da91b26cfc04289fdaa7818bf60c4acd35ff7407c02e797a75fc"
     },
     {
       "path": "docs/ERRORS.md",
@@ -92,8 +92,8 @@
     },
     {
       "path": "docs/INSTALL.md",
-      "bytes": 20035,
-      "sha256": "8c078a4bba908010fafb6a1dbdb1dafc0092a88253759e805fea6a6bb0f0755c"
+      "bytes": 20278,
+      "sha256": "b279931c6dcc904756f7dab0084712ae87d856bbdfd14378de012c3ecab6fb87"
     },
     {
       "path": "docs/PERFORMANCE.md",
@@ -107,8 +107,8 @@
     },
     {
       "path": "docs/RELEASES.md",
-      "bytes": 26610,
-      "sha256": "b852bf6e59162040a6cde62d51aa8402f45e11974cafde0de399cbc1f25649ba"
+      "bytes": 28970,
+      "sha256": "69175f5d40b61f75270504d98207cf8a69a9f2dcd592a4257a3da67fca3a1f78"
     },
     {
       "path": "docs/WAKE.md",
@@ -167,13 +167,13 @@
     },
     {
       "path": "scripts/install_project.py",
-      "bytes": 19601,
-      "sha256": "a05aea7d44d8755122ab139c74d8308baa0e139845dcaf277b69ce5ec3676f1d"
+      "bytes": 21367,
+      "sha256": "1f00007aa17b24e8c0546c26285bc2bb8c6e2a8c1c961ec7772746cf82e6e4e0"
     },
     {
       "path": "scripts/install_user.py",
-      "bytes": 73534,
-      "sha256": "5ffe685c21c1f68dabc24c6343aeb1ebd258baa82410e9bae1fce623a9adb322"
+      "bytes": 74104,
+      "sha256": "91082b641814cf29ab3307055f14fda8e360980ee8a39b3721ef54122270f555"
     },
     {
       "path": "scripts/leak_scan.py",
@@ -206,6 +206,11 @@
       "sha256": "84ce3149a471b604d023637c6d35cc10da3615581a1aa7b3f49994e75c2f49f0"
     },
     {
+      "path": "scripts/upgrade_fetch.py",
+      "bytes": 9275,
+      "sha256": "a07105580ccfd52a73c3952356a7e063a40d1d393ac462db82e8453cda64a930"
+    },
+    {
       "path": "scripts/verify_pin.py",
       "bytes": 15326,
       "sha256": "65f9340ad875f0a841ff50db415cbea94e8f241a2a472d6ec4631cb2ef55f8eb"
@@ -217,8 +222,8 @@
     },
     {
       "path": "skills/ai-comm/SKILL.md",
-      "bytes": 23724,
-      "sha256": "6bcb948ca3d2e8bf07b45b45bf1d8a6233cde450ced833119ae5250c1a8efe05"
+      "bytes": 24084,
+      "sha256": "9be7be874553e2c2f27850d988e84b40b7ee9d172fe77ea770a54cc60c5f15e9"
     },
     {
       "path": "tests/test_bootstrap.py",
@@ -287,8 +292,8 @@
     },
     {
       "path": "tests/test_setup_project.py",
-      "bytes": 60121,
-      "sha256": "90b133b1d032875514538713078cd72356e5b47145976db78561a0ead49adf01"
+      "bytes": 60621,
+      "sha256": "174ccebf224cbfdc502ff96efc2c5cae04708d1710cdaf15f8d0dd9b021d6280"
     },
     {
       "path": "tests/test_setup_real_boundary.py",
@@ -304,6 +309,16 @@
       "path": "tests/test_upgrade_controller.py",
       "bytes": 62080,
       "sha256": "77d7d84fb0725d5132e6e92a97bfe05b3f5a759b7670787e6ef1d09978e00f6f"
+    },
+    {
+      "path": "tests/test_upgrade_fetch.py",
+      "bytes": 24609,
+      "sha256": "04a96e2f3ef9d6bfc0d4780b9d34ddcdd6d44df22b7b36079d2e1d7b971f964d"
+    },
+    {
+      "path": "tests/test_upgrade_fetch_real_boundary.py",
+      "bytes": 8497,
+      "sha256": "00c608b6e897bd91513097ace294c1806441ee753d90792faf94014dec8c250b"
     },
     {
       "path": "tests/test_upgrade_plan.py",

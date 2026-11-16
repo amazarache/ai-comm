@@ -221,6 +221,32 @@ def finish(project, staging, journal, record, guard=None):
 EXPECT_KEYS = ("tag_object", "commit", "manifest_sha256")
 
 
+def staged_release_origin(repo):
+    """The release origin the staged release itself names (its manifest-bound
+    RELEASE_ORIGIN): the value the pin's own release check later trusts."""
+    origin = uc.package_identity(repo)["origin"]
+    need(isinstance(origin, str) and origin, "origin_unavailable")
+    return origin
+
+
+def record_origin(repo, origin):
+    """Name the release origin in the staged repository before it is published, so the
+    pin's own guided-upgrade fetch can verify it (1.11.1). Only `remote.origin.url` is
+    set: no fetch refspec, so nothing is ever fetched implicitly. Idempotent: absent is
+    written, exactly this value is kept, anything else (another value, several values)
+    stops with `origin_conflict`. Only the unpublished staging repository is touched;
+    recovery never edits a published pin's configuration."""
+    found = subprocess.run(["git", "-C", str(repo), "config", "--local", "--null", "--get-all", "remote.origin.url"],
+                           capture_output=True, env=uc.clean_env(), timeout=60, check=False)
+    if found.returncode == 1 and not found.stdout:
+        git(repo, "config", "--local", "remote.origin.url", origin)
+    else:
+        need(found.returncode == 0 and found.stdout == origin.encode() + b"\0", "origin_conflict")
+    need(subprocess.run(["git", "-C", str(repo), "config", "--local", "--get-all", "remote.origin.fetch"],
+                        capture_output=True, env=uc.clean_env(), timeout=60, check=False).returncode == 1,
+         "origin_conflict")
+
+
 def check_expected(expect, guard, setup_txn):
     """Validate the optional setup arguments; all None means today's behaviour."""
     if expect is not None:
@@ -276,6 +302,10 @@ def install(project_dir, version, *, fetch_permitted, use_helper, fetch=None, or
         require_expected_identity(repo, version, select_record(repo, version), expect)
         ri.require_no_foreign_setup(project, setup_txn)
         check_gitignore_before(project, gitignore_guard)
+        origin = staged_release_origin(repo)
+        journal.append("intent", {"index": 2, "action": {"op": "origin"}, "url": origin})
+        record_origin(repo, origin)
+        journal.append("outcome", {"index": 2, "ok": True})
         journal.append("intent", {"index": 1, "action": {"op": "publish"}, "commit": record["commit"]})
         publish(project, staging)
         journal.append("outcome", {"index": 1, "ok": True})
