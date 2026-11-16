@@ -29,9 +29,11 @@
   and skill-entry discovery.
 - New `setup apply` and `setup abandon`: one journalled transaction per
   approved plan (pin, `.gitignore` G1 to G2, channel by the pin's own `init`
-  and a no-replace move, A's join, the note by exclusive create, and for a
-  fresh pin a declared upgrade declaration with no integrations); resume
-  with the same plan completes or stops and never duplicates; `abandon`
+  and a no-replace move, A's join, the note staged and published with a
+  link that never replaces, and for a fresh pin a declared upgrade
+  declaration with no integrations); resume with the same plan first checks
+  every finished step and the real parents again, recovers a torn final
+  journal line, and completes or stops and never duplicates; `abandon`
   removes only setup's staging. Neither binds B, commits, pushes or
   installs a wake adapter.
 - The entry skill leads a project without a pin (fresh) or with a verified pin

@@ -181,11 +181,18 @@ anything, takes `.ai-comm-local/setup/lock`, checks again, and journals each ste
 (fresh: the project installer with the frozen release identity, the `.gitignore` guard and this transaction's id;
 reuse: verified as it is), the channel line in `.gitignore` (only from the planned G1 to G2), the channel (the pin's own
 `init` in `.ai-comm-local/setup/txn/`, checked against the plan, then moved with a no-replace rename that fails if
-anything, even an empty directory, has appeared at the path), A's `join`, the note (exclusive create; its JSON block is
-the plan's data, and it holds no session references) and, fresh only, the declaration (declared, no integrations, the
+anything, even an empty directory, has appeared at the path), A's `join`, the note (complete bytes written and synced in a staging file beside it, then published with a link that
+never replaces, so the note is absent or complete; its JSON block is the plan's data, and it holds no session
+references) and, fresh only, the declaration (declared, no integrations, the
 note as guidance, through `declare_project install` with this setup's transaction id). Resume is the same command:
-finished steps are recognised from the journal and verified, never repeated; anything the journal does not explain
-stops the flow and is not adopted. `apply` re-checks every input rule of the plan on the approved bytes. `setup
+before anything runs, every finished step is checked again (the pin verified, the `.gitignore` at G2, the channel's
+root and settings, A in its registry, the note's and declaration's digests) and never repeated; the actual parents of
+the channel and note are checked again before any write and before each publication; a torn final journal line is
+kept as `torn-N.bin` and recorded, under the lock, once the journal's start matches the approved plan. Anything the
+journal does not explain stops the flow and is not adopted (`pin_changed`, `gitignore_changed`, `channel_foreign`,
+`join_changed`, `note_changed`, `declaration_changed`, `parent_missing`, `unsafe_ancestry`). `setup status` lists
+steps as `started` or `recorded`: journal records, which `apply` checks before it resumes. `plan --out` refuses a file
+inside the project after resolving symbolic links in its parent. `apply` re-checks every input rule of the plan on the approved bytes. `setup
 abandon` marks the journal abandoned, keeps it as `abandoned-<txn>.jsonl`, removes only `.ai-comm-local/setup/txn`, and
 names what stays (pin, channel, note, declaration, `.gitignore` lines); a new plan then sees the project as it is. Nothing else should write to the project
 while setup applies; drift a check observes stops it, a write between a check and the following replacement is not

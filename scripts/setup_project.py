@@ -117,21 +117,28 @@ def check_path_rules(channel, note):
     return channel, note
 
 
-def check_paths(project, channel, note):
-    channel, note = check_path_rules(channel, note)
+def check_parents(project, channel, note):
+    """The actual parents of both paths: real directories inside the project (no symlinked
+    component), with safe ownership and modes, and the channel's on the project's filesystem.
+    Run by plan, and by apply before any write and before every publication (design rev 7, 7)."""
     for path, field in ((channel, "channel"), (note, "note")):
-        parent = project.joinpath(*PurePosixPath(path).parts[:-1])
         cursor = project
         for part in PurePosixPath(path).parts[:-1]:
             cursor = cursor / part
             st = os.lstat(cursor) if os.path.lexists(cursor) else None
             need(st is not None and stat.S_ISDIR(st.st_mode) and not stat.S_ISLNK(st.st_mode),
                  "parent_missing", field=field)
-        uc.check_ancestry(parent)
-        target = project.joinpath(*PurePosixPath(path).parts)
-        need(not os.path.lexists(target), "channel_exists" if field == "channel" else "note_exists", field=field)
+        uc.check_ancestry(cursor)
     channel_parent = project.joinpath(*PurePosixPath(channel).parts[:-1])
     need(device_of(channel_parent) == device_of(project), "channel_other_filesystem")
+
+
+def check_paths(project, channel, note):
+    channel, note = check_path_rules(channel, note)
+    check_parents(project, channel, note)
+    for path, field in ((channel, "channel"), (note, "note")):
+        target = project.joinpath(*PurePosixPath(path).parts)
+        need(not os.path.lexists(target), "channel_exists" if field == "channel" else "note_exists", field=field)
     return channel, note
 
 
@@ -338,8 +345,13 @@ def plan(project_dir, *, task, channel=None, note=None, handles=None, reviewers=
 def write_plan_file(result, out):
     """Save the envelope's exact canonical bytes for `apply`, outside the project (the plan
     itself writes nothing in the project). A new file only: an existing one is never replaced."""
-    target = Path(out).absolute()
-    project = Path(result["plan"]["project"])
+    out = Path(out).absolute()
+    need(out.name not in ("", ".", ".."), "plan_file_invalid")
+    try:
+        target = out.parent.resolve(strict=True) / out.name  # symlinked parents resolved, leaf never followed
+    except OSError as exc:
+        raise Stop("plan_file_invalid") from exc
+    project = Path(result["plan"]["project"]).resolve()
     need(not (target == project or project in target.parents), "plan_file_in_project")
     fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, "wb") as stream:
@@ -554,12 +566,21 @@ class Setup:
         return uc.Journal(self.dir)
 
     def load(self):
-        records, _ = self.journal().read()
+        """Bind the journal's start to this project and approved plan, then (under the lock)
+        set aside a torn final append, so a resume can journal again. A corrupt complete record
+        or an unrecognised start stops with the journal untouched."""
+        journal = self.journal()
+        records, torn = journal.read()
+        need(records and records[0]["kind"] == "start" and isinstance(records[0]["data"], dict),
+             "setup_journal_invalid")
         start = records[0]["data"]
-        need(start.get("schema") == uc.SETUP_SCHEMA, "setup_journal_invalid")
-        need(start.get("plan_sha256") == self.digest, "setup_plan_mismatch")
+        need(start.get("schema") == uc.SETUP_SCHEMA and isinstance(start.get("txn"), str)
+             and uc.HEX.fullmatch(start["txn"]), "setup_journal_invalid")
+        need(start.get("plan_sha256") == self.digest and start.get("plan") == self.env, "setup_plan_mismatch")
         states = [r["data"].get("state") for r in records if r["kind"] == "state"]
         need(not any(state in uc.SETUP_TERMINAL for state in states), "setup_finished")
+        if torn is not None:
+            records = journal.repair_torn_tail()  # tail kept as torn-N.bin, recorded in a note
         self.txn = start["txn"]
         for r in records:
             if r["kind"] == "intent":
@@ -588,10 +609,53 @@ class Setup:
         need(not path.is_symlink(), "unsafe_path", path=".gitignore")
         return ri.file_digest(path.read_bytes() if path.exists() else None)
 
+    def check_parents(self):
+        check_parents(self.project, self.env["channel"], self.env["note"])
+
+    def check_done(self):
+        """Every completed stage must still be what this transaction made; nothing later runs
+        over a changed pin, ignore file, channel, registry, note or declaration (design rev 7, 7).
+        The pin comes first: no pin command runs unless it is verified."""
+        done, gi = self.done, self.env["baseline"]["gitignore"]
+        if "pin" in done:
+            need(self.pin_matches(), "pin_changed")
+        if "gitignore" in done:
+            need(self.gitignore_digest() == gi["g2"], "gitignore_changed")
+        if "channel" in done:
+            self.recognize_channel(done["channel"].get("root"))
+        if "join" in done:
+            a = self.env["roles"][0]
+            items = run_pin(self.pin, self.channel, "registry", "sessions").get("items")
+            need(isinstance(items, list) and any(
+                isinstance(i, dict) and (i.get("handle"), i.get("session"), i.get("platform"))
+                == (a["handle"], self.env["a_reference"]["value"], a["host_label"]) for i in items),
+                "join_changed")
+        if "note" in done:
+            need(os.path.isfile(self.note) and not self.note.is_symlink()
+                 and uc.sha256_bytes(self.note.read_bytes()) == done["note"].get("sha256"), "note_changed")
+        if "declaration" in done and self.env["profile"] == "fresh":
+            live = self.project / ".ai-comm-local" / "upgrade" / "project.json"
+            need(live.is_file() and not live.is_symlink()
+                 and uc.sha256_bytes(live.read_bytes()) == done["declaration"].get("sha256"), "declaration_changed")
+
+    def recognize_channel(self, root):
+        """The channel at the planned path is this transaction's: recorded root, planned facts."""
+        need(root is not None, "channel_exists")
+        need(os.path.isdir(self.channel) and not self.channel.is_symlink(), "channel_foreign")
+        try:
+            facts = channel_facts(self.channel)
+        except Stop as exc:
+            raise Stop("channel_foreign") from exc
+        want = expected_channel(self.env)
+        need(facts["root"] == root and {k: facts[k] for k in want} == want, "channel_foreign")
+
     def check_baseline(self):
-        """Everything not yet done must still be as planned; drift is never adopted."""
+        """Everything not yet done must still be as planned, and everything done must still be
+        recognised; drift is never adopted."""
         env, gi = self.env, self.env["baseline"]["gitignore"]
         need(self.env["executing"] == {"path": str(RELEASE), **executing_identity()}, "executing_release_changed")
+        self.check_parents()
+        self.check_done()
         if "pin" not in self.done:
             if env["profile"] == "fresh":
                 report = vp.check_project(self.project, self.cache)
@@ -655,13 +719,9 @@ class Setup:
     def stage_channel(self):
         want = expected_channel(self.env)
         recorded = self.intents.get("channel", {}).get("root")
+        self.check_parents()
         if os.path.lexists(self.channel):
-            need(recorded is not None, "channel_exists")
-            try:
-                facts = channel_facts(self.channel)
-            except Stop as exc:
-                raise Stop("channel_foreign") from exc
-            need(facts["root"] == recorded and {k: facts[k] for k in want} == want, "channel_foreign")
+            self.recognize_channel(recorded)
             return self.outcome("channel", root=recorded)
         staged = self.staging / "channel"
         if os.path.lexists(staged):
@@ -674,7 +734,7 @@ class Setup:
         facts = channel_facts(staged)
         need({k: facts[k] for k in want} == want, "channel_invalid")
         self.intent("channel", root=facts["root"])
-        need(device_of(self.channel.parent) == device_of(self.project), "channel_other_filesystem")
+        self.check_parents()
         rename_noreplace(staged, self.channel)
         uc.fsync_dir(self.channel.parent)
         self.outcome("channel", root=facts["root"])
@@ -685,19 +745,39 @@ class Setup:
                 "--session", self.env["a_reference"]["value"])
         self.outcome("join", handle=a["handle"])
 
+    def note_staging(self):
+        """This transaction's own staging file, beside the note (same directory, so the same
+        filesystem); its name is fixed by the transaction, so a resume finds it."""
+        return self.note.with_name(f".{self.note.name}.setup-{self.txn[:16]}")
+
     def stage_note(self):
+        """Complete bytes are written and synced in staging, then published with link(2), which
+        never replaces: the final path is absent or complete, and an unrelated file is kept."""
         data = render_note(self.env, self.done["channel"]["root"], self.digest)
         digest = uc.sha256_bytes(data)
+        staged = self.note_staging()
+        self.check_parents()
         if os.path.lexists(self.note):
-            need(self.intents.get("note", {}).get("sha256") == digest and not self.note.is_symlink()
-                 and uc.sha256_bytes(self.note.read_bytes()) == digest, "note_exists")
+            need(self.intents.get("note", {}).get("sha256") == digest and os.path.isfile(self.note)
+                 and not self.note.is_symlink() and uc.sha256_bytes(self.note.read_bytes()) == digest, "note_exists")
+            if os.path.lexists(staged):
+                os.unlink(staged)  # published; only the staging name remained
+                uc.fsync_dir(self.note.parent)
             return self.outcome("note", sha256=digest)
-        self.intent("note", sha256=digest)
-        fd = os.open(self.note, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+        self.intent("note", sha256=digest, staging=staged.name)
+        if os.path.lexists(staged):
+            os.unlink(staged)  # this transaction's own interrupted staging
+        fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
         with os.fdopen(fd, "wb") as stream:
             stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())
+        self.check_parents()
+        try:
+            os.link(staged, self.note, follow_symlinks=False)
+        except FileExistsError as exc:
+            raise Stop("note_exists") from exc
+        os.unlink(staged)
         uc.fsync_dir(self.note.parent)
         self.outcome("note", sha256=digest)
 
@@ -781,7 +861,7 @@ def abandon(project_dir):
     need(current is not None, "nothing_to_abandon")
     need(current != "unrecognized", "setup_journal_invalid")
     with setup_lock(directory):
-        records, _ = uc.Journal(directory).read()
+        records = uc.Journal(directory).repair_torn_tail()  # a torn final append is kept, not lost
         env = records[0]["data"]["plan"]
         uc.Journal(directory).append("state", {"state": "abandoned"})
         if os.path.lexists(directory / "txn"):
@@ -846,9 +926,10 @@ def status(project_dir, *, cache_dir=None):
         records, _ = uc.Journal(directory).read()
         for r in records:
             if r["kind"] in ("intent", "outcome"):
-                stages[r["data"]["stage"]] = "done" if r["kind"] == "outcome" else "started"
+                stages[r["data"]["stage"]] = "recorded" if r["kind"] == "outcome" else "started"
     return {"status": "ok", "project": str(project), "pin": report["status"], "pin_version": report.get("version"),
             "setup": ri.unfinished_setup(project) and "unfinished" or "none", "stages": stages,
+            "stages_basis": "the setup journal only; apply checks every recorded stage again before it resumes",
             "declaration": found,
             "release_checks": "nothing is checked while no session runs"}
 

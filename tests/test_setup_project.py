@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -643,6 +644,34 @@ class SetupApplyTests(Base):
         self.assertEqual(loaded["integrations"], [])
         self.assertIn(b"/work/chan/\n", (self.project / ".gitignore").read_bytes())
 
+    def test_the_guided_upgrade_prepares_over_a_setup_created_declaration(self):
+        """T13: the controller's own `prepare` (this tree's code, which the fixture pin carries)
+        accepts what setup declared. Only the target's inner full suite is stubbed; consent,
+        session, identity, declaration and guidance checks all run."""
+        import upgrade_controller as ucm
+        path, digest, env = self.write_plan(version="1.5.0")
+        self.apply(path, digest)
+        pin = self.project / ".tools" / "ai-comm"
+        tip.git(pin, "fetch", "-q", "--no-tags", str(self.origin), "refs/tags/v1.5.1:refs/tags/v1.5.1")
+        target = self.releases["1.5.1"]["commit"]
+
+        def run(*args):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = ucm.main(["--project", str(self.project), *args])
+            return code, json.loads(out.getvalue())
+        code, answer = run("record-answer", "--answer", "yes", "--target", "1.5.1", "--target-commit", target,
+                           "--source", ucm.package_identity(pin)["origin"], "--evidence", "owner yes in a test")
+        self.assertEqual(code, 0, answer)
+        stub = {"commit": target, "tag_object": "stub", "tests_ran": 1, "checks": {}, "at": 0}
+        with mock.patch.object(ucm, "verify_target", return_value=stub):
+            code, out = run("prepare", "--target", "1.5.1", "--consent", answer["consent"], "--as", "agent-a",
+                            "--session", "host-session-1")
+        self.assertEqual((code, out["status"]), (0, "prepared"), out)
+        proposal = Path(out["guidance_proposal"]).read_text()
+        self.assertIn(env["note"], proposal)  # the note setup declared as guidance is what prepare lists
+        self.assertIn("Release: 1.5.0", proposal)
+
     # -- T18: the declaration step still checks its preimage
 
     def test_declaration_step_fails_on_a_changed_preimage(self):
@@ -653,6 +682,302 @@ class SetupApplyTests(Base):
         live = self.project / ".ai-comm-local" / "upgrade" / "project.json"
         live.write_bytes(live.read_bytes().replace(b'"integrations":[]', b'"integrations":[] '))
         self.assertEqual(self.stop(self.apply, path, digest).code, "declaration_changed")
+
+
+class SetupRecoveryTests(SetupApplyTests):
+    """Resume after an interruption recognises every completed stage before acting, publishes
+    the note atomically, re-checks real parents, and survives a torn final journal append
+    (agent-b's REVIEW 28 and 30 reproductions)."""
+
+    test_fresh_apply_end_to_end = None  # inherited fixtures only; the base class runs those tests
+    for _name in [n for n in dir(SetupApplyTests) if n.startswith("test_")]:
+        locals()[_name] = None
+    del _name
+
+    def interrupt(self, path, digest, patch):
+        with patch:
+            with self.assertRaises(KeyboardInterrupt):
+                self.apply(path, digest)
+        self.assertEqual(uc.unfinished_setup(self.project) not in (None, "unrecognized"), True)
+
+    def evil_pin(self):
+        """The fixture pin's CLI replaced by a script that leaves a marker if it ever runs."""
+        marker = self.base / "marker"
+        cli = self.project / ".tools" / "ai-comm" / "ai_comm.py"
+        cli.write_text(f"open({str(marker)!r}, 'w').write('ran')\n")
+        return marker
+
+    def test_a_pin_changed_after_its_recorded_outcome_never_runs(self):
+        path, digest, env = self.write_plan()
+        for stage in ("gitignore", "channel", "join", "note"):
+            with self.subTest(stage=stage):
+                shutil.rmtree(self.project)
+                self.project.mkdir()
+                self.interrupt(path, digest, self.crash_after(stage))
+                marker = self.evil_pin()
+                self.assertEqual(sp.vp.check_project(self.project, iu.Cache(self.cache_dir).open(create=False))["status"],
+                                 "modified")
+                self.assertEqual(self.stop(self.apply, path, digest).code, "pin_changed")
+                self.assertFalse(marker.exists(), "the modified pin executed")
+
+    def test_every_other_completed_stage_is_recognised_before_later_actions(self):
+        path, digest, env = self.write_plan()
+        pin = self.project / ".tools" / "ai-comm"
+
+        def fresh(stage):
+            shutil.rmtree(self.project)
+            self.project.mkdir()
+            self.interrupt(path, digest, self.crash_after(stage))
+
+        with self.subTest("ignore file"):
+            fresh("channel")  # the channel is made; its outcome is not recorded
+            (self.project / ".gitignore").write_bytes(b"edited\n")
+            before = tree(self.channel_dir(env))
+            self.assertEqual(self.stop(self.apply, path, digest).code, "gitignore_changed")
+            self.assertEqual(tree(self.channel_dir(env)), before)
+        with self.subTest("channel replaced by a foreign task's"):
+            fresh("join")
+            channel = self.channel_dir(env)
+            shutil.rmtree(channel)
+            sp.run_pin(pin, channel, "init", "--task", "foreign task", "--reviewers", *env["reviewers"])
+            before = tree(channel)
+            self.assertEqual(self.stop(self.apply, path, digest).code, "channel_foreign")
+            self.assertEqual(tree(channel), before, "the foreign channel was mutated")
+        with self.subTest("registry without A"):
+            fresh("note")
+            real = sp.run_pin
+
+            def no_a(pin_, channel_, *args):
+                if args[:2] == ("registry", "sessions"):
+                    return {"items": []}
+                return real(pin_, channel_, *args)
+            with mock.patch.object(sp, "run_pin", no_a):
+                self.assertEqual(self.stop(self.apply, path, digest).code, "join_changed")
+            self.assertEqual(sp.status(self.project, cache_dir=self.cache_dir)["declaration"], "unintegrated")
+        with self.subTest("note edited"):
+            fresh("declaration")
+            note = self.project / env["note"]
+            note.write_bytes(note.read_bytes() + b"x")
+            journal = (self.project / ".ai-comm-local" / "setup" / "journal.jsonl").read_bytes()
+            self.assertEqual(self.stop(self.apply, path, digest).code, "note_changed")
+            self.assertEqual((self.project / ".ai-comm-local" / "setup" / "journal.jsonl").read_bytes(), journal)
+        self.assertEqual(sp.status(self.project, cache_dir=self.cache_dir)["stages"]["note"], "recorded")
+
+    def test_a_note_interrupted_while_written_leaves_no_partial_final_note(self):
+        path, digest, env = self.write_plan()
+        real_fdopen, real_stage = os.fdopen, sp.Setup.stage_note
+        active = []
+
+        class Torn:
+            def __init__(self, stream):
+                self.stream = stream
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                self.stream.close()
+
+            def write(self, data):
+                self.stream.write(data[:12])
+                self.stream.flush()
+                os.fsync(self.stream.fileno())
+                raise KeyboardInterrupt
+
+        def fdopen(fd, mode="r", *a, **kw):
+            stream = real_fdopen(fd, mode, *a, **kw)
+            return Torn(stream) if active and mode == "wb" else stream
+
+        def stage_note(setup):
+            active.append(1)
+            try:
+                return real_stage(setup)
+            finally:
+                active.clear()
+        with mock.patch.object(sp.os, "fdopen", fdopen), mock.patch.object(sp.Setup, "stage_note", stage_note):
+            with self.assertRaises(KeyboardInterrupt):
+                self.apply(path, digest)
+        note = self.project / env["note"]
+        self.assertFalse(os.path.lexists(note), "a partial final note was published")
+        self.assertEqual(self.apply(path, digest)["status"], "set_up")
+        state = self.final_state(env)
+        self.assertEqual(state["note"], sp.render_note(env, state["root"], digest))
+        self.assertEqual([p.name for p in note.parent.iterdir() if ".setup-" in p.name], [])
+
+    def test_note_publication_boundaries(self):
+        path, digest, env = self.write_plan()
+        note = self.project / env["note"]
+        real_link, real_unlink = os.link, os.unlink
+        with self.subTest("before link"):
+            self.interrupt(path, digest, mock.patch.object(sp.os, "link", side_effect=KeyboardInterrupt))
+            self.assertFalse(os.path.lexists(note))
+            self.assertEqual(self.apply(path, digest)["status"], "set_up")
+        with self.subTest("after link, before the staging name is removed"):
+            shutil.rmtree(self.project)
+            self.project.mkdir()
+            calls = []
+
+            def unlink(target, *a, **kw):
+                if ".setup-" in str(target) and not calls:
+                    calls.append(target)
+                    raise KeyboardInterrupt
+                return real_unlink(target, *a, **kw)
+            self.interrupt(path, digest, mock.patch.object(sp.os, "unlink", unlink))
+            self.assertTrue(note.is_file())
+            self.assertEqual(self.apply(path, digest)["status"], "set_up")
+            self.assertEqual([p.name for p in note.parent.iterdir() if ".setup-" in p.name], [])
+        with self.subTest("an unrelated file appears at the final path"):
+            shutil.rmtree(self.project)
+            self.project.mkdir()
+
+            def racing(src, dst, **kw):
+                Path(dst).write_bytes(b"owner's own note\n")
+                return real_link(src, dst, **kw)
+            with mock.patch.object(sp.os, "link", racing):
+                self.assertEqual(self.stop(self.apply, path, digest).code, "note_exists")
+            self.assertEqual(note.read_bytes(), b"owner's own note\n")
+            self.assertEqual(self.stop(self.apply, path, digest).code, "note_exists")
+            self.assertEqual(note.read_bytes(), b"owner's own note\n")
+
+    def test_a_planned_parent_replaced_by_a_symlink_is_refused_before_any_write(self):
+        (self.project / "sub").mkdir()
+        path, digest, env = self.write_plan(channel="sub/chan", note="sub/note.md")
+        outside = self.base / "outside"
+        outside.mkdir()
+        os.rmdir(self.project / "sub")
+        os.symlink(outside, self.project / "sub")
+        self.assertEqual(self.stop(self.apply, path, digest).code, "parent_missing")
+        self.assertEqual(list(outside.iterdir()), [])
+        self.assertFalse((self.project / ".tools").exists())
+        self.assertFalse((self.project / ".ai-comm-local").exists())
+        with self.subTest("on resume"):
+            os.unlink(self.project / "sub")
+            (self.project / "sub").mkdir()
+            self.interrupt(path, digest, self.crash_after("gitignore"))
+            gitignore = (self.project / ".gitignore").read_bytes()
+            os.rmdir(self.project / "sub")
+            os.symlink(outside, self.project / "sub")
+            self.assertEqual(self.stop(self.apply, path, digest).code, "parent_missing")
+            self.assertEqual(list(outside.iterdir()), [])
+            self.assertEqual((self.project / ".gitignore").read_bytes(), gitignore)
+        with self.subTest("a non-directory parent"):
+            os.unlink(self.project / "sub")
+            (self.project / "sub").write_text("file")
+            self.assertEqual(self.stop(self.apply, path, digest).code, "parent_missing")
+
+    def test_a_planned_parent_owned_by_another_user_is_refused(self):
+        """T9: an explicit wrong-owner directory under the project, in plan and in apply."""
+        (self.project / "sub").mkdir()
+        foreign = str(self.project / "sub")
+        real = os.lstat
+
+        def lstat(path, *a, **kw):
+            st = real(path, *a, **kw)
+            if os.fspath(path) == foreign and owned_by_other:
+                fields = list(st)
+                fields[4] = os.getuid() + 100000  # st_uid
+                return os.stat_result(fields)
+            return st
+        owned_by_other = True
+        with mock.patch.object(os, "lstat", lstat):
+            self.assertEqual(self.stop(self.plan, channel="sub/chan").code, "unsafe_ancestry")
+        owned_by_other = False
+        with mock.patch.object(os, "lstat", lstat):
+            path, digest, env = self.write_plan(channel="sub/chan")
+            owned_by_other = True
+            self.assertEqual(self.stop(self.apply, path, digest).code, "unsafe_ancestry")
+        self.assertEqual(list((self.project / "sub").iterdir()), [])
+        self.assertFalse((self.project / ".tools").exists())
+        self.assertFalse((self.project / ".ai-comm-local").exists())
+
+    @unittest.skipUnless(shutil.which("unshare"), "unshare is not available")
+    def test_a_real_second_filesystem_under_the_project(self):
+        """T5 with a real mount: a tmpfs mounted at a planned parent (user and mount namespace).
+        Its device differs as device_of reports it, the parent check refuses it, and the
+        no-replace move fails across filesystems with nothing at the destination and the
+        source intact (no copying fallback). Ancestry is not checked inside the namespace,
+        where the host's directories appear owned by an unmapped user."""
+        (self.project / "sub").mkdir()
+        staged = self.project / ".ai-comm-local" / "setup" / "txn" / "channel"
+        staged.mkdir(parents=True)
+        (staged / "HEAD").write_text("ref: refs/heads/main\n")
+        script = (
+            "import errno, json, os, sys\n"
+            f"sys.path.insert(0, {str(ROOT / 'scripts')!r})\n"
+            "import setup_project as sp\n"
+            f"project, staged = sp.Path({str(self.project)!r}), sp.Path({str(staged)!r})\n"
+            "sp.uc.check_ancestry = lambda p: sp.Path(p)\n"
+            "out = {'devices_differ': sp.device_of(project / 'sub') != sp.device_of(project)}\n"
+            "try:\n"
+            "    sp.check_parents(project, 'sub/chan', 'note.md')\n"
+            "except sp.Stop as exc:\n"
+            "    out['parents'] = exc.code\n"
+            "try:\n"
+            "    sp.rename_noreplace(staged, project / 'sub' / 'chan')\n"
+            "except OSError as exc:\n"
+            "    out['move'] = errno.errorcode.get(exc.errno)\n"
+            "out['destination'] = os.path.lexists(project / 'sub' / 'chan')\n"
+            "out['source'] = (staged / 'HEAD').is_file()\n"
+            "print(json.dumps(out))\n")
+        sub = str(self.project / "sub")
+        probe = subprocess.run(["unshare", "--user", "--map-root-user", "--mount", "sh", "-c",
+                                'mount -t tmpfs none "$1" && exec "$2" -c "$3"', "sh", sub, sys.executable,
+                                script], capture_output=True, text=True, timeout=120)
+        if probe.returncode != 0 and "mount" in probe.stderr.lower():
+            self.skipTest("user namespaces cannot mount here: " + probe.stderr.strip()[:200])
+        self.assertEqual(probe.returncode, 0, probe.stderr)
+        self.assertEqual(json.loads(probe.stdout), {"devices_differ": True, "parents": "channel_other_filesystem",
+                                                    "move": "EXDEV", "destination": False, "source": True})
+        self.assertEqual(list((self.project / "sub").iterdir()), [])  # the mount was private to the namespace
+
+    def test_a_torn_final_journal_append_is_set_aside_and_resume_completes(self):
+        path, digest, env = self.write_plan()
+        journal = self.project / ".ai-comm-local" / "setup" / "journal.jsonl"
+        self.interrupt(path, digest, mock.patch.object(sp.Setup, "stage_gitignore", side_effect=KeyboardInterrupt))
+        g1 = (self.project / ".gitignore").read_bytes()
+        with self.subTest("a corrupt complete record stops with nothing changed"):
+            good = journal.read_bytes()
+            journal.write_bytes(good + b'{"not":"a record"}\n')
+            before = journal.read_bytes()
+            self.assertEqual(self.stop(self.apply, path, digest).code, "journal_corrupt")
+            self.assertEqual(journal.read_bytes(), before)
+            self.assertEqual((self.project / ".gitignore").read_bytes(), g1)
+            journal.write_bytes(good)
+        with self.subTest("another plan's resume leaves the torn journal untouched"):
+            journal.write_bytes(journal.read_bytes() + b'{"v":1,"seq":99,')
+            before = journal.read_bytes()
+            data = uc.canonical(dict(env, task="another task"))
+            other = self.base / "other-plan.json"
+            other.write_bytes(data)
+            self.assertEqual(self.stop(self.apply, other, uc.sha256_bytes(data)).code, "setup_plan_mismatch")
+            self.assertEqual(journal.read_bytes(), before)
+        self.assertEqual(self.apply(path, digest)["status"], "set_up")
+        torn = list(journal.parent.glob("torn-*.bin"))
+        self.assertEqual([t.read_bytes() for t in torn], [b'{"v":1,"seq":99,'])
+        state = self.final_state(env)
+        self.assertEqual(state["note"], sp.render_note(env, state["root"], digest))
+
+    def test_abandon_after_a_torn_final_append(self):
+        path, digest, env = self.write_plan()
+        self.interrupt(path, digest, self.crash_after("channel"))
+        journal = self.project / ".ai-comm-local" / "setup" / "journal.jsonl"
+        journal.write_bytes(journal.read_bytes() + b'{"v":1')
+        self.assertEqual(sp.abandon(self.project)["status"], "abandoned")
+        self.assertIsNone(uc.unfinished_setup(self.project))
+
+    def test_plan_file_containment_is_checked_on_the_real_path(self):
+        out = self.plan()
+        alias = self.base / "alias"
+        os.symlink(self.project, alias)
+        self.assertEqual(self.stop(sp.write_plan_file, out, alias / "approved-plan.json").code,
+                         "plan_file_in_project")
+        self.assertFalse((self.project / "approved-plan.json").exists())
+        nested = self.base / "deep-alias"
+        os.symlink(self.project / ".", nested)
+        self.assertEqual(self.stop(sp.write_plan_file, out, nested / "x.json").code, "plan_file_in_project")
+        self.assertEqual(self.stop(sp.write_plan_file, out, self.base / "missing-dir" / "x.json").code,
+                         "plan_file_invalid")
+        self.assertTrue(Path(sp.write_plan_file(out, self.base / "fine.json")).is_file())
 
 
 def subprocess_run(argv):

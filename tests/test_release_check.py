@@ -253,6 +253,16 @@ class ReleaseCheckTests(unittest.TestCase):
         run_env = os.environ.copy()
         run_env.update(env)
         run_env["PATH"] = str(bin_dir) + os.pathsep + run_env.get("PATH", "")
+
+        def snapshot():
+            refs = dict(line.split(" ", 1) for line in self._git(
+                "for-each-ref", "--format=%(refname) %(objectname)", cwd=package, env=env).stdout.decode().splitlines())
+            return {"refs": refs, "head": self._git("rev-parse", "HEAD", cwd=package, env=env).stdout,
+                    "symbolic": self._git("symbolic-ref", "HEAD", cwd=package, env=env).stdout,
+                    "status": self._git("status", "--porcelain", "--ignored", cwd=package, env=env).stdout,
+                    "config": (package / ".git" / "config").read_bytes(),
+                    "index": (package / ".git" / "index").read_bytes()}
+        before = snapshot()
         proc = subprocess.run([sys.executable, str(package / "scripts" / "check_for_release.py"),
                                "--fetch-permitted", "--expected-origin", "https://fixture.example/ai-comm.git"],
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60, env=run_env)
@@ -266,6 +276,14 @@ class ReleaseCheckTests(unittest.TestCase):
         self.assertFalse((package / ".git" / "FETCH_HEAD").exists())
         self.assertFalse(hook_marker.exists())
         self.assertFalse((package / "__pycache__").exists())
+        # A release check changes only release refs and their objects (T17): the checked-out
+        # commit, branches, index, working tree and configuration stay exactly as they were.
+        after = snapshot()
+        added = set(after["refs"]) - set(before["refs"])
+        self.assertEqual(added, {"refs/remotes/origin/release-index", "refs/tags/v9.9.9"})
+        self.assertEqual({k: v for k, v in after["refs"].items() if k in before["refs"]}, before["refs"])
+        self.assertEqual({k: after[k] for k in ("head", "symbolic", "status", "config", "index")},
+                         {k: before[k] for k in ("head", "symbolic", "status", "config", "index")})
 
     def test_no_fetch_without_permission_and_reports_up_to_date(self):
         fake = self.runner()
