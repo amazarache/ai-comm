@@ -646,8 +646,9 @@ class SetupApplyTests(Base):
 
     def test_the_guided_upgrade_prepares_over_a_setup_created_declaration(self):
         """T13: the controller's own `prepare` (this tree's code, which the fixture pin carries)
-        accepts what setup declared. Only the target's inner full suite is stubbed; consent,
-        session, identity, declaration and guidance checks all run."""
+        accepts what setup declared. `verify_target` (the clone, tag and manifest checks and the
+        target's inner full suite) is stubbed as a whole; consent, session, identity, declaration
+        and guidance checks all run."""
         import upgrade_controller as ucm
         path, digest, env = self.write_plan(version="1.5.0")
         self.apply(path, digest)
@@ -762,6 +763,39 @@ class SetupRecoveryTests(SetupApplyTests):
             self.assertEqual(self.stop(self.apply, path, digest).code, "note_changed")
             self.assertEqual((self.project / ".ai-comm-local" / "setup" / "journal.jsonl").read_bytes(), journal)
         self.assertEqual(sp.status(self.project, cache_dir=self.cache_dir)["stages"]["note"], "recorded")
+
+    def test_a_taken_over_handle_is_not_recognised_as_this_setups_join(self):
+        """REVIEW 34: after a takeover of A, the original session's binding is historical;
+        resume must not treat it as this setup's join."""
+        path, digest, env = self.write_plan()
+        self.interrupt(path, digest, mock.patch.object(sp.Setup, "stage_note", side_effect=KeyboardInterrupt))
+        pin, channel = self.project / ".tools" / "ai-comm", self.channel_dir(env)
+        sp.run_pin(pin, channel, "join", "--as", "agent-a", "--platform", "assistant",
+                   "--session", "replacement-a", "--takeover")
+        self.assertEqual(self.stop(self.apply, path, digest).code, "join_changed")
+        self.assertFalse(os.path.lexists(self.project / env["note"]))
+
+    def test_the_current_binding_is_read_across_every_registry_page(self):
+        path, digest, env = self.write_plan()
+        self.interrupt(path, digest, mock.patch.object(sp.Setup, "stage_note", side_effect=KeyboardInterrupt))
+        pages = {0: {"items": [{"handle": "agent-a", "session": "host-session-1", "platform": "assistant",
+                                "generation": 1}], "more": True, "next": 1},
+                 1: {"items": [{"handle": "agent-a", "session": "other", "platform": "assistant",
+                                "generation": 2}], "more": False, "next": 2}}
+        real = sp.run_pin
+
+        def paged(pin_, channel_, *args):
+            if args[:2] == ("registry", "sessions"):
+                return pages[int(args[args.index("--offset") + 1])]
+            return real(pin_, channel_, *args)
+        with mock.patch.object(sp, "run_pin", paged):
+            self.assertEqual(self.stop(self.apply, path, digest).code, "join_changed")
+        pages[1]["items"][0]["generation"] = 1  # two bindings with one generation: not trusted
+        with mock.patch.object(sp, "run_pin", paged):
+            self.assertEqual(self.stop(self.apply, path, digest).code, "join_changed")
+        pages[0]["more"] = False
+        with mock.patch.object(sp, "run_pin", paged):
+            self.assertEqual(self.apply(path, digest)["status"], "set_up")
 
     def test_a_note_interrupted_while_written_leaves_no_partial_final_note(self):
         path, digest, env = self.write_plan()

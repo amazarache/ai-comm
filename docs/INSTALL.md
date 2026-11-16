@@ -186,7 +186,7 @@ never replaces, so the note is absent or complete; its JSON block is the plan's 
 references) and, fresh only, the declaration (declared, no integrations, the
 note as guidance, through `declare_project install` with this setup's transaction id). Resume is the same command:
 before anything runs, every finished step is checked again (the pin verified, the `.gitignore` at G2, the channel's
-root and settings, A in its registry, the note's and declaration's digests) and never repeated; the actual parents of
+root and settings, A's current binding (highest generation) in its registry, the note's and declaration's digests) and never repeated; the actual parents of
 the channel and note are checked again before any write and before each publication; a torn final journal line is
 kept as `torn-N.bin` and recorded, under the lock, once the journal's start matches the approved plan. Anything the
 journal does not explain stops the flow and is not adopted (`pin_changed`, `gitignore_changed`, `channel_foreign`,

@@ -418,6 +418,7 @@ def display(envelope):
 
 STAGES = ("pin", "gitignore", "channel", "join", "note", "declaration")
 PIN_TIMEOUT = 120
+REGISTRY_PAGES = 64
 
 
 def installer_module():
@@ -642,11 +643,9 @@ class Setup:
             self.recognize_channel(done["channel"].get("root"))
         if "join" in done:
             a = self.env["roles"][0]
-            items = run_pin(self.pin, self.channel, "registry", "sessions").get("items")
-            need(isinstance(items, list) and any(
-                isinstance(i, dict) and (i.get("handle"), i.get("session"), i.get("platform"))
-                == (a["handle"], self.env["a_reference"]["value"], a["host_label"]) for i in items),
-                "join_changed")
+            current = self.current_binding(a["handle"])
+            need(current is not None and (current.get("session"), current.get("platform"))
+                 == (self.env["a_reference"]["value"], a["host_label"]), "join_changed")
         if "note" in done:
             need(os.path.isfile(self.note) and not self.note.is_symlink()
                  and uc.sha256_bytes(self.note.read_bytes()) == done["note"].get("sha256"), "note_changed")
@@ -654,6 +653,27 @@ class Setup:
             live = self.project / ".ai-comm-local" / "upgrade" / "project.json"
             need(live.is_file() and not live.is_symlink()
                  and uc.sha256_bytes(live.read_bytes()) == done["declaration"].get("sha256"), "declaration_changed")
+
+    def current_binding(self, handle):
+        """The handle's current binding: its highest generation across the whole registry
+        (every page), as the pin's own `registry sessions` lists it. A historical binding
+        of the same session after a takeover is not current."""
+        found, offset = [], 0
+        for _ in range(REGISTRY_PAGES):
+            page = run_pin(self.pin, self.channel, "registry", "sessions", "--offset", str(offset))
+            items, more = page.get("items"), page.get("more")
+            need(isinstance(items, list) and isinstance(more, bool), "join_changed")
+            found += [i for i in items if isinstance(i, dict) and i.get("handle") == handle]
+            if not more:
+                break
+            need(isinstance(page.get("next"), int) and page["next"] > offset, "join_changed")
+            offset = page["next"]
+        else:
+            raise Stop("join_changed")
+        generations = [i.get("generation") for i in found]
+        need(all(isinstance(g, int) and not isinstance(g, bool) for g in generations)
+             and len(set(generations)) == len(generations), "join_changed")
+        return max(found, key=lambda i: i["generation"]) if found else None
 
     def recognize_channel(self, root):
         """The channel at the planned path is this transaction's: recorded root, planned facts."""
