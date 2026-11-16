@@ -192,7 +192,7 @@ kept as `torn-N.bin` and recorded, under the lock, once the journal's start matc
 journal does not explain stops the flow and is not adopted (`pin_changed`, `gitignore_changed`, `channel_foreign`,
 `join_changed`, `note_changed`, `declaration_changed`, `parent_missing`, `unsafe_ancestry`). `setup status` lists
 steps as `started` or `recorded`: journal records, which `apply` checks before it resumes. `plan --out` refuses a file
-inside the project after resolving symbolic links in its parent. `apply` re-checks every input rule of the plan on the approved bytes. `setup
+inside the project, the per-user cache or the executing release, after resolving symbolic links in its parent. `apply` re-checks every input rule of the plan on the approved bytes. `setup
 abandon` marks the journal abandoned, keeps it as `abandoned-<txn>.jsonl`, removes only `.ai-comm-local/setup/txn`, and
 names what stays (pin, channel, note, declaration, `.gitignore` lines); a new plan then sees the project as it is. Nothing else should write to the project
 while setup applies; drift a check observes stops it, a write between a check and the following replacement is not

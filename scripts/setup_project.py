@@ -342,17 +342,34 @@ def plan(project_dir, *, task, channel=None, note=None, handles=None, reviewers=
             "display": display(envelope), "discovery": skill_candidates(project, cache)}
 
 
-def write_plan_file(result, out):
-    """Save the envelope's exact canonical bytes for `apply`, outside the project (the plan
-    itself writes nothing in the project). A new file only: an existing one is never replaced."""
+def plan_file_forbidden_roots(result, cache_dir=None):
+    """Trees a plan file must never be written into: the project, the cache that planned
+    (its releases are checked byte for byte), the default per-user cache and the executing
+    release. Each is resolved, so a symlinked alias names the same tree."""
+    roots = [Path(result["plan"]["project"]), RELEASE]
+    if cache_dir is not None:
+        roots.append(Path(cache_dir))
+    elif RELEASE.parent.name == "releases":
+        roots.append(RELEASE.parent.parent)
+    try:
+        roots.append(iu.cache_root())
+    except Stop:
+        pass
+    return [(Path(os.path.abspath(r)).resolve(), "plan_file_in_project" if i == 0 else "plan_file_in_cache")
+            for i, r in enumerate(roots)]
+
+
+def write_plan_file(result, out, cache_dir=None):
+    """Save the envelope's exact canonical bytes for `apply`, outside the project and the cache
+    (the plan writes nothing in either). A new file only: an existing one is never replaced."""
     out = Path(out).absolute()
     need(out.name not in ("", ".", ".."), "plan_file_invalid")
     try:
         target = out.parent.resolve(strict=True) / out.name  # symlinked parents resolved, leaf never followed
     except OSError as exc:
         raise Stop("plan_file_invalid") from exc
-    project = Path(result["plan"]["project"]).resolve()
-    need(not (target == project or project in target.parents), "plan_file_in_project")
+    for root, code in plan_file_forbidden_roots(result, cache_dir):
+        need(not (target == root or root in target.parents), code)
     fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, "wb") as stream:
         stream.write(uc.canonical(result["plan"]))
@@ -979,7 +996,7 @@ def main(argv=None):
                           b_label=args.b_label, b_fallback=args.b_fallback, b_reference=args.b_reference,
                           version=args.version, release_checks=not args.no_release_checks, cache_dir=args.cache)
             if args.out:
-                result["plan_file"] = write_plan_file(result, args.out)
+                result["plan_file"] = write_plan_file(result, args.out, cache_dir=args.cache)
         elif args.command == "apply":
             result = apply(args.plan, args.sha256, session=args.session, cache_dir=args.cache)
         elif args.command == "abandon":

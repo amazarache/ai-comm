@@ -977,7 +977,19 @@ class SetupRecoveryTests(SetupApplyTests):
         self.assertEqual(self.stop(sp.write_plan_file, out, nested / "x.json").code, "plan_file_in_project")
         self.assertEqual(self.stop(sp.write_plan_file, out, self.base / "missing-dir" / "x.json").code,
                          "plan_file_invalid")
-        self.assertTrue(Path(sp.write_plan_file(out, self.base / "fine.json")).is_file())
+        cache_before = tree(self.cache_dir)
+        release = self.cache_dir / "releases" / "1.5.0"
+        cache_alias = self.base / "cache-alias"
+        os.symlink(release, cache_alias)
+        for where in (release / "approved-plan.json", self.cache_dir / "plan.json", cache_alias / "plan.json"):
+            with self.subTest(where=str(where)):
+                self.assertEqual(self.stop(sp.write_plan_file, out, where, cache_dir=self.cache_dir).code,
+                                 "plan_file_in_cache")
+        with mock.patch.dict(os.environ, {"XDG_DATA_HOME": str(self.cache_dir.parent)}):
+            self.assertEqual(self.stop(sp.write_plan_file, out, release / "x.json").code, "plan_file_in_cache")
+        self.assertEqual(tree(self.cache_dir), cache_before)
+        iu.Cache(self.cache_dir).open(create=False).check_release("1.5.0")  # still byte-identical
+        self.assertTrue(Path(sp.write_plan_file(out, self.base / "fine.json", cache_dir=self.cache_dir)).is_file())
 
 
 def subprocess_run(argv):

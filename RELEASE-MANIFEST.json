@@ -92,8 +92,8 @@
     },
     {
       "path": "docs/INSTALL.md",
-      "bytes": 19950,
-      "sha256": "13e8a9ba259598e476487b947aad49edaa61621e15ee46230ad5a33a9e6adbbd"
+      "bytes": 19996,
+      "sha256": "12c38894f57156c280b9c0eed556c03f8a74b51a81fcfb6e437cf0b118e1fda4"
     },
     {
       "path": "docs/PERFORMANCE.md",
@@ -197,8 +197,8 @@
     },
     {
       "path": "scripts/setup_project.py",
-      "bytes": 49743,
-      "sha256": "cb74b32348c2ec32c52eef1f66e5db7b1d3a7bbcdb505aa7ca2f8e5123280a5c"
+      "bytes": 50527,
+      "sha256": "1826889cc26e66558daa0e688fae557399156ca0f1c6a3d89b01d8ae63c3571b"
     },
     {
       "path": "scripts/test_old_protocol.py",
@@ -287,8 +287,8 @@
     },
     {
       "path": "tests/test_setup_project.py",
-      "bytes": 54166,
-      "sha256": "63734f0fc9304ced4c0a8736b624503960a3474b203d17ebbc01fd12668af81d"
+      "bytes": 55065,
+      "sha256": "0f2dbcb014ab61e81cd1e937a0cb8db6ae0d6d0bd64b3d30f481e3ebe127443e"
     },
     {
       "path": "tests/test_setup_real_boundary.py",
