@@ -40,6 +40,9 @@
   the notifier session, checks only while a session is active, revocation
   through any session. The pinned skill and ACTIVATE.md describe setup notes
   and the same rules. `setup --help` exits 0.
+- Wake queue `plan` and `install` on a project path that is not valid UTF-8
+  now refuse with `queue_path_not_utf8` (exit 78) and write nothing, instead
+  of stopping with an uncaught encoding error.
 - `setup plan --out FILE` saves the plan's exact bytes for `apply`; `apply`
   re-checks every input rule on them; `abandon` archives the journal so a new
   plan can apply; the installer reports newer indexed releases under an
@@ -80,7 +83,8 @@ The 1.10.0 section below is kept as released. It omitted:
   written with that spelling is refused with `project_identity_mismatch`;
   write the candidate with `/path`.
 - "Preserve default plan/removal on non-UTF-8 filesystem paths" holds for the
-  exit kind only.
+  exit kind only; for the queue kind such a path stopped with a traceback
+  (since 1.9.0), fixed in 1.11.0 (below).
 
 ## 1.10.0
 

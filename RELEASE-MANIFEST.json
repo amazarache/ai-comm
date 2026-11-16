@@ -27,8 +27,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 28081,
-      "sha256": "10300c5f1d1b60954b73088ef2570f995fcda411626e03985f22374b911ed5cd"
+      "bytes": 28379,
+      "sha256": "ef0605fe081ddbf2b0e9e855736fdb4c5488f601b7fd185f532ab5b4461970ab"
     },
     {
       "path": "LICENSE",
@@ -112,8 +112,8 @@
     },
     {
       "path": "docs/WAKE.md",
-      "bytes": 19641,
-      "sha256": "dd7c34c25dfea08e880075724b874893eb5c72b167b303b2cbf71a055467ceb4"
+      "bytes": 19939,
+      "sha256": "bd9c8b240a1056630dd5dc8f3f229fde7ca6f319dce015c281d8fe8c3f84f982"
     },
     {
       "path": "entry/ai-comm/SKILL.md",
@@ -212,8 +212,8 @@
     },
     {
       "path": "scripts/wake.py",
-      "bytes": 52795,
-      "sha256": "9da1bc1f9140ef265a80347a3113031a0705e1f7fc1b3d43d15072e6fc939fe9"
+      "bytes": 53017,
+      "sha256": "c009b4e10b83fe01262cd55a04a9ef2506483e5de3ee02daae333eda9cad28ba"
     },
     {
       "path": "skills/ai-comm/SKILL.md",
@@ -327,8 +327,8 @@
     },
     {
       "path": "tests/test_wake_channel.py",
-      "bytes": 27665,
-      "sha256": "e3e1584cc4f44fefe2653090441a26ceae3e1d983f82abeb5453c9ba3e38e3ef"
+      "bytes": 28593,
+      "sha256": "95474b41e7fd2776ba5ad688e008d140b52a68740eb95ff012920eb6952f6e75"
     },
     {
       "path": "tests/test_wake_install.py",

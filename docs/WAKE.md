@@ -88,6 +88,11 @@ edited. A new release produces a new bundle, not necessarily a new instance;
 replacement remains the owner-controlled remove-then-install flow. A changed
 queue config still refuses `config_exists` until the old installation is removed.
 
+A queue service unit is UTF-8 text, so a project path that is not valid UTF-8 cannot
+be written into it: queue `plan` and `install` refuse it with `queue_path_not_utf8`
+(exit 78) and write nothing (1.11.0; earlier releases stopped with a traceback). The
+exit kind plans and removes on such paths.
+
 Two copies of a channel with the same root commit, in the same project and for
 the same handle, share an exit-wake instance and its stopped state. They cannot
 be independent exit installations. **Remove, pause and resume through either

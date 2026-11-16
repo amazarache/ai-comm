@@ -237,7 +237,7 @@ def load_queue_module(directory, files, tag):
             raise WakeError("pin_changed")
     # The module name includes its directory, so a module loaded from one directory is
     # never reused for another (its own HERE checks the files beside it).
-    where = sha256(str(Path(directory)).encode("utf-8"))[:16]
+    where = sha256(os.fsencode(Path(directory)))[:16]  # filesystem bytes: any path, UTF-8 or not
     return _load(f"ai_comm_wake_queue_{tag}_{where}", Path(directory) / "queue_wake.py")
 
 
@@ -247,6 +247,9 @@ def renderer_call(fn, *args, module):
         return fn(*args)
     except (module.Invalid, module.common.WakeError) as exc:
         raise WakeError("queue_render_refused") from exc
+    except UnicodeError as exc:
+        # A service unit is UTF-8 text: a path that is not valid UTF-8 cannot be written into it.
+        raise WakeError("queue_path_not_utf8") from exc
 
 
 # --------------------------------------------------------------------------- plan

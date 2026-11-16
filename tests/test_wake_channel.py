@@ -125,6 +125,22 @@ class InstallerChannelTests(installer.Base):
                 self.assertEqual(code, 0, result)
         self.assertFalse((directory / "cursor.json").exists())
 
+    def test_non_utf8_project_queue_kind_refuses_with_a_code_and_writes_nothing(self):
+        """A queue service unit is UTF-8 text; a non-UTF-8 project path is refused, never a traceback."""
+        parent = self.base / os.fsdecode(b"n\xffx")
+        parent.mkdir()
+        moved = parent / "project"
+        self.project.rename(moved)
+        self.project = moved
+        self.pin = moved / ".tools" / "ai-comm"
+        before = self.everything()
+        for command, extra in (("plan", []), ("install", ["--plan-sha256", "0" * 64, "--confirm"])):
+            with self.subTest(command=command):
+                code, result = self.run_wake(self.args(command, kind="queue", extra=extra))
+                self.assertEqual((code, result.get("code")), (78, "queue_path_not_utf8"))
+        self.assertEqual(self.everything(), before)
+        self.assertEqual(self.run_wake(self.args("plan"))[0], 0)  # the exit kind still plans
+
     def test_repository_query_execution_failures_have_fixed_installer_code(self):
         before = self.everything()
         for error in (FileNotFoundError("fixture git unavailable"),
