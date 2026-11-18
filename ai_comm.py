@@ -2003,6 +2003,51 @@ class Channel:
                                          "read_through": receipt["read"], "seen_through": receipt["seen"]}},
                     "count": count, "matched": matched, "messages": entries}
 
+    def resume(self, handle, session, limit=20):
+        """Compact read-only snapshot for a fresh or restarted session.
+
+        Built from the committed ledger and the caller's stored receipt. Never writes:
+        no receipt, no Git and no poll heartbeat.
+        """
+        integer(limit, "limit", 1, 100)
+        # No lock: taking it would create runtime files. The snapshot is committed Git state and
+        # receipts are replaced by atomic rename, so an unlocked read sees a whole old or new receipt.
+        # A concurrent writer can still advance the receipt past the captured snapshot; a newer
+        # receipt is valid, so retry on a fresh snapshot (bounded) before calling it corrupt.
+        for attempt in range(3):
+            state = self.snapshot()
+            current = state.identity(handle, session)
+            try:
+                _, receipt = self._load_receipt(state, handle, current)
+                break
+            except ProtocolError as exc:
+                if exc.details.get("code") != "corrupt_receipt_bounds" or attempt == 2:
+                    raise
+        items, loose = state.obligations()
+        mine = [entry for entry in items if entry["owner"] == handle]
+        waiting = [entry for entry in items if entry["owner"] != handle and
+                   state.by_id[entry["id"]]["from"] == handle]
+        proposals, seen = [], set()
+        for entry in items:
+            if entry["action"] in PROPOSAL_ACTIONS and entry["id"] not in seen:
+                seen.add(entry["id"])
+                proposals.append({"id": entry["id"], "topic": entry["topic"], "artifact": entry["artifact"],
+                                  "stances": entry["stances"]})
+        unread = sum(1 for message in state.messages[receipt["read"]:] if handle in message["to"])
+        return {"head": state.head, "as_of": now(),
+                "you": {"handle": handle, "generation": current["generation"],
+                        "read_through": receipt["read"], "seen_through": receipt["seen"],
+                        "unread_addressed": unread},
+                "pending": mine[:limit], "pending_count": len(mine),
+                "waiting_on_others": [{k: entry[k] for k in ("id", "owner", "action")} for entry in waiting[:limit]],
+                "waiting_on_others_count": len(waiting),
+                "open_proposals": proposals[:limit], "open_proposals_count": len(proposals),
+                "unclassified_count": sum(1 for entry in loose if entry["owner"] == handle),
+                "recent": [{"id": m["id"], "act": m["act"], "summary": m["summary"]}
+                           for m in state.messages[-5:]],
+                "next_steps": ["inbox --as HANDLE --session SESSION",
+                               "pending --for HANDLE --unclassified", "show ID", "show-artifact DIGEST"]}
+
     def ack(self, handle, session, through):
         integer(through, "receipt sequence")
         with self.lock():
@@ -2490,6 +2535,137 @@ class Snapshot:
             result["omitted"][largest] += 1
         return result
 
+    def _cited(self, message):
+        """Message ids a message cites through its own or previously declared sources."""
+        refs = {source["ref"] for source in message.get("sources", [])}
+        refs |= {self.sources[sid]["ref"] for sid in message.get("refs", []) if sid in self.sources}
+        return refs
+
+    def _names(self, message, word, target):
+        """True when the body's first line is exactly `word: target` and a source cites target."""
+        first = message.get("body", "").split("\n", 1)[0].strip()
+        return first == f"{word}: {target}" and target in self._cited(message)
+
+    CANDIDATE_ACTS = frozenset({"ASK", "FACT", "CORRECT", "REVIEW"})
+
+    def _closes(self, message, target):
+        """True when `message` validly closes candidate `target` for its sender."""
+        return (target["seq"] < message["seq"] and target["act"] in self.CANDIDATE_ACTS
+                and not target.get("questions") and message["from"] in target["to"]
+                and message["from"] != target["from"] and self._names(message, "closes", target["id"]))
+
+    def _supersedes(self, message, target):
+        """True when PROPOSE `message` validly supersedes the same author's earlier PROPOSE `target`."""
+        return (message["act"] == "PROPOSE" and target["act"] == "PROPOSE"
+                and target["seq"] < message["seq"] and message["from"] == target["from"]
+                and self._names(message, "supersedes", target["id"]))
+
+    def _closure_record(self, message):
+        """Only a message that validly closes or supersedes an earlier message is exempt from candidates."""
+        first = message.get("body", "").split("\n", 1)[0].strip()
+        for word, check in (("closes", self._closes), ("supersedes", self._supersedes)):
+            if first.startswith(word + ": "):
+                target = self.by_id.get(first[len(word) + 2:])
+                if target is not None and check(message, target):
+                    return True
+        return False
+
+    def obligations(self):
+        """Read-only projection of outstanding work over the committed ledger.
+
+        Uses only protocol acts, question open/close events and the documented
+        `supersedes:` / `closes:` body conventions. Nothing is closed by a newer
+        timestamp, prose or a generic reply. Returns (obligations, unclassified).
+        """
+        reviewers = self.config["reviewers"]
+        later = {}
+        for message in self.messages:
+            later.setdefault(message.get("reply_to"), []).append(message)
+        items, unclassified = [], []
+
+        def item(message, owner, action, **extra):
+            entry = {"id": message["id"], "seq": message["seq"], "act": message["act"],
+                     "topic": message["topic"], "owner": owner, "action": action,
+                     "summary": message["summary"]}
+            entry.update(extra)
+            return entry
+
+        for index, message in enumerate(self.messages):
+            act, mid, author = message["act"], message["id"], message["from"]
+            replies = later.get(mid, [])
+            for delta in message.get("questions", []):
+                if delta["op"] != "open":
+                    continue
+                question = self.questions.get(delta["id"])
+                if question is None or question["state"] != "open" or question.get("opened_by") != mid:
+                    continue
+                for addressee in message["to"]:
+                    if addressee != author:
+                        items.append(item(message, addressee, "answer_question", question=delta["id"]))
+            if act == "PROPOSE":
+                if any(r["act"] == "DECIDE" for r in replies):
+                    continue
+                newer = self.messages[index + 1:]
+                if any(self._supersedes(m, message) for m in newer):
+                    continue
+                stances = {}
+                for reply in replies:
+                    if reply["act"] in {"ACCEPT", "REJECT"}:
+                        stances[reply["from"]] = reply["act"]
+                detail = {"artifact": message["artifact"],
+                          "stances": {r: stances.get(r) for r in reviewers}}
+                for reviewer in reviewers:
+                    if reviewer not in stances:
+                        items.append(item(message, reviewer, "record_stance", **detail))
+                if "REJECT" in stances.values():
+                    items.append(item(message, author, "revise_or_withdraw", **detail))
+                elif all(stances.get(r) == "ACCEPT" for r in reviewers):
+                    items.append(item(message, author, "decide", **detail))
+            elif act == "PING":
+                pongs = [r for r in replies if r["act"] == "PONG"]
+                answered = {r["from"] for r in pongs}
+                for recipient in message["to"]:
+                    if recipient != author and recipient not in answered:
+                        items.append(item(message, recipient, "pong"))
+            elif act == "PONG":
+                ping = self.by_id.get(message.get("reply_to"))
+                initiator = ping["from"] if ping is not None and ping["act"] == "PING" else None
+                if initiator is not None and initiator != author and not any(
+                        r["act"] == "ACK" and r["from"] == initiator for r in replies):
+                    items.append(item(message, initiator, "final_ack"))
+            elif act in self.CANDIDATE_ACTS and not message.get("questions") \
+                    and not self._closure_record(message):
+                for addressee in message["to"]:
+                    if addressee == author:
+                        continue
+                    closed = any(m["from"] == addressee and self._closes(m, message)
+                                 for m in self.messages[index + 1:])
+                    if not closed:
+                        unclassified.append(item(message, addressee, "may_contain_untracked_request",
+                                                 reason="no_structured_question"))
+        return items, unclassified
+
+    def pending(self, handle=None, offset=0, limit=20, unclassified=False):
+        integer(offset, "offset")
+        integer(limit, "limit", 1, 100)
+        if handle is not None:
+            pattern(handle, HANDLE, "handle")
+            require(handle in self.current, "unknown participant", code="unknown_participant",
+                    field="actor", hint="Name a current participant of this channel with --for.")
+        items, loose = self.obligations()
+        chosen = loose if unclassified else items
+        if handle is not None:
+            chosen = [entry for entry in chosen if entry["owner"] == handle]
+        page = chosen[offset:offset + limit]
+        other = items if unclassified else loose
+        if handle is not None:
+            other = [entry for entry in other if entry["owner"] == handle]
+        return {"head": self.head, "for": handle, "view": "unclassified" if unclassified else "obligations",
+                "count": len(chosen), "items": page, "next": offset + len(page),
+                "more": offset + len(page) < len(chosen),
+                ("obligations_count" if unclassified else "unclassified_count"): len(other),
+                "inspect": "show ID; show-artifact DIGEST; pending --unclassified; docs/PENDING.md"}
+
     def render(self, since=0):
         integer(since, "since")
         lines = ["# Channel history", "", f"Committed snapshot: `{self.head}`", ""]
@@ -2679,6 +2855,20 @@ def parser():
             p.add_argument("--limit", type=int, default=10)
             p.add_argument("--exclude-act", dest="exclude_acts", action="append", default=[], metavar="ACT",
                            help="leave messages of this act out of the outstanding set (repeatable)")
+    p = sub.add_parser("pending", help="read-only list of outstanding work, projected from the committed ledger",
+                       description="read-only list of outstanding work, projected from the committed ledger; "
+                                   "never moves a receipt (docs/PENDING.md)")
+    p.add_argument("--for", dest="for_handle", metavar="HANDLE", help="only this participant's work")
+    p.add_argument("--unclassified", action="store_true",
+                   help="list items whose state the ledger cannot settle instead of clear obligations")
+    p.add_argument("--offset", type=int, default=0)
+    p.add_argument("--limit", type=int, default=20)
+    p = sub.add_parser("resume", help="read-only compact snapshot for a fresh or restarted session",
+                       description="read-only compact snapshot for a fresh or restarted session: your receipt, "
+                                   "your pending work, open proposals (docs/PENDING.md)")
+    p.add_argument("--as", dest="actor", required=True)
+    p.add_argument("--session", required=True)
+    p.add_argument("--limit", type=int, default=20)
     p = sub.add_parser("state")
     p.add_argument("--as", dest="actor")
     p.add_argument("--session")
@@ -2711,6 +2901,9 @@ def parser():
     p.add_argument("--since", type=int, default=0)
     p.add_argument("--out")
     return result
+
+
+PROPOSAL_ACTIONS = frozenset({"record_stance", "revise_or_withdraw", "decide"})
 
 
 def run_upgrade_controller(controller_args):
@@ -2762,6 +2955,8 @@ def main(argv=None):
         elif cmd == "outstanding":
             value = channel.outstanding(args.actor, args.session, args.peer, args.state_filter,
                                         args.unreplied, args.after, args.limit, args.exclude_acts)
+        elif cmd == "resume":
+            value = channel.resume(args.actor, args.session, args.limit)
         elif cmd == "artifact":
             value = channel.put_artifact(args.actor, args.session, read_input(args.file, MAX_ARTIFACT))
         else:
@@ -2786,6 +2981,8 @@ def main(argv=None):
                                      for record in state.current.values()}
                 if heartbeat_warning:
                     value["warnings"] = [heartbeat_warning]
+            elif cmd == "pending":
+                value = state.pending(args.for_handle, args.offset, args.limit, args.unclassified)
             elif cmd == "validate":
                 value = {"valid": True, "head": state.head, "messages": len(state.messages),
                          "sessions": len(state.sessions), "artifacts": len(state.artifacts)}

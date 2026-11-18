@@ -77,8 +77,8 @@
     },
     {
       "path": "ai_comm.py",
-      "bytes": 160319,
-      "sha256": "05dfae9ecb79da91b26cfc04289fdaa7818bf60c4acd35ff7407c02e797a75fc"
+      "bytes": 171953,
+      "sha256": "5b673472e24365e5bb507702822acd6030f81eb2f70d60b183dc2b2c828c1996"
     },
     {
       "path": "docs/ERRORS.md",
@@ -94,6 +94,11 @@
       "path": "docs/INSTALL.md",
       "bytes": 20278,
       "sha256": "b279931c6dcc904756f7dab0084712ae87d856bbdfd14378de012c3ecab6fb87"
+    },
+    {
+      "path": "docs/PENDING.md",
+      "bytes": 4871,
+      "sha256": "1abf7779227a6f23eab99629897d069b2d6c2e253e2c91ee6872226bdd81d2fe"
     },
     {
       "path": "docs/PERFORMANCE.md",
@@ -269,6 +274,11 @@
       "path": "tests/test_outstanding.py",
       "bytes": 13951,
       "sha256": "8fdad708c218274eb269932e61a440b3f865b645dcfc10973c8f6023cb7713f3"
+    },
+    {
+      "path": "tests/test_pending.py",
+      "bytes": 20950,
+      "sha256": "403630a5b4f4ac47fc61a4031570a21f636acccfa32d9f68077a1073652ac288"
     },
     {
       "path": "tests/test_protocol.py",
