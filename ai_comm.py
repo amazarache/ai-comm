@@ -1637,6 +1637,10 @@ class Channel:
         head, blobs = read_snapshot_blobs(self.path)
         return Snapshot(head, blobs)
 
+    def head(self):
+        """Current committed head only; cheap, read-only, no validation of the history."""
+        return git(self.path, "rev-parse", "--verify", REF).decode().strip()
+
     def _record_poll(self, handle, session, command):
         """Best-effort process heartbeat; never writes to Git or receipts."""
         warning = {"code": "heartbeat_not_recorded", "reason": "unavailable"}
@@ -2707,10 +2711,75 @@ def parser():
     p.add_argument("kind", choices=["sessions", "questions", "sources"])
     p.add_argument("--offset", type=int, default=0)
     p.add_argument("--limit", type=int, default=20)
+    p = sub.add_parser("watch", help="read-only live view of committed messages, one line each",
+                       description="read-only live view of committed messages, one line each; never moves a "
+                                   "receipt or records a poll (docs/WATCH.md)")
+    p.add_argument("--after", type=int, help="print messages after this sequence number (default: last 10)")
+    p.add_argument("--follow", action="store_true", help="keep running and print new messages as they commit")
+    p.add_argument("--interval", type=float, default=2.0, help="seconds between head checks with --follow")
+    p.add_argument("--format", dest="fmt", choices=["text", "jsonl"], default="text")
     p = sub.add_parser("render")
     p.add_argument("--since", type=int, default=0)
     p.add_argument("--out")
     return result
+
+
+WATCH_FIELDS = ("seq", "id", "ts", "from", "to", "act", "topic", "reply_to", "summary")
+
+
+def watch_line(message, fmt):
+    """One line per committed message. Text fields were validated on commit (no control characters)."""
+    if fmt == "jsonl":
+        return json.dumps({k: message[k] for k in WATCH_FIELDS if k in message},
+                          ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    reply = message.get("reply_to")
+    re_part = f" re:#{int(reply[:8])}" if reply else ""
+    return (f"{message['ts']} #{message['seq']} {message['from']} -> {','.join(message['to'])} "
+            f"{message['act']} [{message['topic']}]{re_part} {message['summary']}")
+
+
+def run_watch(channel, after, follow, interval, fmt, out=None, sleep=time.sleep):
+    """Read-only live view: print committed messages, then (with follow) new ones as they commit.
+
+    Never writes a receipt, a poll record or Git. Rebuilds the validated snapshot only when
+    the committed head changes.
+    """
+    out = out or sys.stdout
+    if after is not None:
+        integer(after, "after")
+    require(isinstance(interval, (int, float)) and 0.2 <= interval <= 3600, "invalid watch interval",
+            code="invalid_watch_interval", field="input", hint="Use --interval from 0.2 to 3600 seconds.")
+    require(fmt in {"text", "jsonl"}, "invalid watch format", code="invalid_watch_format", field="input",
+            hint="Use --format text or jsonl.")
+    last = None
+    try:
+        while True:
+            head = channel.head()
+            if head != last:
+                state = channel.snapshot()
+                if after is None:
+                    after = max(0, len(state.messages) - 10)
+                for message in state.messages[after:]:
+                    out.write(watch_line(message, fmt) + "\n")
+                after = max(after, len(state.messages))
+                out.flush()
+                last = state.head
+            if not follow:
+                return 0
+            sleep(interval)
+    except KeyboardInterrupt:
+        return 0
+    except BrokenPipeError:
+        # The reader went away. Point stdout at /dev/null so no buffered bytes are flushed
+        # again at interpreter exit (the pattern the Python signal documentation describes).
+        if out is sys.stdout:
+            try:
+                devnull = os.open(os.devnull, os.O_WRONLY)
+                os.dup2(devnull, sys.stdout.fileno())
+                os.close(devnull)
+            except OSError:
+                pass
+        return 0
 
 
 def run_upgrade_controller(controller_args):
@@ -2745,6 +2814,8 @@ def main(argv=None):
             return 0
         channel = Channel(args.channel)
         cmd = args.command
+        if cmd == "watch":
+            return run_watch(channel, args.after, args.follow, args.interval, args.fmt)
         if cmd == "join":
             value = channel.join(args.actor, args.platform, args.session, args.takeover)
         elif cmd == "send":
