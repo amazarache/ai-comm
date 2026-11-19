@@ -77,8 +77,8 @@
     },
     {
       "path": "ai_comm.py",
-      "bytes": 171953,
-      "sha256": "5b673472e24365e5bb507702822acd6030f81eb2f70d60b183dc2b2c828c1996"
+      "bytes": 187875,
+      "sha256": "9c56b3ee114e25d443aafd10dfcf1deda3290f31b79e5abcce505e0c112eb9e8"
     },
     {
       "path": "docs/ERRORS.md",
@@ -114,6 +114,11 @@
       "path": "docs/RELEASES.md",
       "bytes": 29055,
       "sha256": "b66b08cee295b5f863a4913d4a33da29fae1d81f977189c8c10e3ac27d37a389"
+    },
+    {
+      "path": "docs/STATUS.md",
+      "bytes": 6130,
+      "sha256": "681ee99f1432cc3271e5680ff080084b312fd7a52eb191a16b74bf53bb30fa8a"
     },
     {
       "path": "docs/WAKE.md",
@@ -314,6 +319,11 @@
       "path": "tests/test_skill.py",
       "bytes": 19876,
       "sha256": "41d1750b98405955b19a0a56dbf645588fe63c395d76afd3d25ed9736a337d95"
+    },
+    {
+      "path": "tests/test_status.py",
+      "bytes": 18576,
+      "sha256": "69c8edc2911e66b93b11343989184d72e72a63f555dd400290a389b1659f96e3"
     },
     {
       "path": "tests/test_upgrade_controller.py",

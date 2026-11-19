@@ -2793,6 +2793,260 @@ def validate_predecessor(path, digest, task, reviewers, target_protocol_digest):
             "handoff_bytes": handoff_bytes}
 
 
+# Status view (docs/STATUS.md). Read-only over the committed ledger, receipts and versioned
+# sidecar observations; `status-record` is the only writer, and only of sidecars.
+STATUS_STATES = {"turn": ("active", "waiting", "ended"), "wake": ("armed", "disarmed", "uncertain")}
+STATUS_KEYS = frozenset({"v", "channel", "handle", "session", "generation", "dimension", "state", "source",
+                         "observed_utc", "lease_seconds"})
+STATUS_MAX_LEASE = 3600
+STATUS_SKEW_SECONDS = 5
+STATUS_SIDECAR_LIMIT = 1024
+PROBE_KEYS = frozenset({"bound_cli_sha256", "paused", "pending", "running"})
+
+
+def default_status_dir(channel_path):
+    return Path(channel_path).parent / ".ai-comm-local" / "status" / "v1"
+
+
+def channel_identity(channel):
+    """A digest of the channel's resolved path. Unlike the root commit, which two channels created alike in the
+    same second share, a path names exactly one channel; moving a channel makes its observations unknown."""
+    return sha(os.fsencode(str(channel.path)))
+
+
+def _status_dir(channel, status_dir, identity):
+    """Observations of one channel live in their own subdirectory, named by its identity."""
+    base = Path(status_dir).absolute() if status_dir else default_status_dir(channel.path)
+    return base / identity[:16]
+
+
+def read_status_sidecar(directory, identity, handle, dimension, record, at):
+    """One observation, or None for unknown. Sidecars are untrusted local input: bounded, no symlinks,
+    exact keys, the participant's current session and generation, an unexpired lease, no future time."""
+    try:
+        dirfd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError:
+        return None
+    try:
+        fd = os.open(f"{handle}.{dimension}.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dirfd)
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                return None
+            data = os.read(fd, STATUS_SIDECAR_LIMIT + 1)
+        finally:
+            os.close(fd)
+    except OSError:
+        return None
+    finally:
+        os.close(dirfd)
+    try:
+        value = parse(data, STATUS_SIDECAR_LIMIT)
+        observed = poll_time(value.get("observed_utc"))
+    except (ProtocolError, ValueError):
+        return None
+    lease = value.get("lease_seconds")
+    if (set(value) != STATUS_KEYS or type(value["v"]) is not int or value["v"] != 1
+            or value["channel"] != identity or value["handle"] != handle or value["dimension"] != dimension
+            or value["session"] != record["session"] or type(value["generation"]) is not int
+            or value["generation"] != record["generation"]
+            or value["state"] not in STATUS_STATES[dimension]
+            or not isinstance(value["source"], str) or IDENT.fullmatch(value["source"]) is None
+            or type(lease) is not int or not 1 <= lease <= STATUS_MAX_LEASE):
+        return None
+    age = (at - observed).total_seconds()
+    if age < -STATUS_SKEW_SECONDS or age > lease:
+        return None
+    return {"state": value["state"], "source": value["source"], "age_seconds": max(0, int(age)),
+            "lease_seconds": lease}
+
+
+def wake_from_probe(data):
+    """Map a wake adapter's read-only `probe` output to a wake state. Anything unexpected is uncertain."""
+    try:
+        value = parse(data, 4096)
+    except ProtocolError:
+        return "uncertain"
+    if (set(value) != PROBE_KEYS or any(type(value[k]) is not bool for k in ("paused", "pending", "running"))
+            or not isinstance(value["bound_cli_sha256"], str) or HEX.fullmatch(value["bound_cli_sha256"]) is None):
+        return "uncertain"
+    return "armed" if value["running"] and not value["paused"] else "disarmed"
+
+
+def record_status(channel, status_dir, handle, session, dimension, state, source, lease):
+    """Write one sidecar observation for a current participant. Never touches Git, receipts or wake files."""
+    require(dimension in STATUS_STATES, "invalid status dimension", code="invalid_status_dimension",
+            field="dimension", hint="Use turn or wake.")
+    require(state in STATUS_STATES[dimension], "invalid status state", code="invalid_status_state",
+            field="state", hint="Use a state listed for this dimension in docs/STATUS.md.")
+    pattern(source, IDENT, "status source")
+    integer(lease, "lease seconds", 1, STATUS_MAX_LEASE)
+    record = channel.snapshot().identity(handle, session)
+    identity = channel_identity(channel)
+    directory = _status_dir(channel, status_dir, identity)
+    require(not directory.is_symlink() and not directory.parent.is_symlink(), "status directory symlink refused",
+            code="status_dir_symlink_refused", field="status_dir")
+    directory.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    directory.mkdir(mode=0o700, exist_ok=True)
+    require(directory.is_dir() and not directory.is_symlink(), "status directory unusable",
+            code="status_dir_unusable", field="status_dir")
+    value = {"v": 1, "channel": identity, "handle": handle, "session": session, "generation": record["generation"],
+             "dimension": dimension, "state": state, "source": source, "observed_utc": poll_now(),
+             "lease_seconds": lease}
+    atomic_json(directory / f"{handle}.{dimension}.json", value)
+    return {"recorded": value}
+
+
+def _host_tokens(host):
+    """Context use reported by this session's host on stdin, or None. Never estimated."""
+    window = host.get("context_window") if isinstance(host, dict) else None
+    if not isinstance(window, dict):
+        return None
+    out = {}
+    pct = window.get("used_percentage")
+    if type(pct) in (int, float) and 0 <= pct <= 100:
+        out["context_used_percent"] = round(pct)
+    totals = [window.get(k) for k in ("total_input_tokens", "total_output_tokens")]
+    if all(type(v) is int and v >= 0 for v in totals):
+        out["session_tokens"] = sum(totals)
+    return dict(out, scope="this session, reported by its host") if out else None
+
+
+def _verdict(turn, wake, mail):
+    waiting_mail = bool(mail["owes"] or mail["new"] or mail["fetched_unread"])
+    if turn == "active":
+        return "working"
+    if turn == "waiting":
+        return "waiting for the owner"
+    if turn == "ended":
+        if wake == "armed":
+            return "idle, wake armed"
+        if waiting_mail:
+            return "wake uncertain, needs nudge" if wake == "uncertain" else "needs nudge"
+        if mail["new"] is None:
+            return "ended, mail unknown"  # an unreadable receipt cannot show that nothing is waiting
+        return "idle"
+    return "unknown"
+
+
+def status_view(channel, status_dir=None, me=None, host=None, at=None, cache=None):
+    """Per participant: turn, wake, mail, tokens. Reads only; creates no file or directory.
+
+    `cache` (a dict) keeps the ledger projection between calls while the channel head is unchanged."""
+    at = at or poll_observed_now()
+    if cache is not None and "identity" in cache:
+        identity = cache["identity"]
+    else:
+        identity = channel_identity(channel)
+        if cache is not None:
+            cache["identity"] = identity
+    directory = _status_dir(channel, status_dir, identity)
+    for attempt in range(3):
+        head = git(channel.path, "rev-parse", "--verify", REF).decode().strip()
+        if cache is not None and cache.get("head") == head:
+            state, items = cache["state"], cache["items"]
+        else:
+            state = channel.snapshot()
+            items, _loose = state.obligations()
+            if cache is not None:
+                cache.update(head=state.head, state=state, items=items)
+        receipts, skew = {}, False
+        for handle, record in state.current.items():
+            try:
+                receipts[handle] = channel._load_receipt(state, handle, record)[1]
+            except ProtocolError as exc:
+                skew = skew or exc.details.get("code") == "corrupt_receipt_bounds"
+                receipts[handle] = None
+        if not skew or attempt == 2:
+            break
+        if cache is not None:
+            cache.pop("head", None)
+    if me is not None:
+        pattern(me, HANDLE, "handle")
+        require(me in state.current, "unknown participant", code="unknown_participant", field="me",
+                hint="Name a current participant of this channel with --me.")
+    rows = []
+    for handle in sorted(state.current):
+        record, receipt = state.current[handle], receipts[handle]
+        # Owed work comes from the ledger alone and stays known even when the receipt cannot be read.
+        mail = {"receipt": "ok" if receipt is not None else "unreadable",
+                "new": None, "fetched_unread": None, "read_through": None,
+                "owes": sum(1 for e in items if e["owner"] == handle),
+                "owed_by_others": sum(1 for e in items if e["owner"] != handle
+                                      and state.by_id[e["id"]]["from"] == handle)}
+        if receipt is not None:
+            addressed = [m["seq"] for m in state.messages if handle in m["to"] and m["from"] != handle]
+            mail.update(new=sum(1 for s in addressed if s > receipt["seen"]),
+                        fetched_unread=sum(1 for s in addressed if receipt["read"] < s <= receipt["seen"]),
+                        read_through=receipt["read"])
+        dims = {d: read_status_sidecar(directory, identity, handle, d, record, at) for d in STATUS_STATES}
+        turn = dims["turn"]["state"] if dims["turn"] else "unknown"
+        wake = dims["wake"]["state"] if dims["wake"] else "unknown"
+        rows.append({"handle": handle, "generation": record["generation"], "you": handle == me,
+                     "summary": _verdict(turn, wake, mail), "turn": dims["turn"] or {"state": "unknown"},
+                     "wake": dims["wake"] or {"state": "unknown"}, "mail": mail,
+                     "tokens": _host_tokens(host) if handle == me else None})
+    last = state.messages[-1] if state.messages else None
+    return {"head": state.head, "as_of": at.strftime("%Y-%m-%dT%H:%M:%SZ"), "messages": len(state.messages),
+            "participants": rows,
+            "last": {k: last[k] for k in ("seq", "from", "act", "topic", "summary")} if last else None}
+
+
+def status_text(view):
+    lines = [f"ai-comm #{view['messages']} as of {view['as_of']} (head {view['head'][:7]})"]
+    width = max(len(r["handle"]) + (6 if r["you"] else 0) for r in view["participants"]) if view["participants"] else 0
+    for row in view["participants"]:
+        name = row["handle"] + (" (you)" if row["you"] else "")
+        parts = [f"turn {row['turn']['state']}"]
+        wake = row["wake"]
+        parts.append(f"wake {wake['state']}" + (f" ({wake['source']}, {wake['age_seconds']}s)" if "source" in wake else ""))
+        mail = row["mail"]
+        unread = ("receipt unreadable" if mail["new"] is None else
+                  f"new {mail['new']}, fetched-unread {mail['fetched_unread']}")
+        parts.append(f"mail {unread}, owes {mail['owes']}, awaiting others {mail['owed_by_others']}")
+        tokens = row["tokens"]
+        if tokens:
+            bits = []
+            if "context_used_percent" in tokens:
+                bits.append(f"context {tokens['context_used_percent']}%")
+            if "session_tokens" in tokens:
+                bits.append(f"{tokens['session_tokens']} tokens")
+            parts.append(", ".join(bits))
+        else:
+            parts.append("tokens n/a")
+        lines.append(f"{name.ljust(width)}  {row['summary']}: " + " · ".join(parts))
+    last = view["last"]
+    if last:
+        summary = last["summary"] if len(last["summary"]) <= 120 else last["summary"][:119] + "…"
+        lines.append(f"last #{last['seq']} {last['from']} {last['act']} [{last['topic']}] {summary}")
+    return "\n".join(lines) + "\n"
+
+
+def run_status(channel, status_dir, me, host, fmt, follow, interval, out=None, sleep=time.sleep):
+    require(type(interval) in (int, float) and 0.2 <= interval <= 3600, "invalid status interval",
+            code="invalid_status_interval", field="interval", hint="Use 0.2 through 3600 seconds.")
+    out = out or sys.stdout
+    cache = {}
+    try:
+        while True:
+            view = status_view(channel, status_dir, me, host, cache=cache)
+            text = status_text(view) if fmt == "text" else json.dumps(view, sort_keys=True) + "\n"
+            if follow and fmt == "text" and out.isatty():
+                text = "\033[H\033[2J" + text
+            out.write(text)
+            out.flush()
+            if not follow:
+                return 0
+            sleep(interval)
+    except KeyboardInterrupt:
+        return 0
+    except BrokenPipeError:
+        if out is sys.stdout:  # keep the interpreter's final flush from failing on the closed pipe
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(devnull, sys.stdout.fileno())
+            os.close(devnull)
+        return 0
+
+
 def emit(value):
     sys.stdout.buffer.write(canonical(value))
     sys.stdout.buffer.flush()
@@ -2869,6 +3123,27 @@ def parser():
     p.add_argument("--as", dest="actor", required=True)
     p.add_argument("--session", required=True)
     p.add_argument("--limit", type=int, default=20)
+    p = sub.add_parser("status", help="read-only real state of every participant: turn, wake, mail, tokens",
+                       description="read-only real state of every participant: turn, wake, mail and tokens; "
+                                   "missing or expired signals show as unknown (docs/STATUS.md)")
+    p.add_argument("--me", metavar="HANDLE", help="mark this participant and attach the host's token figures")
+    p.add_argument("--host-json", metavar="FILE", help="the host's status JSON ('-' for stdin), for tokens")
+    p.add_argument("--status-dir", help="sidecar directory (default: .ai-comm-local/status/v1 beside the channel)")
+    p.add_argument("--format", dest="fmt", choices=["text", "json"], default="text")
+    p.add_argument("--follow", action="store_true", help="refresh until interrupted, for a terminal pane")
+    p.add_argument("--interval", type=float, default=3.0)
+    p = sub.add_parser("status-record", help="record one turn or wake observation for the status view",
+                       description="record one turn or wake observation, as its authorized producer "
+                                   "(docs/STATUS.md); writes only the sidecar")
+    p.add_argument("--as", dest="actor", required=True)
+    p.add_argument("--session", required=True)
+    p.add_argument("--dimension", choices=sorted(STATUS_STATES), required=True)
+    group = p.add_mutually_exclusive_group(required=True)
+    group.add_argument("--state", dest="obs_state")
+    group.add_argument("--from-probe", metavar="FILE", help="a wake adapter's probe output ('-' for stdin)")
+    p.add_argument("--source", required=True, help="the producer's name, for example exit-wake or host-hooks")
+    p.add_argument("--lease", type=int, default=60, help="seconds until the observation expires to unknown")
+    p.add_argument("--status-dir")
     p = sub.add_parser("state")
     p.add_argument("--as", dest="actor")
     p.add_argument("--session")
@@ -2957,6 +3232,26 @@ def main(argv=None):
                                         args.unreplied, args.after, args.limit, args.exclude_acts)
         elif cmd == "resume":
             value = channel.resume(args.actor, args.session, args.limit)
+        elif cmd == "status":
+            host = None
+            if args.host_json is not None:
+                try:
+                    host = parse(read_input(args.host_json, 1 << 20), 1 << 20)
+                except ProtocolError:
+                    host = None  # a host's malformed JSON costs only the token figures
+            return run_status(channel, args.status_dir, args.me, host, args.fmt, args.follow, args.interval)
+        elif cmd == "status-record":
+            state_value = args.obs_state
+            if args.from_probe is not None:
+                require(args.dimension == "wake", "--from-probe is for the wake dimension",
+                        code="probe_requires_wake", field="dimension")
+                try:
+                    probe = read_input(args.from_probe, 4096)
+                except ProtocolError:
+                    probe = b""  # oversized output is not a valid probe: record uncertain, not an error
+                state_value = wake_from_probe(probe)
+            value = record_status(channel, args.status_dir, args.actor, args.session, args.dimension,
+                                  state_value, args.source, args.lease)
         elif cmd == "artifact":
             value = channel.put_artifact(args.actor, args.session, read_input(args.file, MAX_ARTIFACT))
         else:
