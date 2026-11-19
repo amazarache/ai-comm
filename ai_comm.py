@@ -2971,7 +2971,9 @@ def _host_tokens(host):
 
 
 def _verdict(turn, wake, mail):
-    waiting_mail = bool(mail["owes"] or mail["new"] or mail["fetched_unread"])
+    # Only work that arrived since the participant last sent a message calls for a nudge; older open items are
+    # history it has already been active after (they stay visible as the owes count).
+    waiting_mail = bool(mail["owes_since_last_sent"] or mail["new"] or mail["fetched_unread"])
     if turn == "active":
         return "working"
     if turn == "waiting":
@@ -3023,13 +3025,26 @@ def status_view(channel, status_dir=None, me=None, host=None, at=None, cache=Non
         pattern(me, HANDLE, "handle")
         require(me in state.current, "unknown participant", code="unknown_participant", field="me",
                 hint="Name a current participant of this channel with --me.")
+    last_sent, latest_reply = {}, {}
+    for m in state.messages:
+        last_sent[m["from"]] = m["seq"]
+        if "reply_to" in m:
+            latest_reply[m["reply_to"]] = m["seq"]
+
+    def trigger(entry):
+        """When an obligation last became due: its message or the latest reply to it. A reply by the owner itself
+        is never later than the owner's own last message, so it can never make the work fresh."""
+        return max(entry["seq"], latest_reply.get(entry["id"], 0))
+
     rows = []
     for handle in sorted(state.current):
         record, receipt = state.current[handle], receipts[handle]
+        owed = [e for e in items if e["owner"] == handle]
         # Owed work comes from the ledger alone and stays known even when the receipt cannot be read.
         mail = {"receipt": "ok" if receipt is not None else "unreadable",
                 "new": None, "fetched_unread": None, "read_through": None,
-                "owes": sum(1 for e in items if e["owner"] == handle),
+                "owes": len(owed),
+                "owes_since_last_sent": sum(1 for e in owed if trigger(e) > last_sent.get(handle, 0)),
                 "owed_by_others": sum(1 for e in items if e["owner"] != handle
                                       and state.by_id[e["id"]]["from"] == handle)}
         if receipt is not None:
@@ -3061,7 +3076,8 @@ def status_text(view):
         mail = row["mail"]
         unread = ("receipt unreadable" if mail["new"] is None else
                   f"new {mail['new']}, fetched-unread {mail['fetched_unread']}")
-        parts.append(f"mail {unread}, owes {mail['owes']}, awaiting others {mail['owed_by_others']}")
+        parts.append(f"mail {unread}, owes {mail['owes']} ({mail['owes_since_last_sent']} since its last message), "
+                     f"awaiting others {mail['owed_by_others']}")
         tokens = row["tokens"]
         if tokens:
             bits = []

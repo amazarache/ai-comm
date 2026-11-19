@@ -116,6 +116,46 @@ class StatusTests(unittest.TestCase):
         self.assertEqual((1, 0), (beta["owes"], beta["owed_by_others"]))
         self.assertEqual((0, 1), (alpha["owes"], alpha["owed_by_others"]))
 
+    def read_all(self, handle):
+        inbox = self.channel.inbox(handle, handle + "-session", limit=100)
+        self.channel.ack(handle, handle + "-session", inbox["through"])
+
+    def test_old_owed_work_is_history_once_the_participant_has_spoken_since(self):
+        self.send(act="PING")  # beta owes a pong
+        self.read_all("beta")
+        self.record("beta", "turn", "ended")
+        mail = self.row("beta")["mail"]
+        self.assertEqual((1, 1), (mail["owes"], mail["owes_since_last_sent"]))
+        self.assertEqual("needs nudge", self.row("beta")["summary"], "read but unanswered still needs a nudge")
+        self.send(author="beta", summary="An unrelated note.")  # beta has been active since; the ping is history
+        mail = self.row("beta")["mail"]
+        self.assertEqual((1, 0), (mail["owes"], mail["owes_since_last_sent"]))
+        self.assertEqual("idle", self.row("beta")["summary"])
+        self.assertIn("owes 1 (0 since its last message)", self.cli("status").stdout.decode())
+
+    def test_a_reply_makes_older_owed_work_fresh_again(self):
+        proposal = self.send(act="PROPOSE", artifact=self.artifact())
+        self.send(author="beta", act="ACCEPT", reply_to=proposal["id"], artifact=self.artifact())
+        self.read_all("alpha")
+        self.record("alpha", "turn", "ended")
+        mail = self.row("alpha")["mail"]
+        self.assertEqual((1, 1), (mail["owes"], mail["owes_since_last_sent"]), "alpha now owes the decision")
+        self.assertEqual("needs nudge", self.row("alpha")["summary"])
+
+    def test_the_owner_s_own_reply_does_not_refresh_its_work(self):
+        proposal = self.send(act="PROPOSE", artifact=self.artifact())  # beta owes a stance
+        self.send(author="beta", act="FACT", reply_to=proposal["id"], summary="Looking at it.")
+        self.read_all("beta")
+        self.record("beta", "turn", "ended")
+        mail = self.row("beta")["mail"]
+        self.assertEqual((1, 0), (mail["owes"], mail["owes_since_last_sent"]))
+        self.assertEqual("idle", self.row("beta")["summary"])
+
+    def artifact(self):
+        if not hasattr(self, "_artifact"):
+            self._artifact = self.channel.put_artifact("alpha", "alpha-session", b"generic change")["artifact"]
+        return self._artifact
+
     def test_invalid_sidecars_read_as_unknown(self):
         future = (datetime.now(timezone.utc) + timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         old = (datetime.now(timezone.utc) - timedelta(seconds=61)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")

@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | turn | `active`, `waiting` (for the owner's input or approval), `ended`, `unknown` | the host's own turn events, recorded with `status-record` |
 | wake | `armed`, `disarmed`, `uncertain`, `unknown` | the session's wake adapter, recorded from its read-only `probe` |
-| mail | new, fetched but not read, read through N, work owed, work others owe this session | the committed ledger, the receipts and `pending` |
+| mail | new, fetched but not read, read through N, work owed (and how much of it arrived since the session's last message), work others owe this session | the committed ledger, the receipts and `pending` |
 | tokens | context share and session tokens, or `n/a` | only what this session's own host reports |
 
 ```sh
@@ -15,8 +15,8 @@ python3 -I .tools/ai-comm/ai_comm.py --channel .ai-comm status
 
 ```text
 ai-comm #317 as of 2026-11-18T16:17:42Z (head 61a3f28)
-agent-a (you)  unknown: turn unknown · wake armed (exit-wake, 4s) · mail new 0, fetched-unread 0, owes 3, awaiting others 2 · context 42%
-agent-b        needs nudge: turn ended · wake unknown · mail new 2, fetched-unread 0, owes 1, awaiting others 0 · tokens n/a
+agent-a (you)  unknown: turn unknown · wake armed (exit-wake, 4s) · mail new 0, fetched-unread 0, owes 3 (0 since its last message), awaiting others 2 · context 42%
+agent-b        needs nudge: turn ended · wake unknown · mail new 2, fetched-unread 0, owes 1 (1 since its last message), awaiting others 0 · tokens n/a
 last #317 agent-a DECIDE [watch] DECIDED: commit exact watch diff ...
 ```
 
@@ -27,11 +27,16 @@ The word before the colon is a summary of the four facts:
 | working | turn `active` |
 | waiting for approval | turn `waiting` (an approval may also be granted by a rule, not a person) |
 | idle, wake armed | turn `ended`, wake `armed` |
-| needs nudge | turn `ended`, wake not `armed`, and mail is new, unread or owed |
+| needs nudge | turn `ended`, wake not `armed`, and mail is new or unread, or work became due since the session's last message |
 | wake uncertain, needs nudge | as above, with wake `uncertain` |
 | idle | turn `ended`, nothing waiting |
 | ended, mail unknown | turn `ended`, nothing known to be owed, but the receipt cannot be read |
 | unknown | no current turn observation |
+
+Work owed counts every open item from the whole history. Only work that became due after the session last sent a
+message makes it "needs nudge": an item became due with its message, or again with the latest reply to it (an
+acceptance that calls for a decision, for example). Items older than the session's own last message are history it
+has been active after; they stay in the count, so they remain visible with `pending`.
 
 If a receipt cannot be read, the line shows `mail receipt unreadable` and still counts the work owed, which comes
 from the ledger alone.
