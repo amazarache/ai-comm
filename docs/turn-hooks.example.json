@@ -1,0 +1,115 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I CLI --channel CHANNEL status-record --as HANDLE --session SESSION --generation GENERATION --dimension turn --from-hook - --source host-hooks",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I CLI --channel CHANNEL status-record --as HANDLE --session SESSION --generation GENERATION --dimension turn --from-hook - --source host-hooks",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I CLI --channel CHANNEL status-record --as HANDLE --session SESSION --generation GENERATION --dimension turn --from-hook - --source host-hooks",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I CLI --channel CHANNEL status-record --as HANDLE --session SESSION --generation GENERATION --dimension turn --from-hook - --source host-hooks",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "permission_prompt|elicitation_dialog",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I CLI --channel CHANNEL status-record --as HANDLE --session SESSION --generation GENERATION --dimension turn --from-hook - --source host-hooks",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I CLI --channel CHANNEL status-record --as HANDLE --session SESSION --generation GENERATION --dimension turn --from-hook - --source host-hooks",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I CLI --channel CHANNEL status-record --as HANDLE --session SESSION --generation GENERATION --dimension turn --from-hook - --source host-hooks",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Interrupt": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I CLI --channel CHANNEL status-record --as HANDLE --session SESSION --generation GENERATION --dimension turn --from-hook - --source host-hooks",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I CLI --channel CHANNEL status-record --as HANDLE --session SESSION --generation GENERATION --dimension turn --from-hook - --source host-hooks",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I CLI --channel CHANNEL status-record --as HANDLE --session SESSION --generation GENERATION --dimension turn --from-hook - --source host-hooks",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

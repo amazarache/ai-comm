@@ -92,7 +92,7 @@ class StatusTests(unittest.TestCase):
         self.record("alpha", "turn", "active")
         self.assertEqual("working", self.row("alpha")["summary"])
         self.record("alpha", "turn", "waiting")
-        self.assertEqual("waiting for the owner", self.row("alpha")["summary"])
+        self.assertEqual("waiting for approval", self.row("alpha")["summary"])
         self.record("alpha", "turn", "ended")
         self.assertEqual("idle", self.row("alpha")["summary"], "nothing addressed to alpha")
 
@@ -123,7 +123,7 @@ class StatusTests(unittest.TestCase):
                  "other generation": {"generation": 2}, "other session": {"session": "old-session"},
                  "other handle": {"handle": "beta"}, "unknown state": {"state": "working"},
                  "extra key": {"note": "x"}, "other channel": {"channel": "f" * 40}, "bad version": {"v": 2}, "bool version": {"v": True},
-                 "lease too long": {"lease_seconds": 3601}, "bad source": {"source": "Bad\u001b[31m"},
+                 "lease too long": {"lease_seconds": 86401}, "bad source": {"source": "Bad\u001b[31m"},
                  "bad time": {"observed_utc": "yesterday"}}
         for name, change in cases.items():
             with self.subTest(name):
@@ -287,7 +287,8 @@ class StatusTests(unittest.TestCase):
                            (("mood", "active", "test", 60), "invalid_status_dimension"),
                            (("turn", "active", "Bad Source", 60), "invalid_status_source"),
                            (("turn", "active", "test", 0), "invalid_lease_seconds"),
-                           (("turn", "active", "test", 3601), "invalid_lease_seconds")):
+                           (("turn", "active", "test", 86401), "invalid_lease_seconds"),
+                           (("wake", "armed", "test", 3601), "invalid_lease_seconds")):
             with self.subTest(code), self.assertRaises(ac.ProtocolError) as caught:
                 ac.record_status(self.channel, None, "alpha", "alpha-session", *args)
             self.assertEqual(code, caught.exception.details["code"])

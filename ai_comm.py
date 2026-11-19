@@ -2798,7 +2798,16 @@ def validate_predecessor(path, digest, task, reviewers, target_protocol_digest):
 STATUS_STATES = {"turn": ("active", "waiting", "ended"), "wake": ("armed", "disarmed", "uncertain")}
 STATUS_KEYS = frozenset({"v", "channel", "handle", "session", "generation", "dimension", "state", "source",
                          "observed_utc", "lease_seconds"})
-STATUS_MAX_LEASE = 3600
+STATUS_MAX_LEASE = {"turn": 86400, "wake": 3600}  # a turn can stay ended overnight; a wake is re-probed often
+# Turn observations from host hook events (docs/STATUS.md, "Turn from host hooks"). Only these non-content fields
+# of the hook input are read: hook_event_name, session_id, notification_type and source.
+HOOK_INPUT_LIMIT = 1 << 20
+HOOK_EVENT_STATES = {"UserPromptSubmit": "active", "PostToolUse": "active", "PostToolUseFailure": "active",
+                     "PermissionRequest": "waiting", "Stop": "ended", "StopFailure": "ended",
+                     "Interrupt": "ended", "SessionEnd": "ended"}
+HOOK_NOTIFICATION_STATES = {"permission_prompt": "waiting", "elicitation_dialog": "waiting"}
+HOOK_SESSION_START_SOURCES = frozenset({"startup", "resume", "clear", "fork"})  # not "compact": the turn goes on
+TURN_LEASES = {"active": 900, "waiting": 86400, "ended": 86400}
 STATUS_SKEW_SECONDS = 5
 STATUS_SIDECAR_LIMIT = 1024
 PROBE_KEYS = frozenset({"bound_cli_sha256", "paused", "pending", "running"})
@@ -2851,7 +2860,7 @@ def read_status_sidecar(directory, identity, handle, dimension, record, at):
             or value["generation"] != record["generation"]
             or value["state"] not in STATUS_STATES[dimension]
             or not isinstance(value["source"], str) or IDENT.fullmatch(value["source"]) is None
-            or type(lease) is not int or not 1 <= lease <= STATUS_MAX_LEASE):
+            or type(lease) is not int or not 1 <= lease <= STATUS_MAX_LEASE[dimension]):
         return None
     age = (at - observed).total_seconds()
     if age < -STATUS_SKEW_SECONDS or age > lease:
@@ -2872,15 +2881,65 @@ def wake_from_probe(data):
     return "armed" if value["running"] and not value["paused"] else "disarmed"
 
 
-def record_status(channel, status_dir, handle, session, dimension, state, source, lease):
-    """Write one sidecar observation for a current participant. Never touches Git, receipts or wake files."""
+def turn_from_hook(data, session):
+    """The turn state a host hook event stands for, or None: not this session, or an event that changes nothing."""
+    value = parse(data, HOOK_INPUT_LIMIT)
+    if value.get("session_id") != session:
+        return None
+    event = value.get("hook_event_name")
+    if event == "Notification":
+        kind = value.get("notification_type")
+        return HOOK_NOTIFICATION_STATES.get(kind) if isinstance(kind, str) else None
+    if event == "SessionStart":
+        return "ended" if value.get("source") in HOOK_SESSION_START_SOURCES else None
+    return HOOK_EVENT_STATES.get(event) if isinstance(event, str) else None
+
+
+def run_hook_record(argv):
+    """`status-record --from-hook`: run by a host hook, synchronously. Whatever happens it prints nothing, writes
+    nothing to stderr and exits 0, so it can never block a prompt or add text to a model's context."""
+    saved = sys.stdout, sys.stderr
+    devnull = None
+    try:
+        devnull = open(os.devnull, "w")  # inside the boundary: a sink that cannot open means no observation
+        sys.stdout = sys.stderr = devnull
+        args = parser().parse_args(argv)
+        if (args.command == "status-record" and args.dimension == "turn" and args.from_hook is not None
+                and args.generation is not None and args.channel is not None):
+            state = turn_from_hook(read_input(args.from_hook, HOOK_INPUT_LIMIT), args.session)
+            if state is not None:
+                record_status(Channel(args.channel), args.status_dir, args.actor, args.session, "turn", state,
+                              args.source, TURN_LEASES[state], generation=args.generation)
+    except BaseException:  # noqa: BLE001 - a hook must never fail loudly; the observation simply expires
+        pass
+    finally:
+        sys.stdout, sys.stderr = saved
+        if devnull is not None:
+            try:
+                devnull.close()
+            except BaseException:  # noqa: BLE001 - cleanup must not fail the hook either
+                pass
+    return 0
+
+
+def record_status(channel, status_dir, handle, session, dimension, state, source, lease, generation=None):
+    """Write one sidecar observation for a participant. Never touches Git, receipts or wake files.
+
+    Without `generation` the session must be the participant's current join. With it (the hook fast path) the
+    channel is not read: the observation carries the declared binding, and the status view shows it only while that
+    binding is still the current join."""
     require(dimension in STATUS_STATES, "invalid status dimension", code="invalid_status_dimension",
             field="dimension", hint="Use turn or wake.")
     require(state in STATUS_STATES[dimension], "invalid status state", code="invalid_status_state",
             field="state", hint="Use a state listed for this dimension in docs/STATUS.md.")
     pattern(source, IDENT, "status source")
-    integer(lease, "lease seconds", 1, STATUS_MAX_LEASE)
-    record = channel.snapshot().identity(handle, session)
+    integer(lease, "lease seconds", 1, STATUS_MAX_LEASE.get(dimension, 1))
+    if generation is None:
+        generation = channel.snapshot().identity(handle, session)["generation"]
+    else:
+        pattern(handle, HANDLE, "handle")
+        text_field(session, "session reference", 160)
+        integer(generation, "generation", 1)
     identity = channel_identity(channel)
     directory = _status_dir(channel, status_dir, identity)
     require(not directory.is_symlink() and not directory.parent.is_symlink(), "status directory symlink refused",
@@ -2889,7 +2948,7 @@ def record_status(channel, status_dir, handle, session, dimension, state, source
     directory.mkdir(mode=0o700, exist_ok=True)
     require(directory.is_dir() and not directory.is_symlink(), "status directory unusable",
             code="status_dir_unusable", field="status_dir")
-    value = {"v": 1, "channel": identity, "handle": handle, "session": session, "generation": record["generation"],
+    value = {"v": 1, "channel": identity, "handle": handle, "session": session, "generation": generation,
              "dimension": dimension, "state": state, "source": source, "observed_utc": poll_now(),
              "lease_seconds": lease}
     atomic_json(directory / f"{handle}.{dimension}.json", value)
@@ -2916,7 +2975,7 @@ def _verdict(turn, wake, mail):
     if turn == "active":
         return "working"
     if turn == "waiting":
-        return "waiting for the owner"
+        return "waiting for approval"
     if turn == "ended":
         if wake == "armed":
             return "idle, wake armed"
@@ -3141,6 +3200,9 @@ def parser():
     group = p.add_mutually_exclusive_group(required=True)
     group.add_argument("--state", dest="obs_state")
     group.add_argument("--from-probe", metavar="FILE", help="a wake adapter's probe output ('-' for stdin)")
+    group.add_argument("--from-hook", metavar="FILE",
+                       help="a host hook event's JSON ('-' for stdin); turn only, with --generation; silent, exit 0")
+    p.add_argument("--generation", type=int, help="the binding's generation, for --from-hook")
     p.add_argument("--source", required=True, help="the producer's name, for example exit-wake or host-hooks")
     p.add_argument("--lease", type=int, default=60, help="seconds until the observation expires to unknown")
     p.add_argument("--status-dir")
@@ -3193,6 +3255,8 @@ def run_upgrade_controller(controller_args):
 def main(argv=None):
     try:
         raw = list(sys.argv[1:] if argv is None else argv)
+        if "status-record" in raw and any(a == "--from-hook" or a.startswith("--from-hook=") for a in raw):
+            return run_hook_record(raw)
         if raw[:1] == ["upgrade"] and not {"-h", "--help"} & set(raw[1:2]):
             run_upgrade_controller(raw[1:])
         args = parser().parse_args(argv)
@@ -3241,6 +3305,8 @@ def main(argv=None):
                     host = None  # a host's malformed JSON costs only the token figures
             return run_status(channel, args.status_dir, args.me, host, args.fmt, args.follow, args.interval)
         elif cmd == "status-record":
+            require(args.generation is None, "--generation is only for --from-hook", code="generation_requires_hook",
+                    field="generation")
             state_value = args.obs_state
             if args.from_probe is not None:
                 require(args.dimension == "wake", "--from-probe is for the wake dimension",

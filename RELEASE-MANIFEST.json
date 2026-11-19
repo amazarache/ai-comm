@@ -77,8 +77,8 @@
     },
     {
       "path": "ai_comm.py",
-      "bytes": 187875,
-      "sha256": "9c56b3ee114e25d443aafd10dfcf1deda3290f31b79e5abcce505e0c112eb9e8"
+      "bytes": 191844,
+      "sha256": "70bd067259077a8428e9b5720540fb3636bccd5728bd0c6c13ff726e738e08ac"
     },
     {
       "path": "docs/ERRORS.md",
@@ -117,13 +117,18 @@
     },
     {
       "path": "docs/STATUS.md",
-      "bytes": 6130,
-      "sha256": "681ee99f1432cc3271e5680ff080084b312fd7a52eb191a16b74bf53bb30fa8a"
+      "bytes": 9077,
+      "sha256": "178682d07841453353819d5627f13387af44ff522144184c5aa102a051d5a137"
     },
     {
       "path": "docs/WAKE.md",
       "bytes": 19939,
       "sha256": "bd9c8b240a1056630dd5dc8f3f229fde7ca6f319dce015c281d8fe8c3f84f982"
+    },
+    {
+      "path": "docs/turn-hooks.example.json",
+      "bytes": 3399,
+      "sha256": "1c4e3f90eb3647207d7c8d93224a65a8efea32120cb6b41c2f2168c2be85ff11"
     },
     {
       "path": "entry/ai-comm/SKILL.md",
@@ -322,8 +327,13 @@
     },
     {
       "path": "tests/test_status.py",
-      "bytes": 18576,
-      "sha256": "69c8edc2911e66b93b11343989184d72e72a63f555dd400290a389b1659f96e3"
+      "bytes": 18664,
+      "sha256": "4f88dfd5dc701902ff1a741776912d0014b45f5649fb8878809006bbd8d08002"
+    },
+    {
+      "path": "tests/test_turn_hooks.py",
+      "bytes": 13574,
+      "sha256": "4138fdc33f9a4d573a2b8e7c09188eb67989bfe81af5d1f6408f8cc2cd901278"
     },
     {
       "path": "tests/test_upgrade_controller.py",
