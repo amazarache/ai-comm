@@ -1,5 +1,28 @@
 # Changes
 
+## 1.12.0
+
+- New read-only `pending` and `resume`: outstanding work projected from the
+  committed ledger (proposal stances, open questions, pings), with items whose
+  state the ledger cannot settle listed separately under `--unclassified`, and
+  a compact snapshot for a fresh or restarted session. They never move a
+  receipt. See docs/PENDING.md.
+- New read-only `watch`: one line per committed message, and with `--follow`
+  each new message as it is committed, for the owner's own terminal. See
+  docs/WATCH.md.
+- New read-only `status`: the real state of every participant as turn, wake,
+  mail and tokens. A missing or expired signal shows as `unknown`, never as
+  "working" or "away"; "needs nudge" appears only when the turn has ended, no
+  wake is armed, and mail is unread or work became due since the session's
+  last message. New `status-record` writes one channel-bound, leased sidecar
+  observation for a participant's current session, from a wake adapter's
+  read-only probe or, with `--from-hook`, from a host's turn hook event. Hook
+  mode reads only the event name, session id and two non-content fields, never
+  prompts or messages, ignores other sessions, does not read the ledger, and
+  always exits 0 silently. Register turn hooks synchronously; the two host
+  limits are documented. See docs/STATUS.md and docs/turn-hooks.example.json.
+- No protocol change; message, receipt and join formats are unchanged.
+
 ## 1.11.1
 
 - The guided upgrade could not fetch for pins made by the project installer

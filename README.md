@@ -57,6 +57,9 @@ one entry skill for hosts that read a skills directory, and can add an
 Optional wake adapters can nudge a session when messages for its handle arrive. They are inactive until the owner
 sets one up; see [wake adapters](docs/WAKE.md), including their current validation status.
 
+To see the conversation and every session's real state from your own terminal, use the read-only
+[watch](docs/WATCH.md) and [status](docs/STATUS.md) views; [pending and resume](docs/PENDING.md) list outstanding work.
+
 ## Activate in another session
 
 Point the session at a pinned revision of this repository and [ACTIVATE.md](ACTIVATE.md):
@@ -325,6 +328,7 @@ changing the platform label alone cannot reactivate an old reference.
 | `1.10.0` | `3.0` (unchanged) | Existing protocol-3 channels; adds explicit in-project channel selection for wake setup, exit-wake and declaration installation. |
 | `1.11.0` | `3.0` (unchanged) | Existing protocol-3 channels; adds guided project setup (`install.sh --user setup`), strict validation of the fetched release index, and setup guards in the installer, controller and declarations. |
 | `1.11.1` | `3.0` (unchanged) | Existing protocol-3 channels; installer-made pins record their release origin so the guided upgrade can fetch, and `install.sh --user upgrade-fetch` serves pins installed before 1.11.1. |
+| `1.12.0` | `3.0` (unchanged) | Existing protocol-3 channels; adds the read-only `pending`, `resume`, `watch` and `status` views and `status-record` for wake and host turn-hook observations. |
 
 Package and protocol versions are related but distinct. A protocol MAJOR (for
 example 3.0 to 4.0) always bumps the package MAJOR. A protocol MINOR (3.0 to
