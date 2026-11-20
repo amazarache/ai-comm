@@ -327,8 +327,8 @@
     },
     {
       "path": "tests/test_status.py",
-      "bytes": 20926,
-      "sha256": "8c00e16dc08bd694fc6b8c534240be6b9e7831e159f84f5c8ddedd5f420f0051"
+      "bytes": 22326,
+      "sha256": "b0f42233b0cca05adfd8a0f5ac32e7b1d4c5ab5813fb4a6384f80c131dc5b4a4"
     },
     {
       "path": "tests/test_turn_hooks.py",

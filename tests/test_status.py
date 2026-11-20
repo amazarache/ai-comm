@@ -133,14 +133,35 @@ class StatusTests(unittest.TestCase):
         self.assertEqual("idle", self.row("beta")["summary"])
         self.assertIn("owes 1 (0 since its last message)", self.cli("status").stdout.decode())
 
-    def test_a_reply_makes_older_owed_work_fresh_again(self):
+    def owed(self, handle):
+        return [(e["id"], e["action"]) for e in self.channel.snapshot().obligations()[0] if e["owner"] == handle]
+
+    def test_a_reply_makes_the_author_s_open_stance_fresh_again(self):
+        """The author is also a reviewer: after another reviewer's ACCEPT it still owes its own stance."""
         proposal = self.send(act="PROPOSE", artifact=self.artifact())
         self.send(author="beta", act="ACCEPT", reply_to=proposal["id"], artifact=self.artifact())
         self.read_all("alpha")
         self.record("alpha", "turn", "ended")
+        self.assertEqual([(proposal["id"], "record_stance")], self.owed("alpha"))
         mail = self.row("alpha")["mail"]
-        self.assertEqual((1, 1), (mail["owes"], mail["owes_since_last_sent"]), "alpha now owes the decision")
+        self.assertEqual((1, 1), (mail["owes"], mail["owes_since_last_sent"]))
         self.assertEqual("needs nudge", self.row("alpha")["summary"])
+
+    def test_the_last_acceptance_makes_the_decision_due_and_fresh(self):
+        proposal = self.send(act="PROPOSE", artifact=self.artifact())
+        self.send(act="ACCEPT", reply_to=proposal["id"], artifact=self.artifact(), to=["beta"])
+        self.assertEqual([], self.owed("alpha"), "nothing is due while beta's stance is missing")
+        self.send(author="beta", act="ACCEPT", reply_to=proposal["id"], artifact=self.artifact())
+        self.read_all("alpha")
+        self.record("alpha", "turn", "ended")
+        self.assertEqual([(proposal["id"], "decide")], self.owed("alpha"))
+        mail = self.row("alpha")["mail"]
+        self.assertEqual((1, 1), (mail["owes"], mail["owes_since_last_sent"]), "the decision is due since beta's ACCEPT")
+        self.assertEqual("needs nudge", self.row("alpha")["summary"])
+        self.send(act="DECIDE", reply_to=proposal["id"], artifact=self.artifact(), to=["beta"],
+                  summary="Decided.", confidence="verified")
+        self.assertEqual([], self.owed("alpha"))
+        self.assertEqual("idle", self.row("alpha")["summary"])
 
     def test_the_owner_s_own_reply_does_not_refresh_its_work(self):
         proposal = self.send(act="PROPOSE", artifact=self.artifact())  # beta owes a stance
