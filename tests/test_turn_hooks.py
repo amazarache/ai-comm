@@ -166,7 +166,11 @@ class TurnHookTests(unittest.TestCase):
         real_open = open
 
         class ClosingFails(io.StringIO):
+            """Like a real file whose close() fails: it is closed afterwards anyway (FileIO drops its descriptor
+            first), so the object's finalizer does not close it again. Python 3.13 reports exceptions from a
+            finalizer's close() on stderr, which a fake that stays open would trigger after the test."""
             def close(self):
+                super().close()
                 raise OSError("close failed")
 
         def failing(kind):
