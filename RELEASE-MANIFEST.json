@@ -77,8 +77,8 @@
     },
     {
       "path": "ai_comm.py",
-      "bytes": 192753,
-      "sha256": "e823d155f9d96d040998a501219e642321f0bf9be12594a4f4953ce3c0dbaf30"
+      "bytes": 196291,
+      "sha256": "a61dbad62ec735d4119cfc4498fef68ee079358ae82d23382d8eb3750533a506"
     },
     {
       "path": "docs/ERRORS.md",
@@ -124,6 +124,11 @@
       "path": "docs/WAKE.md",
       "bytes": 19939,
       "sha256": "bd9c8b240a1056630dd5dc8f3f229fde7ca6f319dce015c281d8fe8c3f84f982"
+    },
+    {
+      "path": "docs/WATCH.md",
+      "bytes": 1853,
+      "sha256": "1d7a5e9a28da2c4363684c64cfb0924153dff631eae5405e471a16e918a06495"
     },
     {
       "path": "docs/turn-hooks.example.json",
@@ -379,6 +384,11 @@
       "path": "tests/test_wake_install.py",
       "bytes": 61139,
       "sha256": "b0adae31cc42a7924749497aa6bd0a2ce934940390b60107b8c94f08d32aa496"
+    },
+    {
+      "path": "tests/test_watch.py",
+      "bytes": 6982,
+      "sha256": "7a8c6ef4862dd2106a510587459b1701cb89e50a90b0f414e0e5dac776f15b5c"
     },
     {
       "path": "upgrade_controller.py",
