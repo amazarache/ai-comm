@@ -346,11 +346,19 @@ class VerifyPinTests(unittest.TestCase):
         cache.write_bindings({"v": 1, "bindings": self.bindings if bindings is None else bindings})
         return cache
 
+    def old_report(self):
+        return {"class": "controller", "version": "1.5.0", "commit": self.releases["1.5.0"]["commit"],
+                "newer_verified": ["1.5.1"]}
+
     def write_prompt(self, state, mode=0o600):
         root = self.project / ".ai-comm-local" / "upgrade"
         root.mkdir(parents=True, mode=0o700, exist_ok=True)
         os.chmod(root, 0o700)
         path = root / "prompt.json"
+        if path.is_dir() and not path.is_symlink():
+            path.rmdir()
+        elif path.is_symlink() or path.exists():
+            path.unlink()
         path.write_text(json.dumps(dict({"v": 1, "schema": "ai-comm-upgrade-prompt/1", "versions": {},
                                          "never": False}, **state)))
         os.chmod(path, mode)
@@ -363,6 +371,7 @@ class VerifyPinTests(unittest.TestCase):
         report = vp.check_project(self.project, self.offer_cache())
         offer = report["offer"]
         b = self.bindings["1.5.1"]
+        self.assertEqual(offer["pinned_commit"], self.releases["1.5.0"]["commit"])
         self.assertEqual((offer["pinned"], offer["target"], offer["target_commit"], offer["target_tag_object"],
                           offer["target_tag"]), ("1.5.0", "1.5.1", b["commit"], b["tag_object"], "v1.5.1"))
         self.assertEqual(offer["answers"], {"now": "yes", "later": "not_now"})
@@ -376,21 +385,21 @@ class VerifyPinTests(unittest.TestCase):
         cache = self.offer_cache()
         for cls in ("legacy-manual", "unsupported"):
             with self.subTest(cls=cls):
-                report = {"class": cls, "version": "1.5.0", "newer_verified": ["1.5.1"]}
+                report = dict(self.old_report(), **{"class": cls})
                 self.assertIsNone(vp.project_offer(cache, self.project, report))
-        report = {"class": "controller", "version": "1.5.0", "newer_verified": []}
+        report = dict(self.old_report(), newer_verified=[])
         self.assertIsNone(vp.project_offer(cache, self.project, report))
 
     def test_protocol_change_is_blocked(self):
         bindings = dict(self.bindings, **{"1.5.0": dict(self.bindings["1.5.0"], protocol_sha256="d" * 64)})
         cache = self.offer_cache(bindings)
-        report = {"class": "controller", "version": "1.5.0", "newer_verified": ["1.5.1"]}
+        report = self.old_report()
         offer = vp.project_offer(cache, self.project, report)
         self.assertEqual((offer["should_ask"], offer["blocked"]), (False, "protocol_migration_required"))
 
     def test_later_snoozes_and_expires_skip_and_never_suppress(self):
         cache = self.offer_cache()
-        report = {"class": "controller", "version": "1.5.0", "newer_verified": ["1.5.1"]}
+        report = self.old_report()
         self.write_prompt({"versions": {"1.5.1": {"snooze_until": 2000, "snooze_level": 1}}})
         offer = vp.project_offer(cache, self.project, report, at=1000)
         self.assertEqual((offer["should_ask"], offer["snooze_until"]), (False, 2000))
@@ -402,43 +411,91 @@ class VerifyPinTests(unittest.TestCase):
         self.write_prompt({"versions": {"1.5.0": {"skip": True}}})
         self.assertIs(vp.project_offer(cache, self.project, report, at=1000)["should_ask"], True)
 
-    def test_unsafe_or_malformed_prompt_state_blocks_the_offer(self):
+    def test_unsafe_prompt_files_block_the_offer(self):
         cache = self.offer_cache()
-        report = {"class": "controller", "version": "1.5.0", "newer_verified": ["1.5.1"]}
-        path = self.write_prompt({})
-        cases = {"group_readable": lambda: os.chmod(path, 0o640),
-                 "malformed": lambda: path.write_text("{not json"),
-                 "wrong_schema": lambda: path.write_text(json.dumps({"schema": "x", "versions": {}})),
-                 "symlink": lambda: (path.unlink(), path.symlink_to(self.base / "elsewhere.json"))}
-        (self.base / "elsewhere.json").write_text(json.dumps({"v": 1, "schema": "ai-comm-upgrade-prompt/1",
-                                                              "versions": {}, "never": False}))
-        for name, damage in cases.items():
+        report = self.old_report()
+        elsewhere = self.base / "elsewhere.json"
+        elsewhere.write_text(json.dumps({"v": 1, "schema": "ai-comm-upgrade-prompt/1", "versions": {},
+                                         "never": False}))
+        cases = {"group_readable": (lambda p: os.chmod(p, 0o640), "unsafe_runtime_mode"),
+                 "symlink": (lambda p: (p.unlink(), p.symlink_to(elsewhere)), "unsafe_runtime_path"),
+                 "directory": (lambda p: (p.unlink(), p.mkdir(mode=0o700)), "unsafe_runtime_path"),
+                 "fifo": (lambda p: (p.unlink(), os.mkfifo(p, 0o600)), "unsafe_runtime_path")}
+        for name, (damage, code) in cases.items():
             with self.subTest(case=name):
-                self.write_prompt({})
-                damage()
+                path = self.write_prompt({})
+                damage(path)
                 offer = vp.project_offer(cache, self.project, report, at=1000)
-                self.assertIs(offer["should_ask"], False)
-                self.assertIn(offer["blocked"], {"unsafe_runtime_mode", "prompt_state_invalid",
-                                                 "invalid_json", "unsafe_runtime_path"})
-                if path.is_symlink():
-                    path.unlink()
+                self.assertEqual((offer["should_ask"], offer["blocked"]), (False, code))
         self.write_prompt({})
-        os.chmod(path.parent, 0o755)
+        os.chmod(self.project / ".ai-comm-local" / "upgrade", 0o755)
         self.assertEqual(vp.project_offer(cache, self.project, report, at=1000)["blocked"],
                          "unsafe_runtime_mode")
 
+    def test_fifo_prompt_never_blocks_the_verifier_cli(self):
+        """REVIEW 459 F1: a FIFO with no writer must not hang the passive verifier."""
+        cache = self.offer_cache()
+        self.pin("1.5.0")
+        path = self.write_prompt({})
+        code, report = self.run_cli(cache.root, timeout=20)
+        self.assertEqual((code, report["status"], report["offer"]["should_ask"]), (0, "verified", True))
+        path.unlink()
+        os.mkfifo(path, 0o600)
+        code, report = self.run_cli(cache.root, timeout=20)
+        self.assertEqual((code, report["status"]), (0, "verified"))
+        self.assertEqual((report["offer"]["should_ask"], report["offer"]["blocked"]),
+                         (False, "unsafe_runtime_path"))
+
+    def test_malformed_prompt_state_blocks_and_keeps_the_pin_verified(self):
+        """REVIEW 459 F2: empty, mistyped or unknown state is invalid, never 'never asked'."""
+        cache = self.offer_cache()
+        self.pin("1.5.0")
+        base = {"v": 1, "schema": "ai-comm-upgrade-prompt/1", "versions": {}, "never": False}
+        cases = {"empty": b"", "not_json": b"{not json", "not_utf8": b"\xff",
+                 "list": b"[]", "wrong_schema": dict(base, schema="x"), "v_999": dict(base, v=999),
+                 "v_bool": dict(base, v=True), "never_string": dict(base, never="false"),
+                 "never_int": dict(base, never=0), "extra_key": dict(base, extra=1),
+                 "missing_key": {k: base[k] for k in ("v", "schema", "versions")},
+                 "versions_list": dict(base, versions=[]),
+                 "bad_version_key": dict(base, versions={"v1.5.1": {}}),
+                 "entry_not_dict": dict(base, versions={"1.5.1": []}),
+                 "snooze_string": dict(base, versions={"1.5.1": {"snooze_until": "2000"}}),
+                 "snooze_bool": dict(base, versions={"1.5.1": {"snooze_until": True}}),
+                 "snooze_negative": dict(base, versions={"1.5.1": {"snooze_until": -1}}),
+                 "snooze_float": dict(base, versions={"1.5.1": {"snooze_until": 2000.0}}),
+                 "level_string": dict(base, versions={"1.5.1": {"snooze_level": "1"}}),
+                 "skip_string": dict(base, versions={"1.5.1": {"skip": "yes"}}),
+                 "skip_int": dict(base, versions={"1.5.1": {"skip": 1}}),
+                 "shown_int": dict(base, versions={"1.5.1": {"required_shown": 1}}),
+                 "unknown_entry_key": dict(base, versions={"1.5.1": {"later": True}})}
+        path = self.write_prompt({})
+        for name, value in cases.items():
+            with self.subTest(case=name):
+                path.write_bytes(value if isinstance(value, bytes) else json.dumps(value).encode())
+                code, report = self.run_cli(cache.root)
+                self.assertEqual((code, report["status"]), (0, "verified"), report)
+                self.assertEqual((report["offer"]["should_ask"], report["offer"]["blocked"]),
+                                 (False, "prompt_state_invalid"))
+        valid = dict(base, versions={"1.5.0": {}, "1.5.1": {"snooze_until": 1, "snooze_level": 3,
+                                                           "skip": False, "required_shown": False}})
+        path.write_text(json.dumps(valid))
+        before = path.read_bytes()
+        code, report = self.run_cli(cache.root)
+        self.assertEqual((report["offer"]["should_ask"], report["offer"].get("blocked")), (True, None))
+        self.assertEqual(path.read_bytes(), before)
+
     def test_offer_reads_without_creating_anything(self):
         cache = self.offer_cache()
-        report = {"class": "controller", "version": "1.5.0", "newer_verified": ["1.5.1"]}
+        report = self.old_report()
         self.assertIs(vp.project_offer(cache, self.project, report)["should_ask"], True)
         self.assertFalse((self.project / ".ai-comm-local").exists())
 
     # -- the command
 
-    def run_cli(self, cache, *args, script=ROOT / "scripts" / "verify_pin.py"):
+    def run_cli(self, cache, *args, script=ROOT / "scripts" / "verify_pin.py", timeout=120):
         done = subprocess.run([sys.executable, "-I", str(script), "--project", str(self.project), *args]
                               + ([] if cache is None else ["--cache", str(cache)]),
-                              capture_output=True, timeout=120, check=False)
+                              capture_output=True, timeout=timeout, check=False)
         return done.returncode, json.loads(done.stdout)
 
     def test_cli_exit_codes(self):

@@ -137,8 +137,8 @@
     },
     {
       "path": "entry/ai-comm/SKILL.md",
-      "bytes": 13126,
-      "sha256": "3a8fd484b6e3d716de97bbcc40c1eae56f5992ec0b0b6443f9d882a0e5ff3aed"
+      "bytes": 13594,
+      "sha256": "f57e43bf8d4a30a1a918b019d6780b76ab36e06bd3f022a561f4dfef56e96b7c"
     },
     {
       "path": "examples/ask.json",
@@ -232,8 +232,8 @@
     },
     {
       "path": "scripts/verify_pin.py",
-      "bytes": 18856,
-      "sha256": "0154f85da41cc469335af55572b11b480f051757ef63505ea0590568afd8f543"
+      "bytes": 20886,
+      "sha256": "6e79834b0a914879ff0c52eca63a4e9d2ea07fcd587d384f61c83e622230a6d6"
     },
     {
       "path": "scripts/wake.py",
@@ -367,13 +367,13 @@
     },
     {
       "path": "tests/test_user_objects.py",
-      "bytes": 37844,
-      "sha256": "7f622cc4bb2dc9a64b1746608522f3fceb176b18b1aede1c4e07f2be5d838bcb"
+      "bytes": 38044,
+      "sha256": "b3dfbc32212337d92a128a833a6fffc63f20353d1902d54c4cbbe27ea9564aaf"
     },
     {
       "path": "tests/test_verify_pin.py",
-      "bytes": 24618,
-      "sha256": "f3d302e18df9b0785a9973aff79b2ca478b56f57b66901b7d6d2b82c2bde4c8b"
+      "bytes": 28093,
+      "sha256": "9221e51f7fd5373bf0c036c49be06797066737aced4e218de0dda9980b376dd4"
     },
     {
       "path": "tests/test_wake_channel.py",

@@ -293,15 +293,58 @@ OFFER_CLASSES = ("controller", "controller-check-workaround")
 
 
 def controller_module():
-    """This cache release's own upgrade controller (trusted code, never the pin's)."""
-    return _load("ai_comm_offer_controller", RELEASE / "upgrade_controller.py")
+    """This cache release's own upgrade controller (trusted code, never the pin's),
+    the copy the installer already loaded."""
+    return uc
+
+
+PROMPT_KEYS = {"v", "schema", "versions", "never"}
+PROMPT_ENTRY_TYPES = {"snooze_until": int, "snooze_level": int, "skip": bool, "required_shown": bool}
+MAX_PROMPT = 1 << 20
+
+
+def _read_prompt_file(path):
+    """Bytes of an existing private regular file, or None when it does not exist.
+
+    Opened without following a symlink and without blocking (a FIFO or device is
+    refused from its descriptor before any read)."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise Stop("unsafe_runtime_path") from exc
+    with os.fdopen(fd, "rb") as stream:
+        st = os.fstat(stream.fileno())
+        need(stat.S_ISREG(st.st_mode), "unsafe_runtime_path")
+        need(st.st_uid == os.getuid(), "unsafe_runtime_owner")
+        need(stat.S_IMODE(st.st_mode) & 0o077 == 0, "unsafe_runtime_mode")
+        data = stream.read(MAX_PROMPT + 1)
+    need(len(data) <= MAX_PROMPT, "runtime_file_too_large")
+    return data
+
+
+def _exact(value, kind):
+    return type(value) is kind and (kind is not int or value >= 0)
+
+
+def valid_prompt_state(state, ctl):
+    """Exactly the controller's prompt.json shape, with every consumed field typed."""
+    return (isinstance(state, dict) and set(state) == PROMPT_KEYS and _exact(state["v"], int)
+            and state["v"] == 1 and state["schema"] == ctl.PROMPT_SCHEMA and _exact(state["never"], bool)
+            and isinstance(state["versions"], dict)
+            and all(isinstance(version, str) and ctl.VERSION_RE.fullmatch(version) and isinstance(entry, dict)
+                    and set(entry) <= set(PROMPT_ENTRY_TYPES)
+                    and all(_exact(entry[k], PROMPT_ENTRY_TYPES[k]) for k in entry)
+                    for version, entry in state["versions"].items()))
 
 
 def prompt_state(project):
     """The project's recorded offer answers, read only: (state, None) or (None, code).
 
-    Uses the controller's own file rules (no symlinks, user-owned, private modes)
-    and creates, locks or repairs nothing. No upgrade directory means never asked."""
+    Follows the controller's file rules (no symlinks, user-owned, private modes),
+    never blocks, and creates, locks or repairs nothing. No upgrade directory or no
+    prompt file means never asked; an existing empty or malformed file is invalid."""
     ctl = controller_module()
     fresh = {"v": 1, "schema": ctl.PROMPT_SCHEMA, "versions": {}, "never": False}
     try:
@@ -309,17 +352,22 @@ def prompt_state(project):
         root = local / "upgrade"
         if not os.path.lexists(local) or not os.path.lexists(root):
             return fresh, None
-        ctl.need(ctl._mode_ok_ancestor(os.lstat(local)), "unsafe_runtime_path")
-        ctl.private_dir(root, create=False)
-        data = ctl.read_private(root / "prompt.json", missing=b"")
-        if not data:
+        need(ctl._mode_ok_ancestor(os.lstat(local)), "unsafe_runtime_path")
+        st = os.lstat(root)
+        need(stat.S_ISDIR(st.st_mode), "unsafe_runtime_path")
+        need(st.st_uid == os.getuid(), "unsafe_runtime_owner")
+        need(stat.S_IMODE(st.st_mode) & 0o077 == 0, "unsafe_runtime_mode")
+        data = _read_prompt_file(root / "prompt.json")
+        if data is None:
             return fresh, None
-        state = ctl.parse_json(data, "prompt_state_invalid")
-        ctl.need(isinstance(state, dict) and state.get("schema") == ctl.PROMPT_SCHEMA
-                 and isinstance(state.get("versions"), dict)
-                 and all(isinstance(v, dict) for v in state["versions"].values()), "prompt_state_invalid")
+        try:
+            state = json.loads(data.decode("utf-8"))
+        except (UnicodeError, ValueError):
+            return None, "prompt_state_invalid"
+        if not valid_prompt_state(state, ctl):
+            return None, "prompt_state_invalid"
         return state, None
-    except ctl.Stop as exc:
+    except Stop as exc:
         return None, exc.code
     except OSError:
         return None, "unsafe_runtime_path"
@@ -337,7 +385,7 @@ def project_offer(cache, project, report, at=None):
     bound, current = bindings.get(target), bindings.get(report["version"]) or {}
     record = next((r for r in (cache.index() or {}).get("releases", [])
                    if isinstance(r, dict) and r.get("package_version") == target), {})
-    offer = {"pinned": report["version"], "target": target, "target_tag": bound["tag"],
+    offer = {"pinned": report["version"], "pinned_commit": report["commit"], "target": target, "target_tag": bound["tag"],
              "target_commit": bound["commit"], "target_tag_object": bound["tag_object"],
              "advisory": record.get("advisory"), "protocol_change":
              bound.get("protocol_sha256") != current.get("protocol_sha256"),

@@ -120,13 +120,18 @@ with every target value taken from the cache's own bindings. It applies even whe
 pin's own `check` has not seen that release yet. When `offer.should_ask` is true, the
 notifier first runs `python3 -I .tools/ai-comm/ai_comm.py upgrade --project <PROJECT_ROOT> status`;
 if a transaction is open and not `completed` or `rolled_back`, it continues or reports
-that transaction instead of asking. Otherwise it asks the owner once in this session,
-naming `offer.pinned` and `offer.target`:
+that transaction instead of asking, and a failed `status` is reported, never read as
+"no transaction". Otherwise it asks the owner once in this session. The question is
+the pin skill's **One scoped question** with every disclosure it requires (project and
+channel, `offer.pinned` and `offer.pinned_commit`, `offer.target` and `offer.target_commit`, the
+release source URL, the advisory, the conditional scope of fetch, verification and
+re-pin, and the credential-helper disclosure when it applies), presented as two answers:
 
 - **Upgrade now (in place)**: record the owner's answer with the pin's controller,
   `upgrade --project <PROJECT_ROOT> record-answer --answer yes --target <target>
   --target-commit <target_commit> --target-tag-object <target_tag_object> --source <ORIGIN>
-  --evidence "<the owner's words>"`, where `<ORIGIN>` is `pin.origin` from `upgrade status`.
+  --evidence "<DESCRIPTION>"`, where `<ORIGIN>` is `pin.origin` from `upgrade status` and
+  `<DESCRIPTION>` describes the owner's direct answer without quoting it.
   This one answer covers `fetch`, `prepare` and `apply` of exactly that target. Then follow
   the pin's own skill for completion (liveness, guidance, `finalize`), which still needs
   the reviewers' decisions. Host hook or listener changes outside the transaction are

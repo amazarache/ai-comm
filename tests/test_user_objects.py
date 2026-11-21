@@ -664,7 +664,9 @@ class EntrySkillTests(unittest.TestCase):
         for phrase in ("**The trusted offer.**", "`offer.should_ask`", "**Upgrade now (in place)**", "**Later**",
                        "--answer yes", "--answer not_now", "This one answer covers `fetch`, `prepare` and `apply`",
                        "never included", "`offer.blocked`", "`protocol_migration_required`",
-                       "`completed` or `rolled_back`"):
+                       "`completed` or `rolled_back`", "**One scoped question**",
+                       "describes the owner's direct answer without quoting it",
+                       "never read as\n\"no transaction\"", "credential-helper disclosure"):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, self.text)
         parser = subprocess.run([sys.executable, "-I", str(ROOT / "upgrade_controller.py"), "--project", "/",
