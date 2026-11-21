@@ -335,6 +335,104 @@ class VerifyPinTests(unittest.TestCase):
         cache.write_bindings({"v": 1, "bindings": {"1.5.1": bad}})
         self.assertEqual(vp.newer_verified(cache, "1.5.0"), [])
 
+    # -- the project offer (change 8)
+
+    def offer_cache(self, bindings=None):
+        cache = iu.Cache(self.base / "cache").open(create=True)
+        records = [dict({k: r[k] for k in ("package_version", "commit", "tag", "manifest_sha256",
+                                            "protocol_sha256")}, advisory="optional")
+                   for r in self.releases.values()]
+        cache.write_index(records, 1)
+        cache.write_bindings({"v": 1, "bindings": self.bindings if bindings is None else bindings})
+        return cache
+
+    def write_prompt(self, state, mode=0o600):
+        root = self.project / ".ai-comm-local" / "upgrade"
+        root.mkdir(parents=True, mode=0o700, exist_ok=True)
+        os.chmod(root, 0o700)
+        path = root / "prompt.json"
+        path.write_text(json.dumps(dict({"v": 1, "schema": "ai-comm-upgrade-prompt/1", "versions": {},
+                                         "never": False}, **state)))
+        os.chmod(path, mode)
+        return path
+
+    def test_offer_names_the_newest_bound_release_from_cache_values_only(self):
+        pin = self.pin("1.5.0")
+        # The pin's own refs name another commit for the target; the offer must ignore them.
+        tip.git(pin, "tag", "-f", "-a", "-m", "forged", "v1.5.1", "v1.5.0")
+        report = vp.check_project(self.project, self.offer_cache())
+        offer = report["offer"]
+        b = self.bindings["1.5.1"]
+        self.assertEqual((offer["pinned"], offer["target"], offer["target_commit"], offer["target_tag_object"],
+                          offer["target_tag"]), ("1.5.0", "1.5.1", b["commit"], b["tag_object"], "v1.5.1"))
+        self.assertEqual(offer["answers"], {"now": "yes", "later": "not_now"})
+        self.assertIs(offer["should_ask"], True)
+        self.assertFalse(offer["protocol_change"])
+        self.assertNotIn("blocked", offer)
+
+    def test_no_offer_when_current_or_not_a_controller_class(self):
+        self.pin("1.5.1")
+        self.assertNotIn("offer", vp.check_project(self.project, self.offer_cache()))
+        cache = self.offer_cache()
+        for cls in ("legacy-manual", "unsupported"):
+            with self.subTest(cls=cls):
+                report = {"class": cls, "version": "1.5.0", "newer_verified": ["1.5.1"]}
+                self.assertIsNone(vp.project_offer(cache, self.project, report))
+        report = {"class": "controller", "version": "1.5.0", "newer_verified": []}
+        self.assertIsNone(vp.project_offer(cache, self.project, report))
+
+    def test_protocol_change_is_blocked(self):
+        bindings = dict(self.bindings, **{"1.5.0": dict(self.bindings["1.5.0"], protocol_sha256="d" * 64)})
+        cache = self.offer_cache(bindings)
+        report = {"class": "controller", "version": "1.5.0", "newer_verified": ["1.5.1"]}
+        offer = vp.project_offer(cache, self.project, report)
+        self.assertEqual((offer["should_ask"], offer["blocked"]), (False, "protocol_migration_required"))
+
+    def test_later_snoozes_and_expires_skip_and_never_suppress(self):
+        cache = self.offer_cache()
+        report = {"class": "controller", "version": "1.5.0", "newer_verified": ["1.5.1"]}
+        self.write_prompt({"versions": {"1.5.1": {"snooze_until": 2000, "snooze_level": 1}}})
+        offer = vp.project_offer(cache, self.project, report, at=1000)
+        self.assertEqual((offer["should_ask"], offer["snooze_until"]), (False, 2000))
+        self.assertIs(vp.project_offer(cache, self.project, report, at=2000)["should_ask"], True)
+        self.write_prompt({"versions": {"1.5.1": {"skip": True}}})
+        self.assertIs(vp.project_offer(cache, self.project, report, at=1000)["should_ask"], False)
+        self.write_prompt({"never": True})
+        self.assertIs(vp.project_offer(cache, self.project, report, at=1000)["should_ask"], False)
+        self.write_prompt({"versions": {"1.5.0": {"skip": True}}})
+        self.assertIs(vp.project_offer(cache, self.project, report, at=1000)["should_ask"], True)
+
+    def test_unsafe_or_malformed_prompt_state_blocks_the_offer(self):
+        cache = self.offer_cache()
+        report = {"class": "controller", "version": "1.5.0", "newer_verified": ["1.5.1"]}
+        path = self.write_prompt({})
+        cases = {"group_readable": lambda: os.chmod(path, 0o640),
+                 "malformed": lambda: path.write_text("{not json"),
+                 "wrong_schema": lambda: path.write_text(json.dumps({"schema": "x", "versions": {}})),
+                 "symlink": lambda: (path.unlink(), path.symlink_to(self.base / "elsewhere.json"))}
+        (self.base / "elsewhere.json").write_text(json.dumps({"v": 1, "schema": "ai-comm-upgrade-prompt/1",
+                                                              "versions": {}, "never": False}))
+        for name, damage in cases.items():
+            with self.subTest(case=name):
+                self.write_prompt({})
+                damage()
+                offer = vp.project_offer(cache, self.project, report, at=1000)
+                self.assertIs(offer["should_ask"], False)
+                self.assertIn(offer["blocked"], {"unsafe_runtime_mode", "prompt_state_invalid",
+                                                 "invalid_json", "unsafe_runtime_path"})
+                if path.is_symlink():
+                    path.unlink()
+        self.write_prompt({})
+        os.chmod(path.parent, 0o755)
+        self.assertEqual(vp.project_offer(cache, self.project, report, at=1000)["blocked"],
+                         "unsafe_runtime_mode")
+
+    def test_offer_reads_without_creating_anything(self):
+        cache = self.offer_cache()
+        report = {"class": "controller", "version": "1.5.0", "newer_verified": ["1.5.1"]}
+        self.assertIs(vp.project_offer(cache, self.project, report)["should_ask"], True)
+        self.assertFalse((self.project / ".ai-comm-local").exists())
+
     # -- the command
 
     def run_cli(self, cache, *args, script=ROOT / "scripts" / "verify_pin.py"):

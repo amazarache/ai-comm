@@ -658,5 +658,27 @@ class EntrySkillTests(unittest.TestCase):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, self.text)
 
+    def test_trusted_offer_route_is_stated_and_matches_the_controller(self):
+        """Change 8: the offer is asked from the verifier's cache values, as now or later."""
+        import re
+        for phrase in ("**The trusted offer.**", "`offer.should_ask`", "**Upgrade now (in place)**", "**Later**",
+                       "--answer yes", "--answer not_now", "This one answer covers `fetch`, `prepare` and `apply`",
+                       "never included", "`offer.blocked`", "`protocol_migration_required`",
+                       "`completed` or `rolled_back`"):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, self.text)
+        parser = subprocess.run([sys.executable, "-I", str(ROOT / "upgrade_controller.py"), "--project", "/",
+                                 "record-answer", "--help"], capture_output=True, timeout=60, check=False)
+        for flag in set(re.findall(r"record-answer --answer [a-z_]+((?:\s+--[a-z-]+[^\n`]*)*)", self.text)):
+            for name in re.findall(r"--[a-z-]+", flag):
+                with self.subTest(flag=name):
+                    self.assertIn(name, parser.stdout.decode())
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import verify_pin as vp
+        source = Path(vp.__file__).read_text()
+        for key in re.findall(r"`offer\.([a-z_]+)`", self.text):
+            with self.subTest(key=key):
+                self.assertIn(f'"{key}"', source)
+
 if __name__ == "__main__":
     unittest.main()

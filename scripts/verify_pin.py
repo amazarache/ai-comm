@@ -289,6 +289,76 @@ def newer_verified(cache, version):
     return sorted(out, key=iu.version_key)
 
 
+OFFER_CLASSES = ("controller", "controller-check-workaround")
+
+
+def controller_module():
+    """This cache release's own upgrade controller (trusted code, never the pin's)."""
+    return _load("ai_comm_offer_controller", RELEASE / "upgrade_controller.py")
+
+
+def prompt_state(project):
+    """The project's recorded offer answers, read only: (state, None) or (None, code).
+
+    Uses the controller's own file rules (no symlinks, user-owned, private modes)
+    and creates, locks or repairs nothing. No upgrade directory means never asked."""
+    ctl = controller_module()
+    fresh = {"v": 1, "schema": ctl.PROMPT_SCHEMA, "versions": {}, "never": False}
+    try:
+        local = Path(project) / ".ai-comm-local"
+        root = local / "upgrade"
+        if not os.path.lexists(local) or not os.path.lexists(root):
+            return fresh, None
+        ctl.need(ctl._mode_ok_ancestor(os.lstat(local)), "unsafe_runtime_path")
+        ctl.private_dir(root, create=False)
+        data = ctl.read_private(root / "prompt.json", missing=b"")
+        if not data:
+            return fresh, None
+        state = ctl.parse_json(data, "prompt_state_invalid")
+        ctl.need(isinstance(state, dict) and state.get("schema") == ctl.PROMPT_SCHEMA
+                 and isinstance(state.get("versions"), dict)
+                 and all(isinstance(v, dict) for v in state["versions"].values()), "prompt_state_invalid")
+        return state, None
+    except ctl.Stop as exc:
+        return None, exc.code
+    except OSError:
+        return None, "unsafe_runtime_path"
+
+
+def project_offer(cache, project, report, at=None):
+    """The owner offer for a verified pin older than a trusted release, or None.
+
+    Every target value comes from this cache's index and bindings, never from the
+    pin's refs. "now" maps to the controller answer `yes`, "later" to `not_now`."""
+    if report.get("class") not in OFFER_CLASSES or not report.get("newer_verified"):
+        return None
+    target = report["newer_verified"][-1]
+    bindings = cache.bindings()["bindings"]
+    bound, current = bindings.get(target), bindings.get(report["version"]) or {}
+    record = next((r for r in (cache.index() or {}).get("releases", [])
+                   if isinstance(r, dict) and r.get("package_version") == target), {})
+    offer = {"pinned": report["version"], "target": target, "target_tag": bound["tag"],
+             "target_commit": bound["commit"], "target_tag_object": bound["tag_object"],
+             "advisory": record.get("advisory"), "protocol_change":
+             bound.get("protocol_sha256") != current.get("protocol_sha256"),
+             "answers": {"now": "yes", "later": "not_now"}, "should_ask": False}
+    if offer["protocol_change"]:
+        offer["blocked"] = "protocol_migration_required"
+        return offer
+    state, blocked = prompt_state(project)
+    if blocked:
+        offer["blocked"] = blocked
+        return offer
+    ctl = controller_module()
+    # The cache index keeps no `affects` range, so a required advisory's applicability is
+    # unknown here: it never overrides the owner's skip or never (the pin's check still can).
+    offer["should_ask"] = bool(ctl.should_ask(state, target, "none", ctl.now() if at is None else at))
+    until = state["versions"].get(target, {}).get("snooze_until")
+    if not offer["should_ask"] and isinstance(until, int):
+        offer["snooze_until"] = until
+    return offer
+
+
 def legacy_status(pin, version):
     """For a verified 1.4.x pin (no `upgrade` command): newer versions its own
     fetched release index lists, read with inert plumbing. Untrusted information,
@@ -330,6 +400,9 @@ def check_project(project, cache):
     report = verify(project, cache.bindings()["bindings"])
     if report["status"] == "verified":
         report["newer_verified"] = newer_verified(cache, report["version"])
+        offer = project_offer(cache, project, report)
+        if offer is not None:
+            report["offer"] = offer
         if report["class"] == "legacy-manual":
             report["legacy"] = legacy_status(Path(report["pin"]), report["version"])
     index = cache.index()

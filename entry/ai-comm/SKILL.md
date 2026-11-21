@@ -114,6 +114,32 @@ offer, and only with the pin's own controller. Use the path for the `class` repo
 A check never changes a pin, and a missing, stale or failed check is never reported
 as "up to date".
 
+**The trusted offer.** For a `controller` or `controller-check-workaround` pin, the
+verifier's `offer` names the newest release this cache has verified for an older pin,
+with every target value taken from the cache's own bindings. It applies even when the
+pin's own `check` has not seen that release yet. When `offer.should_ask` is true, the
+notifier first runs `python3 -I .tools/ai-comm/ai_comm.py upgrade --project <PROJECT_ROOT> status`;
+if a transaction is open and not `completed` or `rolled_back`, it continues or reports
+that transaction instead of asking. Otherwise it asks the owner once in this session,
+naming `offer.pinned` and `offer.target`:
+
+- **Upgrade now (in place)**: record the owner's answer with the pin's controller,
+  `upgrade --project <PROJECT_ROOT> record-answer --answer yes --target <target>
+  --target-commit <target_commit> --target-tag-object <target_tag_object> --source <ORIGIN>
+  --evidence "<the owner's words>"`, where `<ORIGIN>` is `pin.origin` from `upgrade status`.
+  This one answer covers `fetch`, `prepare` and `apply` of exactly that target. Then follow
+  the pin's own skill for completion (liveness, guidance, `finalize`), which still needs
+  the reviewers' decisions. Host hook or listener changes outside the transaction are
+  never included. Report any stop as it is.
+- **Later**: `upgrade --project <PROJECT_ROOT> record-answer --answer not_now --target <target>`;
+  the offer returns after 24 hours, then 48 hours, then 7 days.
+
+`skip` (this version) and `never` are recorded only when the owner says so. With
+`offer.blocked`, do not ask: report the code (`protocol_migration_required` needs a
+manual, reviewed migration; a prompt-state code means the project's upgrade files need
+the owner's attention). The offer depends on the cache's release index; refreshing that
+index is the cache's own offer in section 4, never part of this one.
+
 **Pins without a recorded origin.** If the pin's own `upgrade fetch` stops with
 `origin_missing`, the pin was published by a project installer or guided setup before
 1.11.1 and records no release origin. Do that one fetch with this cache release instead,
