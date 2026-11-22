@@ -405,7 +405,11 @@ every entry's working bytes (opened component by component without following
 links) must match its size, digest and executable bit. The class names the
 upgrade path: `controller` (1.5.2 and later), `controller-check-workaround`
 (1.5.0, 1.5.1), `legacy-manual` (1.4.0 to 1.4.2), `unsupported`. Untracked files
-in the pin are outside the check.
+in the pin are outside the check. For the two controller classes with a newer
+verified release, `offer` (1.12.1) names the highest one with commit and tag
+object from the cache binding and `should_ask` from the cached controller's
+snooze rule over the project's `prompt.json`, read without following links or
+blocking; an unsafe or malformed file, or a protocol change, sets `blocked`.
 
 `scripts/declare_project.py` writes `.ai-comm-local/upgrade/project.json` for a
 verified pin: `init` writes the unintegrated declaration and never overwrites;

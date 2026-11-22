@@ -51,7 +51,7 @@ On macOS use `shasum -a 256 -c -` instead of `sha256sum -c -`. To read the boots
 
 | Release | File | SHA-256 |
 | --- | --- | --- |
-| `v1.12.0` | `install-ai-comm.sh` | `53fc6c8d1dc222f76f922a187e6ae43e844e3b53f537ec4cf703c42f307b4554` |
+| `v1.12.1` | `install-ai-comm.sh` | `e4ee9b307d43042c97932773d779ea5acf7654116adda76c07ea2a20084d8a97` |
 
 The table is generated before each release is tagged (`scripts/render_bootstrap.py`), and the release workflow
 refuses to publish a bootstrap whose digest differs from it.
@@ -232,7 +232,8 @@ directory registered earlier, already declares `name: ai-comm`, or `DIR/ai-comm`
 conflict and changes nothing. ai-comm cannot know which other directories a host scans or how it ranks duplicates; if
 you register in more than one directory, confirm in each host that exactly one `ai-comm` skill appears.
 
-The entry skill verifies the project's pin first and then hands over to the pin's own instructions.
+The entry skill verifies the project's pin first and then hands over to the pin's own instructions. When the cache knows
+a newer verified release, the project's notifier asks once: upgrade now (in place) or later.
 
 ## The `ai-comm` command (optional)
 

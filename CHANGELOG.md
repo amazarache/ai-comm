@@ -1,5 +1,24 @@
 # Changes
 
+## 1.12.1
+
+- The entry skill offers a project's pin upgrade as soon as the cache knows a
+  newer verified release, without waiting for the pin's own index. For a
+  verified pin of class `controller` or `controller-check-workaround`,
+  `verify_pin.py` adds `offer`: the target, its commit and tag object from the
+  cache's trusted binding (never from the pin), the advisory, whether the
+  protocol changes, and `should_ask` from the controller's own snooze rule over
+  `.ai-comm-local/upgrade/prompt.json`. The prompt file is read without
+  following links or blocking; an unsafe, empty or malformed file blocks the
+  offer (`prompt_state_invalid`) and is never changed. A protocol change blocks
+  it (`protocol_migration_required`).
+- The notifier asks the owner once: upgrade now (in place), recorded as the
+  controller's `yes` for that exact target and covering fetch, prepare and
+  apply, or later (`not_now`, the existing snooze). Guidance, finalize and host
+  hook changes keep their own steps.
+- No protocol, CLI or controller change; message, receipt and join formats are
+  unchanged.
+
 ## 1.12.0
 
 - New read-only `pending` and `resume`: outstanding work projected from the
