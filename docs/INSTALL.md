@@ -51,7 +51,7 @@ On macOS use `shasum -a 256 -c -` instead of `sha256sum -c -`. To read the boots
 
 | Release | File | SHA-256 |
 | --- | --- | --- |
-| `v1.12.1` | `install-ai-comm.sh` | `e4ee9b307d43042c97932773d779ea5acf7654116adda76c07ea2a20084d8a97` |
+| `v1.12.2` | `install-ai-comm.sh` | `f84d3330e658954da9d4e5a7ab274ba0a4d49932c8190362105660b99c4fca11` |
 
 The table is generated before each release is tagged (`scripts/render_bootstrap.py`), and the release workflow
 refuses to publish a bootstrap whose digest differs from it.

@@ -243,6 +243,9 @@ arguments. Commands, all JSON with non-zero exit on any stop:
   that name the old pin, plus the transaction and hash marker lines (not an
   applicable diff; it edits no guidance).
 - `apply`, `continue`, `rollback`, `recover`, `report`, `finalize`, `status`.
+  A listener stop names its cause (1.12.2): `integration_has_unread` before that
+  listener is asked to pause, and `what` on a failed resume, `finalize` or
+  `attest`, with a start-and-retry `next` only for an idle listener.
 
 The pin location is fixed at the project's `.tools/ai-comm`; consent and each
 transaction bind the canonical project, pin and channel paths and the channel

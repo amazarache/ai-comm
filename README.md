@@ -330,6 +330,7 @@ changing the platform label alone cannot reactivate an old reference.
 | `1.11.1` | `3.0` (unchanged) | Existing protocol-3 channels; installer-made pins record their release origin so the guided upgrade can fetch, and `install.sh --user upgrade-fetch` serves pins installed before 1.11.1. |
 | `1.12.0` | `3.0` (unchanged) | Existing protocol-3 channels; adds the read-only `pending`, `resume`, `watch` and `status` views and `status-record` for wake and host turn-hook observations. |
 | `1.12.1` | `3.0` (unchanged) | Existing protocol-3 channels; the entry skill offers "upgrade now (in place)" or "later" from the cache's verified releases. |
+| `1.12.2` | `3.0` (unchanged) | Existing protocol-3 channels; guided upgrade listener stops name their cause and the retry step, and the entry skill re-resolves the cache release per owner request. |
 
 Package and protocol versions are related but distinct. A protocol MAJOR (for
 example 3.0 to 4.0) always bumps the package MAJOR. A protocol MINOR (3.0 to

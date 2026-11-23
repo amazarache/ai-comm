@@ -1,5 +1,26 @@
 # Changes
 
+## 1.12.2
+
+- Guided upgrade stops caused by a listener now say what to do. Before asking
+  a listener to pause, `apply` probes it; with unread messages (its owner's own
+  sends included) it stops with `integration_has_unread` and a `next` hint
+  (`inbox`, then `ack`, then `apply` again), before that listener is asked to
+  pause. A failed `resume` (in `apply`, `continue`, `rollback` or a peer's
+  `report`), `finalize` and `attest` add `what`: `binding_mismatch`,
+  `source_mismatch` or `integration_paused` first, `integration_not_running`
+  only for a merely idle listener, which alone gets a start-and-retry `next`.
+  Resume is checked against the package that plan resumes on (the target
+  forward, the original on rollback). A failed hook may report the adapter's own
+  `hook_error`, accepted only as a short well-formed code; malformed or deeply
+  nested output keeps the plain `hook_failed`. Existing stop codes are unchanged.
+- The entry skill resolves the cache release again for every owner request and
+  after this session activates a cache release, so a long-running session no
+  longer keeps a release the cache has moved past. One release is still used
+  within a request, and a started upgrade keeps its own frozen controller.
+- No protocol, CLI or adapter change; message, receipt and join formats are
+  unchanged.
+
 ## 1.12.1
 
 - The entry skill offers a project's pin upgrade as soon as the cache knows a
