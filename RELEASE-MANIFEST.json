@@ -242,8 +242,8 @@
     },
     {
       "path": "skills/ai-comm/SKILL.md",
-      "bytes": 24660,
-      "sha256": "29a36d3f0cb08a586de17b10fc01c64eb9b338aa81ff4d216c770531da48f7e8"
+      "bytes": 24742,
+      "sha256": "674b77532088950d9624b42edba788f40b49efb77d7f4ff53a38a60d214f1805"
     },
     {
       "path": "tests/test_bootstrap.py",
@@ -342,8 +342,8 @@
     },
     {
       "path": "tests/test_upgrade_controller.py",
-      "bytes": 66897,
-      "sha256": "e53469ae88fa12c800e8c8e920d42e6b8610cbea279ea56e952a12caa0813300"
+      "bytes": 70664,
+      "sha256": "9e027e0c77b4dd71153d97a5005120b234e494ca7d82d525ef1d2c24447ec542"
     },
     {
       "path": "tests/test_upgrade_fetch.py",
@@ -392,8 +392,8 @@
     },
     {
       "path": "upgrade_controller.py",
-      "bytes": 79628,
-      "sha256": "971608ecfd666b09286a7fe94c9964c816462fe76ceedb506f843c2d677e0827"
+      "bytes": 80618,
+      "sha256": "3392b9b5ced93773875ac74018b8c3ee576127948c5cc24d2fa8336f667a19f1"
     }
   ],
   "format": "ai-comm-review-manifest/1",

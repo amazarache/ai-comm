@@ -409,9 +409,10 @@ transaction and in its target state. After any interruption run `upgrade recover
 it can actually observe for each integration and never claims a peer listener is
 paused without that peer's probe.
 
-**Listener stops.** `integration_has_unread` comes before anything changes: the
-listener's owner still has unread messages, its own sends included. Run `inbox`,
-then `ack` through the cursor it returns, then `apply` again. A
+**Listener stops.** `integration_has_unread` stops before that listener is asked
+to pause (earlier steps, such as another listener's pause, may already have
+completed): its owner still has unread messages, its own sends included. Run
+`inbox`, then `ack` through the cursor it returns, then `apply` again. A
 `postcondition_failed` with `what: integration_not_running` means the listener is
 only idle: start it and run the command its `next` names again. Any other `what`
 (`binding_mismatch`, `source_mismatch`, `integration_paused`) is not fixed by a

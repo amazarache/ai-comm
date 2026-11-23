@@ -67,7 +67,10 @@ if fail == name + ":" + cmd:
     sys.stdout.write(os.environ.get("UC_FAIL_OUTPUT", ""))
     sys.exit(3)
 if cmd == "pause": st.update(paused=True, running=False)
-elif cmd == "resume": st.update(paused=False, running=os.environ.get("UC_RESUME_IDLE") != name)
+elif cmd == "resume":
+    st.update(paused=False, running=os.environ.get("UC_RESUME_IDLE") != name)
+    if os.environ.get("UC_RESUME_BOUND") == name: st["bound"] = "0" * 64
+    if os.environ.get("UC_RESUME_SOURCE") == name: open(src, "w").write("# not a staged source\n")
 elif cmd == "rebind": st["bound"] = sha(cli)
 elif cmd in ("install_source", "restore_source"):
     which = sys.argv[3]
@@ -193,7 +196,7 @@ class ControllerTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.addCleanup(os.environ.pop, "UC_FAIL_STEP", None)
         self.addCleanup(os.environ.pop, "UC_ADVISORY", None)
-        for name in ("UC_FAIL_OUTPUT", "UC_PENDING", "UC_RESUME_IDLE"):
+        for name in ("UC_FAIL_OUTPUT", "UC_PENDING", "UC_RESUME_IDLE", "UC_RESUME_BOUND", "UC_RESUME_SOURCE"):
             self.addCleanup(os.environ.pop, name, None)
         self.addCleanup(os.environ.pop, "UC_WRITE_THEN_FAIL", None)
 
@@ -903,6 +906,63 @@ class ControllerTests(unittest.TestCase):
                 self.assertNotIn("next", res, "only an idle listener gets the start-and-retry hint")
                 path.write_text(saved)
         self.assertEqual(self.run_uc(*args)[1]["status"], "completed")
+
+    def test_a_deeply_nested_failed_hook_output_keeps_the_coded_stop(self):
+        consent, out = self.prepared()
+        os.environ["UC_FAIL_STEP"] = "own:pause"
+        os.environ["UC_FAIL_OUTPUT"] = "[" * 16000 + "]" * 16000
+        self.assertLess(len(os.environ["UC_FAIL_OUTPUT"]), uc.MAX_HOOK_OUTPUT)
+        code, res = self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")
+        self.assertEqual((res["code"], res.get("exit"), res.get("hook_error")), ("hook_failed", 3, None), res)
+
+    def test_resume_reports_a_wrong_binding_or_source_before_an_idle_listener(self):
+        consent, out = self.prepared()
+        os.environ["UC_RESUME_IDLE"] = "own"
+        for env, what in (("UC_RESUME_BOUND", "binding_mismatch"), ("UC_RESUME_SOURCE", "source_mismatch")):
+            with self.subTest(what=what):
+                os.environ[env] = "own"
+                code, res = self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")
+                self.assertEqual((res["code"], res.get("op"), res.get("what")),
+                                 ("postcondition_failed", "resume", what), res)
+                self.assertNotIn("next", res)
+                os.environ.pop(env)
+                subprocess.run([sys.executable, "listener.py", "own", "rebind"], cwd=self.fx.project, check=True,
+                               capture_output=True)
+
+    def test_rollback_resume_checks_the_old_package_and_source(self):
+        consent, out = self.prepared()
+        os.environ["UC_FAIL_STEP"] = "own:rebind"
+        self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")
+        os.environ.pop("UC_FAIL_STEP")
+        os.environ["UC_RESUME_IDLE"] = "own"
+        code, res = self.run_uc("rollback", "--as", "agent-a", "--session", "s-agent-a")
+        self.assertEqual((res["code"], res.get("op"), res.get("what")),
+                         ("postcondition_failed", "resume", "integration_not_running"), res)
+        self.assertIn("start", res.get("next", ""))
+        os.environ["UC_RESUME_BOUND"] = "own"
+        code, res = self.run_uc("rollback", "--as", "agent-a", "--session", "s-agent-a")
+        self.assertEqual((res["code"], res.get("what")), ("postcondition_failed", "binding_mismatch"), res)
+        for name in ("UC_RESUME_IDLE", "UC_RESUME_BOUND"):
+            os.environ.pop(name)
+        subprocess.run([sys.executable, "listener.py", "own", "rebind"], cwd=self.fx.project, check=True,
+                       capture_output=True)
+        code, res = self.run_uc("rollback", "--as", "agent-a", "--session", "s-agent-a")
+        self.assertEqual(res["status"], "rolled_back", res)
+
+    def test_a_peer_reported_resume_names_an_idle_listener(self):
+        consent, out = self.prepared([self.fx.integration("peer", "agent-b")])
+        res = self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")[1]
+        os.environ["UC_RESUME_IDLE"] = "peer"
+        rep = None
+        while res.get("status") == "awaiting_peer":
+            code, rep = self.run_uc("report", "--integration", "peer", "--phase", res["phase"],
+                                    "--nonce", res["nonce"], "--as", "agent-b", "--session", "s-agent-b")
+            if rep.get("status") == "stopped":
+                break
+            res = self.run_uc("continue", "--as", "agent-a", "--session", "s-agent-a")[1]
+        self.assertEqual((rep["code"], rep.get("op"), rep.get("what")),
+                         ("postcondition_failed", "resume", "integration_not_running"), rep)
+        self.assertIn("report", rep.get("next", ""))
 
     def test_r6_peer_attestation_required_before_completion(self):
         consent, out = self.prepared([self.fx.integration("peer", "agent-b")])

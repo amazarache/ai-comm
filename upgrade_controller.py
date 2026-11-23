@@ -54,6 +54,7 @@ MESSAGE_ID = re.compile(r"[0-9]{8}-[a-z][a-z0-9_-]{0,31}\Z")
 HOOK_ERROR = re.compile(r"[a-z][a-z0-9_]{0,63}\Z")
 UNREAD_NEXT = "the integration's owner runs inbox, then ack through the returned cursor, then apply again"
 IDLE_NEXT = "the integration's owner starts its listener, then runs {} again"
+ADVANCE_COMMAND = "the upgrade command that stopped (apply, continue or rollback)"
 ANSWERS = ("yes", "fetch_only", "not_now", "skip", "never")
 PHASES = ("pause", "install_source", "rebind", "check", "resume", "restore_source")
 REPORT_PHASES = PHASES + ("attest",)
@@ -311,7 +312,7 @@ def hook_error(stdout):
     """A failed hook's own error code, only if it is a short well-formed code; never raw output."""
     try:
         value = json.loads(stdout.decode("utf-8"))
-    except (UnicodeDecodeError, ValueError):
+    except (UnicodeDecodeError, ValueError, RecursionError):
         return None
     code = value.get("error") if isinstance(value, dict) else None
     return code if isinstance(code, str) and HOOK_ERROR.match(code) else None
@@ -1240,8 +1241,9 @@ def advance(txn, applier):
         txn.journal.append("outcome", {"index": index, "ok": ok, "observed": observed})
         if not ok:
             txn.journal.append("state", {"state": "stopped:postcondition_failed"})
-            problem = listener_problem(observed) if action["op"] == "resume" and observed else None
-            raise Stop("postcondition_failed", index=index, op=action["op"], **problem_details(problem, "apply"))
+            problem = resume_problem(txn, plan, action, observed) if action["op"] == "resume" else None
+            raise Stop("postcondition_failed", index=index, op=action["op"],
+                       **problem_details(problem, ADVANCE_COMMAND))
         if action["op"] == "checkout":
             txn.journal.append("state", {"state": "package_switched"})
     final = "integrated_pending_liveness" if plan["data"]["direction"] == "forward" else "rolled_back"
@@ -1430,7 +1432,8 @@ def cmd_report(project, args):
             txn.journal.append("outcome", {"index": index, "ok": ok, "nonce": args.nonce,
                                            "by": args.as_handle, "session": args.session,
                                            "observed": observed})
-            need(ok, "postcondition_failed", index=index, op=action["op"])
+            problem = resume_problem(txn, plan, action, observed) if not ok and action["op"] == "resume" else None
+            need(ok, "postcondition_failed", index=index, op=action["op"], **problem_details(problem, "report"))
             return {"status": "reported", "txn": txn.id, "integration": args.integration,
                     "phase": args.phase, "observed": observed}
         raise Stop("no_pending_phase")
@@ -1484,6 +1487,17 @@ def problem_details(problem, command):
     if problem == "integration_not_running":
         details["next"] = IDLE_NEXT.format(command)
     return details
+
+
+def resume_problem(txn, plan, action, observed):
+    """Why a resume did not leave the listener live on the package this plan resumes it on:
+    the target for a forward plan, the original package for a rollback. Identities the
+    probe does not report are not compared (resume itself never required them)."""
+    side = txn.frozen["to" if plan["data"]["direction"] == "forward" else "from"]
+    expected_source = txn.integration(action["integration"])["sources"].get(side["commit"])
+    return listener_problem(observed,
+                            side["cli_sha256"] if "bound_cli_sha256" in observed else None,
+                            expected_source if "source_sha256" in observed else None)
 
 
 def integration_final_problem(txn, item_id, observed):
