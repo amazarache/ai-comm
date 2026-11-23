@@ -64,9 +64,10 @@ def sha(p): return hashlib.sha256(open(p, "rb").read()).hexdigest()
 st = json.load(open(state_path)) if os.path.exists(state_path) else {"paused": False, "running": True, "bound": sha(cli)}
 fail = os.environ.get("UC_FAIL_STEP")
 if fail == name + ":" + cmd:
+    sys.stdout.write(os.environ.get("UC_FAIL_OUTPUT", ""))
     sys.exit(3)
 if cmd == "pause": st.update(paused=True, running=False)
-elif cmd == "resume": st.update(paused=False, running=True)
+elif cmd == "resume": st.update(paused=False, running=os.environ.get("UC_RESUME_IDLE") != name)
 elif cmd == "rebind": st["bound"] = sha(cli)
 elif cmd in ("install_source", "restore_source"):
     which = sys.argv[3]
@@ -77,7 +78,7 @@ elif cmd == "check": pass
 elif cmd == "big": print("x" * 70000); sys.exit(0)
 json.dump(st, open(state_path, "w"))
 if cmd == "probe":
-    print(json.dumps({"paused": st["paused"], "running": st["running"], "pending": False,
+    print(json.dumps({"paused": st["paused"], "running": st["running"], "pending": os.environ.get("UC_PENDING") == name,
                       "source_sha256": sha(src), "bound_cli_sha256": st["bound"]}))
 else:
     print("{}")
@@ -192,6 +193,8 @@ class ControllerTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.addCleanup(os.environ.pop, "UC_FAIL_STEP", None)
         self.addCleanup(os.environ.pop, "UC_ADVISORY", None)
+        for name in ("UC_FAIL_OUTPUT", "UC_PENDING", "UC_RESUME_IDLE"):
+            self.addCleanup(os.environ.pop, name, None)
         self.addCleanup(os.environ.pop, "UC_WRITE_THEN_FAIL", None)
 
     def run_uc(self, *args, controller=None):
@@ -821,6 +824,84 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(res["code"], "postcondition_failed")
         subprocess.run([sys.executable, "listener.py", "own", "resume"], cwd=self.fx.project, check=True,
                        capture_output=True)
+        self.assertEqual(self.run_uc(*args)[1]["status"], "completed")
+
+    # ---- self-explaining listener stops (change 9)
+
+    def own_state(self, **changes):
+        path = self.fx.project / "own.state.json"
+        state = json.loads(path.read_text())
+        state.update(changes)
+        path.write_text(json.dumps(state))
+
+    def test_unread_messages_stop_apply_before_the_pause_and_a_retry_succeeds(self):
+        consent, out = self.prepared()
+        journal = self.journal(out["txn"]).path
+        os.environ["UC_PENDING"] = "own"
+        before = journal.read_bytes()
+        code, res = self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")
+        self.assertEqual((res["code"], res.get("integration")), ("integration_has_unread", "own"), res)
+        self.assertIn("inbox", res.get("next", ""))
+        self.assertIn("ack", res.get("next", ""))
+        plan_and_intents = [r for r in self.journal(out["txn"]).read()[0] if r["kind"] in ("intent", "outcome")]
+        self.assertEqual([], plan_and_intents, "nothing is attempted while the listener has unread messages")
+        self.assertTrue(journal.read_bytes().startswith(before))
+        self.assertFalse(json.loads((self.fx.project / "own.state.json").read_text())["paused"])
+        self.assertEqual(self.pin_commit(), self.fx.from_commit)
+        os.environ.pop("UC_PENDING")
+        code, res = self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")
+        self.assertEqual(res["status"], "integrated_pending_liveness", res)
+
+    def test_a_failed_hook_reports_only_a_well_formed_adapter_error_code(self):
+        consent, out = self.prepared()
+        os.environ["UC_FAIL_STEP"] = "own:pause"
+        cases = [('{"error": "run_did_not_pause"}', "run_did_not_pause"),
+                 ('{"error": "run_did_not_pause", "extra": 1}', "run_did_not_pause"),
+                 ('{"error": "Bad Code!"}', None), ('{"error": "' + "a" * 65 + '"}', None),
+                 ('{"error": 7}', None), ('["run_did_not_pause"]', None), ("not json", None), ("", None),
+                 ('{"error": "secret\\npath"}', None)]
+        for output, expected in cases:
+            with self.subTest(output=output):
+                os.environ["UC_FAIL_OUTPUT"] = output
+                code, res = self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")
+                self.assertEqual((res["code"], res.get("exit")), ("hook_failed", 3), res)
+                self.assertEqual(res.get("hook_error"), expected, res)
+
+    def test_apply_names_an_idle_listener_after_resume(self):
+        consent, out = self.prepared()
+        os.environ["UC_RESUME_IDLE"] = "own"
+        code, res = self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")
+        self.assertEqual((res["code"], res.get("op"), res.get("what")),
+                         ("postcondition_failed", "resume", "integration_not_running"), res)
+        self.assertIn("start", res.get("next", ""))
+        os.environ.pop("UC_RESUME_IDLE")
+        code, res = self.run_uc("apply", "--as", "agent-a", "--session", "s-agent-a")
+        self.assertEqual(res["status"], "integrated_pending_liveness", res)
+
+    def test_finalize_names_an_idle_listener_and_completes_once_it_runs(self):
+        consent, out = self.prepared()
+        args = self._complete(out)
+        self.own_state(running=False, paused=False)
+        code, res = self.run_uc(*args)
+        self.assertEqual((res["code"], res.get("integration"), res.get("what")),
+                         ("postcondition_failed", "own", "integration_not_running"), res)
+        self.assertIn("finalize", res.get("next", ""))
+        self.own_state(running=True)
+        self.assertEqual(self.run_uc(*args)[1]["status"], "completed")
+
+    def test_finalize_reports_a_wrong_binding_or_pause_before_an_idle_listener(self):
+        consent, out = self.prepared()
+        args = self._complete(out)
+        for changes, what in (({"running": False, "paused": False, "bound": "0" * 64}, "binding_mismatch"),
+                              ({"running": False, "paused": True}, "integration_paused")):
+            with self.subTest(what=what):
+                path = self.fx.project / "own.state.json"
+                saved = path.read_text()
+                self.own_state(**changes)
+                code, res = self.run_uc(*args)
+                self.assertEqual((res["code"], res.get("what")), ("postcondition_failed", what), res)
+                self.assertNotIn("next", res, "only an idle listener gets the start-and-retry hint")
+                path.write_text(saved)
         self.assertEqual(self.run_uc(*args)[1]["status"], "completed")
 
     def test_r6_peer_attestation_required_before_completion(self):

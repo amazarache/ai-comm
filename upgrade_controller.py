@@ -51,6 +51,9 @@ TXN_RE = re.compile(r"txn-[0-9a-f]{16}\Z")
 CONSENT_RE = re.compile(r"consent-[0-9a-f]{16}\Z")
 INTEGRATION_ID = re.compile(r"[a-z][a-z0-9_-]{0,63}\Z")
 MESSAGE_ID = re.compile(r"[0-9]{8}-[a-z][a-z0-9_-]{0,31}\Z")
+HOOK_ERROR = re.compile(r"[a-z][a-z0-9_]{0,63}\Z")
+UNREAD_NEXT = "the integration's owner runs inbox, then ack through the returned cursor, then apply again"
+IDLE_NEXT = "the integration's owner starts its listener, then runs {} again"
 ANSWERS = ("yes", "fetch_only", "not_now", "skip", "never")
 PHASES = ("pause", "install_source", "rebind", "check", "resume", "restore_source")
 REPORT_PHASES = PHASES + ("attest",)
@@ -304,6 +307,16 @@ def git(directory, *args, ok=(0,), timeout=120):
     return result.stdout.decode("utf-8", "replace")
 
 
+def hook_error(stdout):
+    """A failed hook's own error code, only if it is a short well-formed code; never raw output."""
+    try:
+        value = json.loads(stdout.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return None
+    code = value.get("error") if isinstance(value, dict) else None
+    return code if isinstance(code, str) and HOOK_ERROR.match(code) else None
+
+
 def run_json(argv, cwd, timeout=HOOK_TIMEOUT, limit=MAX_HOOK_OUTPUT, env=None):
     """Run an argv (no shell) and parse bounded JSON stdout; never leak raw output."""
     need(isinstance(argv, list) and argv and all(isinstance(a, str) and a and "\x00" not in a
@@ -317,7 +330,8 @@ def run_json(argv, cwd, timeout=HOOK_TIMEOUT, limit=MAX_HOOK_OUTPUT, env=None):
         raise Stop("hook_unavailable") from exc
     need(len(result.stdout) <= limit, "hook_output_too_large")
     if result.returncode != 0:
-        raise Stop("hook_failed", exit=result.returncode)
+        code = hook_error(result.stdout)
+        raise Stop("hook_failed", exit=result.returncode, **({"hook_error": code} if code else {}))
     value = parse_json(result.stdout or b"{}", "hook_output_invalid")
     need(isinstance(value, dict), "hook_output_invalid")
     return value
@@ -1209,6 +1223,12 @@ def advance(txn, applier):
             txn.journal.append("state", {"state": f"awaiting_peer:{integ['id']}:{action['op']}"})
             return {"status": "awaiting_peer", "integration": integ["id"], "phase": action["op"],
                     "owner": owner, "nonce": nonce, "index": index}
+        if action["op"] == "pause":
+            # A listener with unread messages cannot pause; stop before asking it to (no
+            # pause request is left behind and the transaction stays retryable).
+            before = probe(txn.project, txn.manifest_item(integ["id"]))
+            need(before.get("pending") is not True, "integration_has_unread", integration=integ["id"],
+                 next=UNREAD_NEXT)
         txn.journal.append("intent", {"index": index, "action": action, "owner": owner})
         try:
             observed = perform_own(txn, action)
@@ -1220,7 +1240,8 @@ def advance(txn, applier):
         txn.journal.append("outcome", {"index": index, "ok": ok, "observed": observed})
         if not ok:
             txn.journal.append("state", {"state": "stopped:postcondition_failed"})
-            raise Stop("postcondition_failed", index=index, op=action["op"])
+            problem = listener_problem(observed) if action["op"] == "resume" and observed else None
+            raise Stop("postcondition_failed", index=index, op=action["op"], **problem_details(problem, "apply"))
         if action["op"] == "checkout":
             txn.journal.append("state", {"state": "package_switched"})
     final = "integrated_pending_liveness" if plan["data"]["direction"] == "forward" else "rolled_back"
@@ -1441,12 +1462,38 @@ def decision_binds(project, decision_id, txn_id):
     return artifact
 
 
-def integration_final_ok(txn, item_id, observed):
+def listener_problem(observed, cli_sha256=None, expected_source=None):
+    """The most serious reason a listener is not live on the expected package, or None.
+    A wrong binding or source, and a pause, are reported before a merely idle listener."""
+    if cli_sha256 is not None and observed.get("bound_cli_sha256") != cli_sha256:
+        return "binding_mismatch"
+    if expected_source is not None and observed.get("source_sha256") != expected_source:
+        return "source_mismatch"
+    if observed.get("paused") is not False:
+        return "integration_paused"
+    if observed.get("running") is not True:
+        return "integration_not_running"
+    return None
+
+
+def problem_details(problem, command):
+    """Stop details for a listener problem; only an idle listener gets a start-and-retry hint."""
+    if problem is None:
+        return {}
+    details = {"what": problem}
+    if problem == "integration_not_running":
+        details["next"] = IDLE_NEXT.format(command)
+    return details
+
+
+def integration_final_problem(txn, item_id, observed):
     frozen = txn.integration(item_id)
     expected_source = frozen["sources"].get(txn.frozen["to"]["commit"])
-    return (observed.get("paused") is False and observed.get("running") is True
-            and observed.get("bound_cli_sha256") == txn.frozen["to"]["cli_sha256"]
-            and (expected_source is None or observed.get("source_sha256") == expected_source))
+    return listener_problem(observed, txn.frozen["to"]["cli_sha256"], expected_source)
+
+
+def integration_final_ok(txn, item_id, observed):
+    return integration_final_problem(txn, item_id, observed) is None
 
 
 def attestations(txn):
@@ -1470,10 +1517,12 @@ def report_attestation(project, txn, args):
     need(txn.integration(args.integration)["owner"] == args.as_handle, "not_integration_owner")
     txn.check_identities(txn.frozen["to"]["commit"])
     observed = probe(project, txn.manifest_item(args.integration))
-    ok = integration_final_ok(txn, args.integration, observed)
+    problem = integration_final_problem(txn, args.integration, observed)
+    ok = problem is None
     txn.journal.append("outcome", {"attest": args.integration, "ok": ok, "nonce": args.nonce,
                                    "by": args.as_handle, "session": args.session, "observed": observed})
-    need(ok, "postcondition_failed", integration=args.integration, phase="attest")
+    need(ok, "postcondition_failed", integration=args.integration, phase="attest",
+         **problem_details(problem, "report"))
     return {"status": "reported", "txn": txn.id, "integration": args.integration, "phase": "attest"}
 
 
@@ -1491,8 +1540,9 @@ def cmd_finalize(project, args):
         for item in txn.frozen["integrations"]:
             if item["owner"] == args.as_handle or item["run_by"] == "any":
                 observed = probe(project, txn.manifest_item(item["id"]))
-                need(integration_final_ok(txn, item["id"], observed), "postcondition_failed",
-                     integration=item["id"])
+                problem = integration_final_problem(txn, item["id"], observed)
+                need(problem is None, "postcondition_failed", integration=item["id"],
+                     **problem_details(problem, "finalize"))
                 continue
             outcome = current.get(item["id"], {}).get("outcome")
             fresh = outcome is not None and outcome.get("ok") and now() - outcome["ts"] <= ATTEST_MAX_AGE
