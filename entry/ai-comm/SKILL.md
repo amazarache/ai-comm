@@ -10,10 +10,14 @@ itself: it checks that the project's own pinned copy of ai-comm is a genuine rel
 and then hands over to that copy's instructions. Nothing from a project's pin is read
 as instructions, or run, before it passes this check.
 
-## 1. Resolve one release for the whole task
+## 1. Resolve one release per owner request
 
-Use the same cache release for every command of this task, even if the cache's
-`current` release changes meanwhile:
+Resolve the cache release again at the start of every new owner request, and
+after this session activates a cache release, so a long-running session never
+keeps using a release the cache has moved past. Within one request, use the same
+release for every command, even if the cache's `current` release changes
+meanwhile. A started upgrade transaction keeps using
+its own frozen controller invocation, whichever release this resolves to:
 
 ```sh
 CACHE="${XDG_DATA_HOME:-$HOME/.local/share}/ai-comm"

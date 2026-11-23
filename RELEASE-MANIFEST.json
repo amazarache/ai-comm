@@ -137,8 +137,8 @@
     },
     {
       "path": "entry/ai-comm/SKILL.md",
-      "bytes": 13594,
-      "sha256": "f57e43bf8d4a30a1a918b019d6780b76ab36e06bd3f022a561f4dfef56e96b7c"
+      "bytes": 13913,
+      "sha256": "6068300f76ca1a401fddd9246fe467759ace7d45cf5cc8e8ad2713e98543168b"
     },
     {
       "path": "examples/ask.json",
@@ -367,8 +367,8 @@
     },
     {
       "path": "tests/test_user_objects.py",
-      "bytes": 38044,
-      "sha256": "b3dfbc32212337d92a128a833a6fffc63f20353d1902d54c4cbbe27ea9564aaf"
+      "bytes": 38641,
+      "sha256": "13dba5298a8eb606de8dafa52bbe5c3f8a6f7b4dac77875ea1ecc9c47a96d53c"
     },
     {
       "path": "tests/test_verify_pin.py",

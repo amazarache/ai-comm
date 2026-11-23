@@ -641,6 +641,15 @@ class EntrySkillTests(unittest.TestCase):
                 self.assertIn(f"`{status}`", self.text)
 
 
+    def test_the_cache_release_is_resolved_again_for_each_owner_request(self):
+        """A long-lived session must not keep a release the cache has moved past (1.12.2)."""
+        for phrase in ("## 1. Resolve one release per owner request", "at the start of every new owner request",
+                       "after this session activates a cache release", "Within one request",
+                       "its own frozen controller invocation"):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, self.text)
+        self.assertNotIn("for the whole task", self.text)
+
     def test_old_pins_get_the_cache_side_fetch_route(self):
         """1.11.1 (REVIEW 106 P2): an older pin cannot learn the fallback from its own skill."""
         for phrase in ("`origin_missing`", "--user upgrade-fetch", "--consent <CONSENT_ID>",
